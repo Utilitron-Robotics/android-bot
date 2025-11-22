@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.logic.TourManager
+import com.opendroids.tourbot.ui.MainViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -20,9 +21,11 @@ fun ControlPanel(
     onDismiss: () -> Unit,
     tourManager: TourManager,
     tourConfigRepository: TourConfigRepository,
-    viewModel: SettingsViewModel = hiltViewModel()
+    mainViewModel: MainViewModel, // Pass MainViewModel
+    settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val preSpeakDelay by viewModel.preSpeakDelay.collectAsState()
+    val preSpeakDelay by settingsViewModel.preSpeakDelay.collectAsState()
+    val robotUrl by mainViewModel.robotUrl.collectAsState() // Get robotUrl from MainViewModel
     var showScriptEditor by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
@@ -30,6 +33,17 @@ fun ControlPanel(
         title = { Text("Control Panel") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
+                // Robot URL Editor
+                Text("Base Control", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = robotUrl,
+                    onValueChange = { mainViewModel.setRobotUrl(it) },
+                    label = { Text("Robot WebSocket URL") },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                )
+
+                Divider(modifier = Modifier.padding(vertical = 16.dp))
+
                 // Pre-speak delay editor
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -38,7 +52,7 @@ fun ControlPanel(
                     Text("Pre-speak delay (ms):", modifier = Modifier.weight(1f))
                     OutlinedTextField(
                         value = preSpeakDelay.toString(),
-                        onValueChange = { viewModel.setPreSpeakDelay(it.toIntOrNull() ?: 0) },
+                        onValueChange = { settingsViewModel.setPreSpeakDelay(it.toIntOrNull() ?: 0) },
                         modifier = Modifier.width(100.dp)
                     )
                 }
@@ -50,7 +64,7 @@ fun ControlPanel(
                 LazyColumn(modifier = Modifier.height(300.dp)) {
                     items(tourManager.waypointIds) { waypointId ->
                         ListItem(
-                            headlineContent = { Text(waypointId) }, // Corrected parameter
+                            headlineContent = { Text(waypointId) },
                             modifier = Modifier.clickable { showScriptEditor = waypointId }
                         )
                     }

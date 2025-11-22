@@ -6,8 +6,10 @@ import android.view.View;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.SavedStateHandle;
 import androidx.lifecycle.ViewModel;
-import com.opendroids.tourbot.data.FakeTourRepository;
+import com.opendroids.tourbot.data.RealTourRepository;
 import com.opendroids.tourbot.data.TourConfigRepository;
+import com.opendroids.tourbot.data.TourRepository;
+import com.opendroids.tourbot.data.remote.RobotClient;
 import com.opendroids.tourbot.data.settings.SettingsManager;
 import com.opendroids.tourbot.logic.TourManager;
 import com.opendroids.tourbot.ui.MainViewModel;
@@ -403,15 +405,15 @@ public final class DaggerTourBotApp_HiltComponents_SingletonC {
 
     @IdentifierNameString
     private static final class LazyClassKeyProvider {
-      static String com_opendroids_tourbot_ui_settings_SettingsViewModel = "com.opendroids.tourbot.ui.settings.SettingsViewModel";
-
       static String com_opendroids_tourbot_ui_MainViewModel = "com.opendroids.tourbot.ui.MainViewModel";
 
-      @KeepFieldType
-      SettingsViewModel com_opendroids_tourbot_ui_settings_SettingsViewModel2;
+      static String com_opendroids_tourbot_ui_settings_SettingsViewModel = "com.opendroids.tourbot.ui.settings.SettingsViewModel";
 
       @KeepFieldType
       MainViewModel com_opendroids_tourbot_ui_MainViewModel2;
+
+      @KeepFieldType
+      SettingsViewModel com_opendroids_tourbot_ui_settings_SettingsViewModel2;
     }
   }
 
@@ -488,7 +490,7 @@ public final class DaggerTourBotApp_HiltComponents_SingletonC {
       public T get() {
         switch (id) {
           case 0: // com.opendroids.tourbot.ui.MainViewModel 
-          return (T) new MainViewModel(singletonCImpl.settingsManagerProvider.get(), singletonCImpl.fakeTourRepositoryProvider.get());
+          return (T) new MainViewModel(singletonCImpl.settingsManagerProvider.get(), singletonCImpl.bindRealTourRepositoryProvider.get());
 
           case 1: // com.opendroids.tourbot.ui.settings.SettingsViewModel 
           return (T) new SettingsViewModel(singletonCImpl.tourConfigRepositoryProvider.get());
@@ -573,7 +575,11 @@ public final class DaggerTourBotApp_HiltComponents_SingletonC {
 
     private final SingletonCImpl singletonCImpl = this;
 
-    private Provider<FakeTourRepository> fakeTourRepositoryProvider;
+    private Provider<RobotClient> robotClientProvider;
+
+    private Provider<RealTourRepository> realTourRepositoryProvider;
+
+    private Provider<TourRepository> bindRealTourRepositoryProvider;
 
     private Provider<AudioPlayer> audioPlayerProvider;
 
@@ -591,10 +597,12 @@ public final class DaggerTourBotApp_HiltComponents_SingletonC {
 
     @SuppressWarnings("unchecked")
     private void initialize(final ApplicationContextModule applicationContextModuleParam) {
-      this.fakeTourRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<FakeTourRepository>(singletonCImpl, 1));
-      this.audioPlayerProvider = DoubleCheck.provider(new SwitchingProvider<AudioPlayer>(singletonCImpl, 2));
-      this.settingsManagerProvider = DoubleCheck.provider(new SwitchingProvider<SettingsManager>(singletonCImpl, 3));
-      this.tourConfigRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<TourConfigRepository>(singletonCImpl, 4));
+      this.robotClientProvider = DoubleCheck.provider(new SwitchingProvider<RobotClient>(singletonCImpl, 2));
+      this.realTourRepositoryProvider = new SwitchingProvider<>(singletonCImpl, 1);
+      this.bindRealTourRepositoryProvider = DoubleCheck.provider((Provider) realTourRepositoryProvider);
+      this.audioPlayerProvider = DoubleCheck.provider(new SwitchingProvider<AudioPlayer>(singletonCImpl, 3));
+      this.settingsManagerProvider = DoubleCheck.provider(new SwitchingProvider<SettingsManager>(singletonCImpl, 4));
+      this.tourConfigRepositoryProvider = DoubleCheck.provider(new SwitchingProvider<TourConfigRepository>(singletonCImpl, 5));
       this.tourManagerProvider = DoubleCheck.provider(new SwitchingProvider<TourManager>(singletonCImpl, 0));
     }
 
@@ -632,18 +640,21 @@ public final class DaggerTourBotApp_HiltComponents_SingletonC {
       public T get() {
         switch (id) {
           case 0: // com.opendroids.tourbot.logic.TourManager 
-          return (T) new TourManager(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule), singletonCImpl.fakeTourRepositoryProvider.get(), singletonCImpl.audioPlayerProvider.get(), singletonCImpl.settingsManagerProvider.get(), singletonCImpl.tourConfigRepositoryProvider.get());
+          return (T) new TourManager(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule), singletonCImpl.bindRealTourRepositoryProvider.get(), singletonCImpl.audioPlayerProvider.get(), singletonCImpl.settingsManagerProvider.get(), singletonCImpl.tourConfigRepositoryProvider.get());
 
-          case 1: // com.opendroids.tourbot.data.FakeTourRepository 
-          return (T) new FakeTourRepository();
+          case 1: // com.opendroids.tourbot.data.RealTourRepository 
+          return (T) new RealTourRepository(singletonCImpl.robotClientProvider.get());
 
-          case 2: // com.opendroids.tourbot.ui.audio.AudioPlayer 
+          case 2: // com.opendroids.tourbot.data.remote.RobotClient 
+          return (T) new RobotClient();
+
+          case 3: // com.opendroids.tourbot.ui.audio.AudioPlayer 
           return (T) new AudioPlayer(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule));
 
-          case 3: // com.opendroids.tourbot.data.settings.SettingsManager 
+          case 4: // com.opendroids.tourbot.data.settings.SettingsManager 
           return (T) new SettingsManager(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule));
 
-          case 4: // com.opendroids.tourbot.data.TourConfigRepository 
+          case 5: // com.opendroids.tourbot.data.TourConfigRepository 
           return (T) new TourConfigRepository(ApplicationContextModule_ProvideContextFactory.provideContext(singletonCImpl.applicationContextModule));
 
           default: throw new AssertionError(id);

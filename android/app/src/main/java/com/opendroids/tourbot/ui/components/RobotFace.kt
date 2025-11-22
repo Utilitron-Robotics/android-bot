@@ -5,7 +5,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -21,14 +20,36 @@ fun RobotFace(
     modifier: Modifier = Modifier
 ) {
     var isBlinking by remember { mutableStateOf(false) }
+    val pupilOffset = remember { Animatable(Offset.Zero, Offset.VectorConverter) } // Corrected Animatable
 
+    // Blinking animation
     LaunchedEffect(Unit) {
         while (true) {
-            // Blink every 2-5 seconds
             delay(Random.nextLong(2000, 5000))
             isBlinking = true
             delay(150)
             isBlinking = false
+        }
+    }
+
+    // Pupil "looking around" animation
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(Random.nextLong(1500, 4000)) // Wait for a bit
+            val maxX = 15f
+            val maxY = 10f
+            pupilOffset.animateTo(
+                targetValue = Offset(
+                    x = Random.nextFloat() * 2 * maxX - maxX,
+                    y = Random.nextFloat() * 2 * maxY - maxY
+                ),
+                animationSpec = tween(durationMillis = 500, easing = EaseInOut)
+            )
+            delay(1000) // Hold the gaze
+            pupilOffset.animateTo(
+                targetValue = Offset.Zero,
+                animationSpec = tween(durationMillis = 300, easing = EaseInOut)
+            )
         }
     }
 
@@ -77,12 +98,12 @@ fun RobotFace(
             drawCircle(
                 color = eyeColor,
                 radius = eyeRadius * 0.3f,
-                center = Offset(centerX - eyeOffsetX, eyeY)
+                center = Offset(centerX - eyeOffsetX + pupilOffset.value.x, eyeY + pupilOffset.value.y)
             )
              drawCircle(
                 color = eyeColor,
                 radius = eyeRadius * 0.3f,
-                center = Offset(centerX + eyeOffsetX, eyeY)
+                center = Offset(centerX + eyeOffsetX + pupilOffset.value.x, eyeY + pupilOffset.value.y)
             )
 
         } else {
@@ -138,17 +159,23 @@ fun RobotFace(
         val maxAmp = 20000f
         val normalizedAmp = (amplitude.coerceAtMost(maxAmp.toInt()) / maxAmp).coerceIn(0f, 1f)
         
-        val mouthWidth = width * 0.33f // Approximately 2/3rds of previous width (0.5 * 2/3 = 0.33)
         val mouthBaseY = centerY + (height * 0.25f)
-        val maxMouthOpenHeight = height * 0.2f // Still allows for a full opening
         
-        val currentMouthHeight = 15f + (maxMouthOpenHeight * normalizedAmp) // Min height for closed mouth
+        // Make width dynamic with amplitude
+        val minMouthWidth = width * 0.25f
+        val maxMouthWidth = width * 0.45f
+        val currentMouthWidth = minMouthWidth + ((maxMouthWidth - minMouthWidth) * normalizedAmp)
+
+        // Make height dynamic with amplitude
+        val minMouthHeight = 15f
+        val maxMouthOpenHeight = height * 0.2f
+        val currentMouthHeight = minMouthHeight + (maxMouthOpenHeight * normalizedAmp)
 
         // Draw mouth outline as an oval
         drawOval(
             color = mouthColor,
-            topLeft = Offset(centerX - (mouthWidth / 2), mouthBaseY - (currentMouthHeight / 2)),
-            size = Size(mouthWidth, currentMouthHeight),
+            topLeft = Offset(centerX - (currentMouthWidth / 2), mouthBaseY - (currentMouthHeight / 2)),
+            size = Size(currentMouthWidth, currentMouthHeight),
             style = Stroke(width = 8f)
         )
         
@@ -156,8 +183,8 @@ fun RobotFace(
         if (normalizedAmp > 0.05f) { // Only fill if speaking
              drawOval(
                 color = mouthColor.copy(alpha = 0.5f * normalizedAmp),
-                topLeft = Offset(centerX - (mouthWidth / 2) + 10, mouthBaseY - (currentMouthHeight / 2) + 10),
-                size = Size(mouthWidth - 20, currentMouthHeight - 20)
+                topLeft = Offset(centerX - (currentMouthWidth / 2), mouthBaseY - (currentMouthHeight / 2)),
+                size = Size(currentMouthWidth, currentMouthHeight)
             )
         }
     }

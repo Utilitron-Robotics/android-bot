@@ -35,7 +35,7 @@ class AudioPlayer @Inject constructor(
     val captionText: StateFlow<String> = _captionText.asStateFlow()
 
     private var amplitudeJob: Job? = null
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob()) // Changed to Dispatchers.Default
 
     init {
         tts = TextToSpeech(context) { status ->
@@ -91,68 +91,75 @@ class AudioPlayer @Inject constructor(
         }
     }
 
-    suspend fun speak(text: String) = suspendCoroutine<Unit> { cont ->
+    suspend fun speak(text: String) {
+        // Corrected: Perform suspend calls before entering the suspendCoroutine block
         if (::tts.isInitialized) {
-            if (tts.isSpeaking) {
-                tts.stop() // Stop current speech if any
-            }
-            stopAmplitudePolling() // Stop any existing amplitude polling
+            delay(100) // Small warm-up delay
+        }
 
-            val utteranceId = UUID.randomUUID().toString()
-            val params = Bundle()
-            params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+        return suspendCoroutine { cont ->
+            if (::tts.isInitialized) {
+                if (tts.isSpeaking) {
+                    tts.stop() // Stop current speech if any
+                }
+                stopAmplitudePolling() // Stop any existing amplitude polling
 
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {
-                    Log.d(TAG, "TTS Start: $utteranceId")
-                    // Start amplitude simulation
-                    amplitudeJob = scope.launch {
-                        while (isActive) {
-                            _amplitude.value = Random.nextInt(500, 2000) // Random amplitude for mouth movement
-                            delay(50)
+                val utteranceId = UUID.randomUUID().toString()
+                val params = Bundle()
+                params.putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+
+                tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {
+                        Log.d(TAG, "TTS Start: $utteranceId")
+                        // Start amplitude simulation
+                        amplitudeJob = scope.launch {
+                            while (isActive) {
+                                _amplitude.value = Random.nextInt(500, 2000) // Random amplitude for mouth movement
+                                delay(50)
+                            }
                         }
                     }
-                }
 
-                override fun onDone(utteranceId: String?) {
-                    Log.d(TAG, "TTS Done: $utteranceId")
-                    stopAmplitudePolling() // Stop amplitude simulation
-                    _captionText.value = "" // Clear caption
+                    override fun onDone(utteranceId: String?) {
+                        Log.d(TAG, "TTS Done: $utteranceId")
+                        stopAmplitudePolling() // Stop amplitude simulation
+                        _captionText.value = "" // Clear caption
+                        cont.resume(Unit)
+                    }
+
+                    override fun onError(utteranceId: String?) {
+                        Log.e(TAG, "TTS Error: $utteranceId")
+                        stopAmplitudePolling() // Stop amplitude simulation
+                        _captionText.value = "" // Clear caption
+                        cont.resume(Unit) // Resume even on error to unblock coroutine
+                    }
+
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) {
+                        Log.d(TAG, "TTS Stop: $utteranceId, interrupted: $interrupted")
+                        stopAmplitudePolling() // Stop amplitude simulation
+                        _captionText.value = "" // Clear caption
+                        if (interrupted && cont.context.isActive) {
+                            cont.resume(Unit) // Resume if interrupted
+                        }
+                    }
+
+                    override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+                        // Update caption with the current word/segment
+                        _captionText.value = text.substring(start, end)
+                    }
+                })
+
+                val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+                if (result == TextToSpeech.ERROR) {
+                    Log.e(TAG, "Error speaking text: $text")
+                    stopAmplitudePolling()
+                    _captionText.value = ""
                     cont.resume(Unit)
                 }
-
-                override fun onError(utteranceId: String?) {
-                    Log.e(TAG, "TTS Error: $utteranceId")
-                    stopAmplitudePolling() // Stop amplitude simulation
-                    _captionText.value = "" // Clear caption
-                    cont.resume(Unit) // Resume even on error to unblock coroutine
-                }
-
-                override fun onStop(utteranceId: String?, interrupted: Boolean) {
-                    Log.d(TAG, "TTS Stop: $utteranceId, interrupted: $interrupted")
-                    stopAmplitudePolling() // Stop amplitude simulation
-                    _captionText.value = "" // Clear caption
-                    if (interrupted) {
-                        cont.resume(Unit) // Resume if interrupted
-                    }
-                }
-
-                override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
-                    // Update caption with the current word/segment
-                    _captionText.value = text.substring(start, end)
-                }
-            })
-
-            val result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
-            if (result == TextToSpeech.ERROR) {
-                Log.e(TAG, "Error speaking text: $text")
-                stopAmplitudePolling()
-                _captionText.value = ""
+            } else {
+                Log.e(TAG, "TTS not initialized, cannot speak.")
                 cont.resume(Unit)
             }
-        } else {
-            Log.e(TAG, "TTS not initialized, cannot speak.")
-            cont.resume(Unit)
         }
     }
 

@@ -23,12 +23,12 @@ import com.opendroids.tourbot.ui.settings.ControlPanel
 fun MainScreen(
     tourManager: TourManager,
     audioPlayer: AudioPlayer,
-    tourConfigRepository: TourConfigRepository, // Inject TourConfigRepository
+    tourConfigRepository: TourConfigRepository,
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val tourState by tourManager.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
-    val captionText by audioPlayer.captionText.collectAsState() // Collect caption text
+    val captionText by audioPlayer.captionText.collectAsState()
     var showControlPanel by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -80,7 +80,7 @@ fun MainScreen(
 
                 // Captions
                 Text(
-                    text = captionText, // Display real-time caption text
+                    text = captionText,
                     color = Color.White,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
@@ -113,7 +113,8 @@ fun MainScreen(
                 ControlPanel(
                     onDismiss = { showControlPanel = false },
                     tourManager = tourManager,
-                    tourConfigRepository = tourConfigRepository
+                    tourConfigRepository = tourConfigRepository,
+                    mainViewModel = viewModel // Pass MainViewModel
                 )
             }
         }

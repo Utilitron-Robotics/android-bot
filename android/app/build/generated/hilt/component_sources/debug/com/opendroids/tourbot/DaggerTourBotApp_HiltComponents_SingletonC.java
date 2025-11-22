@@ -455,15 +455,15 @@ public final class DaggerTourBotApp_HiltComponents_SingletonC {
 
     @IdentifierNameString
     private static final class LazyClassKeyProvider {
-      static String com_opendroids_tourbot_ui_MainViewModel = "com.opendroids.tourbot.ui.MainViewModel";
-
       static String com_opendroids_tourbot_ui_settings_SettingsViewModel = "com.opendroids.tourbot.ui.settings.SettingsViewModel";
 
-      @KeepFieldType
-      MainViewModel com_opendroids_tourbot_ui_MainViewModel2;
+      static String com_opendroids_tourbot_ui_MainViewModel = "com.opendroids.tourbot.ui.MainViewModel";
 
       @KeepFieldType
       SettingsViewModel com_opendroids_tourbot_ui_settings_SettingsViewModel2;
+
+      @KeepFieldType
+      MainViewModel com_opendroids_tourbot_ui_MainViewModel2;
     }
 
     private static final class SwitchingProvider<T> implements Provider<T> {

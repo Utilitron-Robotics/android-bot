@@ -5,7 +5,6 @@ import com.opendroids.tourbot.data.RealTourRepository
 import com.opendroids.tourbot.data.TourRepository
 import dagger.Binds
 import dagger.Module
-import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
@@ -14,14 +13,14 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 abstract class RepositoryModule {
 
-    // Temporarily bind the FakeTourRepository for testing
+    // Switched back to FakeTourRepository for testing
     @Binds
     @Singleton
     abstract fun bindTourRepository(
         fakeTourRepository: FakeTourRepository
     ): TourRepository
 
-    // The RealTourRepository binding is commented out for now
+    // The RealTourRepository is now commented out again
     // @Binds
     // @Singleton
     // abstract fun bindRealTourRepository(

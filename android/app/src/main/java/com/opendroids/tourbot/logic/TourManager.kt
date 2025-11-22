@@ -52,12 +52,11 @@ class TourManager @Inject constructor(
     )
 
     fun startTour() {
-        if (tourState.value !is TourState.Idle && tourState.value !is TourState.Completed && tourState.value !is TourState.Error) {
-            Log.w(TAG, "Tour start rejected - tour already in progress")
-            return
-        }
+        // Corrected: Always cancel the previous job to ensure a clean start.
+        tourJob?.cancel() 
+        _tourState.value = TourState.Idle
 
-        Log.i(TAG, "🎬 Tour start requested with ${waypointIds.size} waypoints")
+        Log.i(TAG, "🎬 Tour start requested.")
         tourJob = tourScope.launch {
             runTour()
         }
