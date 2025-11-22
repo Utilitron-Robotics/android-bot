@@ -1,31 +1,39 @@
-# 🤖 Android TourBot
+# TourBot - Native Android Edition
 
-This repository hosts the **Android Native** implementation of the TourBot application.
+🚀 **The TourBot project has migrated to a Native Android Application.**
 
-> **Note:** The original Python implementation (FastAPI + WebSockets) has been moved to the [`legacy-python`](../tree/legacy-python) branch. Please check that branch for the legacy backend, API adapters, and web UI code.
+This repository contains the source code for the TourBot application, now completely rewritten in Kotlin/Jetpack Compose to run directly on the robot's tablet. This architecture simplifies deployment, improves UI responsiveness, and removes the need for an intermediate Python server.
 
-## 📱 About This Project
+## 📱 Android Project
 
-TourBot is a modular robot tour application designed to run directly on Android-based robot platforms (or Android tablets attached to robots). It guides robots through predefined waypoints with audio narration, leveraging the Android SDK for native performance and UI integration.
+The complete Android project is located in the [`android/`](android/) directory.
 
-## 📂 Project Structure
+**Quick Links:**
+*   [**Getting Started & Architecture**](android/README.md) - How to build and run the app.
+*   [**Switching to Real Robot**](android/HANDOFF_TO_REAL.md) - Instructions for moving from simulation to real hardware.
+*   [**Deployment Script**](android/deploy.sh) - Automated build and install script.
 
-- **`android/`**: Contains the complete Android Studio project.
-  - `app/`: Main application module.
-  - `deploy.sh`: Deployment script for installing the APK on connected devices.
-  - `HANDOFF_TO_REAL.md`: Instructions for transitioning from emulators/mock data to real robot hardware.
+## 🐍 Legacy Python Version
 
-## 🚀 Getting Started
+The original Python/FastAPI implementation has been archived. If you need to reference the original Python logic, adapters, or web UI, please access the **legacy-python** branch:
 
-1. Open the `android/` directory in **Android Studio**.
-2. Sync Gradle project.
-3. Build and run on an emulator or connected Android device.
+👉 **[Access Legacy Python Code (Branch: legacy-python)](../../tree/legacy-python)**
 
-For detailed Android development instructions, see [`android/README.md`](android/README.md).
+## 🛠️ Development
 
-## 🔗 Legacy Python Code
+1.  **Open in Android Studio:**
+    Open the `android` folder as an existing project in Android Studio (Ladybug or newer recommended).
 
-If you are looking for the previous Python-based architecture (BaseRobotApplication, API adapters, etc.), please switch to the `legacy-python` branch:
+2.  **Build & Deploy:**
+    You can build via Android Studio or use the included helper script:
+    ```bash
+    ./android/deploy.sh
+    ```
 
-```bash
-git checkout legacy-python
+## 🤖 Robot Configuration
+
+The app uses WebSockets to communicate with the robot base (ROS bridge).
+By default, it is configured for the Android Emulator (`ws://10.0.2.2:9090`).
+
+**To connect to a real robot:**
+Follow the instructions in [**HANDOFF_TO_REAL.md**](android/HANDOFF_TO_REAL.md).
