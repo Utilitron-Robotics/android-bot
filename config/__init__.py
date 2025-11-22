@@ -1,4 +1,0 @@
-"""
-Configuration package for TourBot
-"""
-
