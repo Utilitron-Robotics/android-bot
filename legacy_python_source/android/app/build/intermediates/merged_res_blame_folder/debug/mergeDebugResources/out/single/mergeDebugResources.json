@@ -1,0 +1,62 @@
+[
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_start.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/start.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/drawable_ic_launcher.xml.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/drawable/ic_launcher.xml"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/xml_backup_rules.xml.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/xml/backup_rules.xml"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_utilitron.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/utilitron.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_end.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/end.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_armin.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/armin.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_avatar.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/avatar.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/drawable_ic_launcher_background.xml.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/drawable/ic_launcher_background.xml"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_empty_1.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/empty_1.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_emerson.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/emerson.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/drawable_ic_launcher_round.xml.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/drawable/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_opendroids.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/opendroids.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/raw_empty_2.wav.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/raw/empty_2.wav"
+    },
+    {
+        "merged": "com.opendroids.tourbot.app-debug-58:/xml_data_extraction_rules.xml.flat",
+        "source": "com.opendroids.tourbot.app-main-60:/xml/data_extraction_rules.xml"
+    }
+]
