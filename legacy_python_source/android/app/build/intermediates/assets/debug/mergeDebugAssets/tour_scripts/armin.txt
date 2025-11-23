@@ -1,1 +1,0 @@
-This is Armin's office, who focuses on automating laboratory workflows. His goal is to make labs faster, more efficient, and more precise through robotics. One of his current projects features a robotic arm that moves along a conveyor belt, carefully transporting samples to reduce human error and speed up everyday lab work.

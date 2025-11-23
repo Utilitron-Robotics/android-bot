@@ -1,3 +1,50 @@
+# Gradle files
+.gradle/
+build/
+app/build/*
+app/.gradle/
+app/gradle/
+gradle/
+gradlew
+app/gradlew
+
+# Local configuration file (sdk.dir is not checked in)
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Android/Google artifacts
+*.apk
+*.aar
+*.ap_
+*.aab
+*.dex
+*.class
+
+# Generated files
+bin/
+gen/
+captures/
+.externalNativeBuild/
+.cxx/
+.navigation/
+
+# Google Services
+google-services.json
+
+# Keystore files
+*.jks
+*.keystore
+*.pem
+*.p12
+*.key
+
+# Python / Legacy Source
 .env
 .env.local
 .env.development.local
@@ -8,15 +55,16 @@
 .env.production
 pycache/
 __pycache__/
-.DS_Store
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-.env.development
-.env.test
-.env.production
 venv/
 logs/
 hidden/
 .pytest_cache/
+
+# OS Specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
