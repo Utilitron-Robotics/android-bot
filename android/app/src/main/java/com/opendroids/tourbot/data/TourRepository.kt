@@ -14,4 +14,7 @@ interface TourRepository {
 
     // Low-level status observation
     fun observeStatus(): Flow<RobotStatusMessage>
+    
+    // Function to attempt connection and report success/failure
+    suspend fun tryConnect(url: String): Boolean
 }

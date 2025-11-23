@@ -24,6 +24,11 @@ class FakeTourRepository @Inject constructor() : TourRepository {
         currentPoi = "start" // Initial POI
     ))
 
+    override suspend fun tryConnect(url: String): Boolean {
+        // The fake repository should always fail the "tryConnect" so the master can fall back to it.
+        return false
+    }
+
     override fun connect(url: String) {
         Log.d(TAG, "connect called with url: $url")
     }

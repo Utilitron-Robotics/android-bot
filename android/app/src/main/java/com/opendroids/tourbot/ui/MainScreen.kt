@@ -1,5 +1,6 @@
 package com.opendroids.tourbot.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -11,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.data.model.TourState
 import com.opendroids.tourbot.logic.TourManager
@@ -24,11 +26,13 @@ fun MainScreen(
     tourManager: TourManager,
     audioPlayer: AudioPlayer,
     tourConfigRepository: TourConfigRepository,
+    masterTourRepository: MasterTourRepository, // Inject MasterTourRepository
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val tourState by tourManager.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
     val captionText by audioPlayer.captionText.collectAsState()
+    val isInTestMode by masterTourRepository.isInTestMode.collectAsState() // Observe test mode
     var showControlPanel by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -43,79 +47,99 @@ fun MainScreen(
             )
         }
     ) { padding ->
-        Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            color = Color.Black
-        ) {
-            Column(
-                modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+        Box(modifier = Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                color = Color.Black
             ) {
-                // Status Text
-                Text(
-                    text = when (val state = tourState) {
-                        is TourState.Idle -> "Ready for Tour"
-                        is TourState.Navigating -> "Navigating to ${state.targetWaypoint.id}..."
-                        is TourState.Speaking -> "Speaking at ${state.currentWaypoint.id}"
-                        is TourState.Completed -> "Tour Completed"
-                        is TourState.Error -> "Error: ${state.message}"
-                    },
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(16.dp)
-                )
-
-                // Robot Face
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(32.dp)
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
                 ) {
-                    RobotFace(amplitude = amplitude)
+                    // Status Text
+                    Text(
+                        text = when (val state = tourState) {
+                            is TourState.Idle -> "Ready for Tour"
+                            is TourState.Navigating -> "Navigating to ${state.targetWaypoint.id}..."
+                            is TourState.Speaking -> "Speaking at ${state.currentWaypoint.id}"
+                            is TourState.Completed -> "Tour Completed"
+                            is TourState.Error -> "Error: ${state.message}"
+                        },
+                        color = Color.White,
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier.padding(16.dp)
+                    )
+
+                    // Robot Face
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(32.dp)
+                    ) {
+                        RobotFace(amplitude = amplitude)
+                    }
+
+                    // Captions
+                    Text(
+                        text = captionText,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 32.dp, vertical = 16.dp)
+                            .heightIn(min = 72.dp) // Reserve space for captions
+                    )
+
+                    // Controls
+                    if (tourState is TourState.Idle || tourState is TourState.Completed || tourState is TourState.Error) {
+                        Button(
+                            onClick = { tourManager.startTour() },
+                            modifier = Modifier.padding(bottom = 48.dp)
+                        ) {
+                            Text("Start Tour")
+                        }
+                    } else {
+                        Button(
+                            onClick = { tourManager.abort() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                            modifier = Modifier.padding(bottom = 48.dp)
+                        ) {
+                            Text("Abort Tour")
+                        }
+                    }
                 }
 
-                // Captions
-                Text(
-                    text = captionText,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp, vertical = 16.dp)
-                        .heightIn(min = 72.dp) // Reserve space for captions
-                )
-
-                // Controls
-                if (tourState is TourState.Idle || tourState is TourState.Completed || tourState is TourState.Error) {
-                    Button(
-                        onClick = { tourManager.startTour() },
-                        modifier = Modifier.padding(bottom = 48.dp)
-                    ) {
-                        Text("Start Tour")
-                    }
-                } else {
-                    Button(
-                        onClick = { tourManager.abort() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                        modifier = Modifier.padding(bottom = 48.dp)
-                    ) {
-                        Text("Abort Tour")
-                    }
+                if (showControlPanel) {
+                    ControlPanel(
+                        onDismiss = { showControlPanel = false },
+                        tourManager = tourManager,
+                        tourConfigRepository = tourConfigRepository,
+                        mainViewModel = viewModel
+                    )
                 }
             }
 
-            if (showControlPanel) {
-                ControlPanel(
-                    onDismiss = { showControlPanel = false },
-                    tourManager = tourManager,
-                    tourConfigRepository = tourConfigRepository,
-                    mainViewModel = viewModel // Pass MainViewModel
-                )
+            // Test Mode Banner
+            if (isInTestMode) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = padding.calculateTopPadding())
+                        .fillMaxWidth()
+                        .background(Color.Red.copy(alpha = 0.7f))
+                        .padding(4.dp)
+                ) {
+                    Text(
+                        text = "TEST MODE",
+                        color = Color.White,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
             }
         }
     }

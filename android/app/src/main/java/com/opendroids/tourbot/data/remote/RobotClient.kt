@@ -3,12 +3,17 @@ package com.opendroids.tourbot.data.remote
 import android.util.Log
 import com.opendroids.tourbot.data.remote.model.RobotCommand
 import com.opendroids.tourbot.data.remote.model.RobotMessage
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -19,9 +24,6 @@ import okhttp3.WebSocketListener
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 private const val TAG = "RobotClient"
 
@@ -39,9 +41,25 @@ class RobotClient @Inject constructor() {
     private val _messages = MutableSharedFlow<RobotMessage>()
     val messages: Flow<RobotMessage> = _messages.asSharedFlow()
 
+    private val _isConnected = MutableStateFlow(false)
+    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+
+    private var connectionResult = CompletableDeferred<Boolean>()
+
+    suspend fun tryConnect(url: String): Boolean {
+        if (isConnected.value) return true
+        connectionResult = CompletableDeferred()
+        val request = Request.Builder().url(url).build()
+        webSocket = client.newWebSocket(request, createListener())
+
+        // Wait for 5 seconds for the connection to establish or fail
+        return withTimeoutOrNull(5000) {
+            connectionResult.await()
+        } ?: false
+    }
+
     fun connect(url: String) {
-        if (webSocket != null) return
-        
+        if (isConnected.value) return
         val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, createListener())
     }
@@ -49,6 +67,7 @@ class RobotClient @Inject constructor() {
     fun disconnect() {
         webSocket?.close(1000, "Disconnect requested")
         webSocket = null
+        _isConnected.value = false
     }
 
     fun sendCommand(command: RobotCommand) {
@@ -65,13 +84,14 @@ class RobotClient @Inject constructor() {
         return object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "✓ Connected to robot")
+                _isConnected.value = true
+                connectionResult.complete(true)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 Log.v(TAG, "← Received: $text")
                 try {
                     val message = json.decodeFromString<RobotMessage>(text)
-                    // Use a coroutine to emit the message on the shared flow
                     CoroutineScope(Dispatchers.IO).launch {
                         _messages.emit(message)
                     }
@@ -82,17 +102,21 @@ class RobotClient @Inject constructor() {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Connection failure", t)
-                this@RobotClient.webSocket = null // Corrected: refer to class member
+                this@RobotClient.webSocket = null
+                _isConnected.value = false
+                connectionResult.complete(false)
             }
             
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Robot connection closing: $code / $reason")
-                this@RobotClient.webSocket = null // Corrected: refer to class member
+                this@RobotClient.webSocket = null
+                _isConnected.value = false
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Robot connection closed: $code / $reason")
                 this@RobotClient.webSocket = null
+                _isConnected.value = false
             }
         }
     }

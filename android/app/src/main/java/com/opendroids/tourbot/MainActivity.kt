@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.MainScreen
@@ -32,7 +33,10 @@ class MainActivity : ComponentActivity() {
     lateinit var audioPlayer: AudioPlayer
 
     @Inject
-    lateinit var tourConfigRepository: TourConfigRepository // Inject TourConfigRepository
+    lateinit var tourConfigRepository: TourConfigRepository
+
+    @Inject
+    lateinit var masterTourRepository: MasterTourRepository // Inject MasterTourRepository
 
     private val viewModel: MainViewModel by viewModels()
     
@@ -54,7 +58,8 @@ class MainActivity : ComponentActivity() {
                 MainScreen(
                     tourManager = tourManager,
                     audioPlayer = audioPlayer,
-                    tourConfigRepository = tourConfigRepository
+                    tourConfigRepository = tourConfigRepository,
+                    masterTourRepository = masterTourRepository // Pass MasterTourRepository
                 )
             } else {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

@@ -1,21 +1,31 @@
 package com.opendroids.tourbot.data
 
+import android.util.Log
 import com.opendroids.tourbot.data.remote.RobotClient
 import com.opendroids.tourbot.data.remote.model.RobotCommand
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onCompletion
-import kotlinx.coroutines.flow.onStart
 import javax.inject.Inject
+import javax.inject.Singleton
 
+private const val TAG = "RealTourRepository"
+
+@Singleton
 class RealTourRepository @Inject constructor(
     private val robotClient: RobotClient
 ) : TourRepository {
 
+    override suspend fun tryConnect(url: String): Boolean {
+        Log.d(TAG, "Trying to connect to $url")
+        return robotClient.tryConnect(url)
+    }
+
     override fun connect(url: String) {
-        robotClient.connect(url)
+        // This can now be a simple delegation if tryConnect is called first
+        if (!robotClient.isConnected.value) {
+            robotClient.connect(url)
+        }
     }
 
     override fun disconnect() {
@@ -26,64 +36,33 @@ class RealTourRepository @Inject constructor(
         val command = RobotCommand(
             op = "call_service",
             service = "/poi",
-            id = "nav_$poi",
+            id = "nav_${poi}",
             args = mapOf("poi" to poi)
         )
         robotClient.sendCommand(command)
     }
 
     override suspend fun cancelNavigation() {
-        // 1. Advertise
-        robotClient.sendCommand(RobotCommand(
-            op = "advertise",
-            id = "cancel_goal",
-            topic = "/move_base/cancel",
-            type = "actionlib_msgs/GoalID"
-        ))
-        // 2. Publish
-        robotClient.sendCommand(RobotCommand(
-            op = "publish",
-            topic = "/move_base/cancel",
-            id = "cancel_goal",
-            msg = mapOf("stamp" to "", "id" to "")
-        ))
-        // 3. Unadvertise
-        robotClient.sendCommand(RobotCommand(
-            op = "unadvertise",
-            id = "cancel_goal",
-            topic = "/move_base/cancel"
-        ))
+        val advertiseCommand = RobotCommand(op = "advertise", id = "cancel_goal", topic = "/move_base/cancel", type = "actionlib_msgs/GoalID")
+        robotClient.sendCommand(advertiseCommand)
+        // In a real implementation, you might wait for confirmation before sending the next command
+        val publishCommand = RobotCommand(op = "publish", topic = "/move_base/cancel", id = "cancel_goal", msg = mapOf("stamp" to "", "id" to ""))
+        robotClient.sendCommand(publishCommand)
+        val unadvertiseCommand = RobotCommand(op = "unadvertise", id = "cancel_goal", topic = "/move_base/cancel")
+        robotClient.sendCommand(unadvertiseCommand)
     }
 
     override fun getBatteryLevel(): Flow<Float> {
-        val topic = "/mobile_base/sensors/core"
-        val type = "kobuki_msgs/SensorState"
-        val id = "get_sensors_core"
-
-        return robotClient.messages
-            .filter { it.topic == topic && it.msg?.battery != null }
-            .map { it.msg!!.battery!! }
-            .onStart {
-                robotClient.sendCommand(RobotCommand("subscribe", id, topic, type))
-            }
-            .onCompletion {
-                robotClient.sendCommand(RobotCommand("unsubscribe", id, topic))
-            }
+        // This requires a more complex implementation to request and listen for battery status
+        // For now, returning a flow from the main status message
+        return observeStatus().map { it.battery ?: 0f }
     }
 
     override fun observeStatus(): Flow<RobotStatusMessage> {
-        val topic = "/robot_status"
-        val type = "yutong_assistance/RobotStatus"
-        val id = "get_robot_status"
-
-        return robotClient.messages
-            .filter { it.topic == topic && it.msg != null }
-            .map { it.msg!! }
-            .onStart {
-                robotClient.sendCommand(RobotCommand("subscribe", id, topic, type))
-            }
-            .onCompletion {
-                robotClient.sendCommand(RobotCommand("unsubscribe", id, topic))
-            }
+        // Subscribe to the status topic if not already
+        val subscribeCommand = RobotCommand(op = "subscribe", topic = "/robot_status", type = "yutong_assistance/RobotStatus", id = "get_robot_status")
+        robotClient.sendCommand(subscribeCommand)
+        
+        return robotClient.messages.map { it.msg ?: RobotStatusMessage() }
     }
 }
