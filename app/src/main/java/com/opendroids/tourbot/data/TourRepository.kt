@@ -8,7 +8,7 @@ interface TourRepository {
     fun disconnect()
 
     // High-level commands
-    suspend fun goTo(poi: String)
+    fun goTo(poi: String)
     suspend fun cancelNavigation()
     fun getBatteryLevel(): Flow<Float>
 

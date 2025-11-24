@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -23,6 +24,7 @@ class TourConfigRepository @Inject constructor(
 ) {
     // --- Keys ---
     private val preSpeakDelayKey = intPreferencesKey("pre_speak_delay_ms")
+    private val waypointListKey = stringSetPreferencesKey("waypoint_list")
     private fun scriptKey(waypointId: String) = stringPreferencesKey("script_$waypointId")
 
     // --- Defaults ---
@@ -33,10 +35,36 @@ class TourConfigRepository @Inject constructor(
         preferences[preSpeakDelayKey] ?: defaultPreSpeakDelay
     }
 
+    val waypointIds: Flow<List<String>> = context.dataStore.data.map { preferences ->
+        val fromAssets = context.assets.list("tour_scripts")?.map { it.removeSuffix(".txt") }?.toSet() ?: emptySet()
+        val fromDataStore = preferences[waypointListKey] ?: emptySet()
+        val combined = (fromAssets + fromDataStore).toMutableList()
+        val start = combined.remove("start")
+        val end = combined.remove("end")
+        combined.sort()
+        if (start) combined.add(0, "start")
+        if (end) combined.add("end")
+        combined
+    }
+
     // --- Public Methods ---
     suspend fun setPreSpeakDelay(delayMs: Int) {
         context.dataStore.edit { settings ->
             settings[preSpeakDelayKey] = delayMs
+        }
+    }
+
+    suspend fun addWaypoint(id: String) {
+        context.dataStore.edit { settings ->
+            val currentWaypoints = settings[waypointListKey] ?: emptySet()
+            settings[waypointListKey] = currentWaypoints + id
+        }
+    }
+
+    suspend fun removeWaypoint(id: String) {
+        context.dataStore.edit { settings ->
+            val currentWaypoints = settings[waypointListKey] ?: emptySet()
+            settings[waypointListKey] = currentWaypoints - id
         }
     }
 

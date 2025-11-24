@@ -21,7 +21,10 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
+import java.util.zip.Inflater
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -100,13 +103,26 @@ class RobotClient @Inject constructor() {
                 }
             }
 
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                Log.v(TAG, "← Received bytes: ${bytes.size}")
+                try {
+                    val decompressed = decompress(bytes.toByteArray())
+                    val message = json.decodeFromString<RobotMessage>(decompressed)
+                    CoroutineScope(Dispatchers.IO).launch {
+                        _messages.emit(message)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse byte message: ${bytes.hex()}", e)
+                }
+            }
+
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Connection failure", t)
                 this@RobotClient.webSocket = null
                 _isConnected.value = false
                 connectionResult.complete(false)
             }
-            
+
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Robot connection closing: $code / $reason")
                 this@RobotClient.webSocket = null
@@ -119,5 +135,18 @@ class RobotClient @Inject constructor() {
                 _isConnected.value = false
             }
         }
+    }
+
+    private fun decompress(data: ByteArray): String {
+        val inflater = Inflater()
+        inflater.setInput(data)
+        val outputStream = ByteArrayOutputStream()
+        val buffer = ByteArray(1024)
+        while (!inflater.finished()) {
+            val count = inflater.inflate(buffer)
+            outputStream.write(buffer, 0, count)
+        }
+        inflater.end()
+        return outputStream.toString("UTF-8")
     }
 }

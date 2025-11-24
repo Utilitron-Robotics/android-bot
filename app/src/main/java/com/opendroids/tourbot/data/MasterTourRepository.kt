@@ -29,40 +29,47 @@ class MasterTourRepository @Inject constructor(
 
     override fun connect(url: String) {
         scope.launch {
-            Log.d(TAG, "Attempting to connect with RealRepository...")
-            val connectionSuccessful = realRepository.tryConnect(url)
-            if (connectionSuccessful) {
-                Log.i(TAG, "✅ RealRepository connected. Switching to REAL mode.")
-                activeRepository = realRepository
-                _isInTestMode.value = false
-            } else {
-                Log.w(TAG, "⚠️ RealRepository failed to connect. Falling back to FAKE mode.")
+            if (_isInTestMode.value) {
+                Log.d(TAG, "In test mode, using FakeRepository")
                 activeRepository = fakeRepository
-                _isInTestMode.value = true
+                activeRepository.connect(url)
+            } else {
+                Log.d(TAG, "Attempting to connect with RealRepository...")
+                val connectionSuccessful = realRepository.tryConnect(url)
+                if (connectionSuccessful) {
+                    Log.i(TAG, "✅ RealRepository connected. Switching to REAL mode.")
+                    activeRepository = realRepository
+                } else {
+                    Log.w(TAG, "⚠️ RealRepository failed to connect. No fallback.")
+                    // No change in active repository, user must manually switch to test mode
+                }
+                activeRepository.connect(url)
             }
-            // Delegate the connect call to the now-active repository
-            activeRepository.connect(url)
         }
     }
 
     override suspend fun tryConnect(url: String): Boolean {
-        // Always try to connect to the real repository first
-        val connectionSuccessful = realRepository.tryConnect(url)
-        activeRepository = if (connectionSuccessful) {
-            Log.i(TAG, "✅ RealRepository connected. Switching to REAL mode.")
-            _isInTestMode.value = false
-            realRepository
+        return if (_isInTestMode.value) {
+            fakeRepository.tryConnect(url)
         } else {
-            Log.w(TAG, "⚠️ RealRepository failed to connect. Falling back to FAKE mode.")
-            _isInTestMode.value = true
-            fakeRepository
+            realRepository.tryConnect(url)
         }
-        return connectionSuccessful
+    }
+
+    fun setTestMode(isTest: Boolean) {
+        _isInTestMode.value = isTest
+        activeRepository = if (isTest) {
+            Log.i(TAG, "Switched to FAKE mode.")
+            fakeRepository
+        } else {
+            Log.i(TAG, "Switched to REAL mode.")
+            realRepository
+        }
     }
 
     // Delegate all other TourRepository methods to the currently active repository
     override fun disconnect() = activeRepository.disconnect()
-    override suspend fun goTo(poi: String) = activeRepository.goTo(poi)
+    override fun goTo(poi: String) = activeRepository.goTo(poi)
     override suspend fun cancelNavigation() = activeRepository.cancelNavigation()
     override fun getBatteryLevel(): Flow<Float> = activeRepository.getBatteryLevel()
     override fun observeStatus(): Flow<RobotStatusMessage> = activeRepository.observeStatus()

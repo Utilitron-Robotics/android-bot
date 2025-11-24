@@ -2,7 +2,6 @@ package com.opendroids.tourbot.logic
 
 import android.content.Context
 import android.util.Log
-import com.opendroids.tourbot.data.FakeTourRepository // Import FakeTourRepository
 import com.opendroids.tourbot.data.TourConfigRepository // Import TourConfigRepository
 import com.opendroids.tourbot.data.TourRepository
 import com.opendroids.tourbot.data.model.TourState
@@ -21,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
@@ -33,7 +34,7 @@ private const val TAG = "TourManager"
 
 @Singleton
 class TourManager @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val tourRepository: TourRepository,
     private val audioPlayer: AudioPlayer,
     private val settingsManager: SettingsManager,
@@ -46,10 +47,8 @@ class TourManager @Inject constructor(
     private var tourJob: Job? = null
     private val tourScope = CoroutineScope(Dispatchers.Main)
 
-    val waypointIds = listOf(
-        "start", "empty_1", "armin", "empty_2", "opendroids",
-        "utilitron", "emerson", "avatar", "end"
-    )
+    val waypointIds: StateFlow<List<String>> = tourConfigRepository.waypointIds
+        .stateIn(tourScope, SharingStarted.Eagerly, emptyList())
 
     fun startTour() {
         // Corrected: Always cancel the previous job to ensure a clean start.
@@ -111,7 +110,7 @@ class TourManager @Inject constructor(
             }
 
             // 3. Iterate through waypoints (excluding "start")
-            for (id in waypointIds.drop(1)) {
+            for (id in waypointIds.value.drop(1)) {
                 val waypoint = createWaypoint(id) ?: continue
 
                 // Navigate
@@ -165,13 +164,6 @@ class TourManager @Inject constructor(
     
     private suspend fun waitForArrival(destinationName: String): Boolean {
         Log.d(TAG, "waitForArrival: Starting for $destinationName")
-
-        // Temporary workaround for FakeTourRepository to immediately simulate arrival
-        if (tourRepository is FakeTourRepository) {
-            Log.d(TAG, "waitForArrival: Using FakeTourRepository, simulating immediate arrival for $destinationName")
-            delay(500) // Small delay to simulate some "travel" time
-            return true
-        }
 
         return try {
             withTimeout(300_000) { // 5 minutes timeout

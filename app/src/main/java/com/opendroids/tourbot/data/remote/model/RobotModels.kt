@@ -25,7 +25,8 @@ data class RobotCommand(
 data class RobotMessage(
     val op: String? = null,
     val topic: String? = null,
-    val msg: RobotStatusMessage? = null
+    val msg: RobotStatusMessage? = null,
+    val compression: String? = null
 )
 
 /**

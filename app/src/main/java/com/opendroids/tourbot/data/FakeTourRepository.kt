@@ -1,32 +1,37 @@
 package com.opendroids.tourbot.data
 
-import android.util.Log // Import Log
+import android.util.Log
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val TAG = "FakeTourRepository" // Define TAG
+private const val TAG = "FakeTourRepository"
 
 @Singleton
 class FakeTourRepository @Inject constructor() : TourRepository {
 
+    private val coroutineScope = CoroutineScope(Dispatchers.IO)
+    private var navigationJob: Job? = null
+
     private val _robotStatus = MutableStateFlow(RobotStatusMessage(
-        navStatus = 0, // Idle
+        navStatus = 600, // Idle
         battery = 0.8f,
         velocity = listOf(0f, 0f, 0f),
-        currentPoi = "start" // Initial POI
+        currentPoi = "start"
     ))
 
     override suspend fun tryConnect(url: String): Boolean {
-        // The fake repository should always fail the "tryConnect" so the master can fall back to it.
-        return false
+        return true
     }
 
     override fun connect(url: String) {
@@ -35,21 +40,30 @@ class FakeTourRepository @Inject constructor() : TourRepository {
 
     override fun disconnect() {
         Log.d(TAG, "disconnect called")
+        navigationJob?.cancel()
     }
 
-    override suspend fun goTo(poi: String) {
+    override fun goTo(poi: String) {
         Log.d(TAG, "goTo called with poi: $poi")
-        _robotStatus.update { it.copy(navStatus = 601, velocity = listOf(0.5f, 0f, 0f)) } // Simulate navigating
-        Log.d(TAG, "Status updated to NAVIGATING (601) for $poi")
-        delay(3000) // Simulate navigation time
-        _robotStatus.update { it.copy(navStatus = 0, velocity = listOf(0f, 0f, 0f), currentPoi = poi) } // Simulate arrival by returning to idle
-        Log.d(TAG, "Status updated to IDLE (0) for $poi after arrival")
+        navigationJob?.cancel() // Cancel any ongoing navigation
+        navigationJob = coroutineScope.launch {
+            // 1. Start navigating
+            _robotStatus.update { it.copy(navStatus = 601, velocity = listOf(0.5f, 0f, 0f)) }
+            Log.d(TAG, "Status updated to NAVIGATING (601) for $poi")
+
+            // 2. Simulate travel time
+            delay(2000) // Wait for 2 seconds
+
+            // 3. Arrive at destination
+            _robotStatus.update { it.copy(navStatus = 603, velocity = listOf(0f, 0f, 0f), currentPoi = poi) }
+            Log.d(TAG, "Status updated to ARRIVED (603) for $poi")
+        }
     }
 
     override suspend fun cancelNavigation() {
-        Log.d(TAG, "cancelNavigation called")
-        _robotStatus.update { it.copy(navStatus = 0, velocity = listOf(0f, 0f, 0f)) } // Simulate cancelling navigation
-        Log.d(TAG, "Status updated to IDLE (0) after cancellation")
+        navigationJob?.cancel()
+        _robotStatus.update { it.copy(navStatus = 600, velocity = listOf(0f, 0f, 0f)) }
+        Log.d(TAG, "cancelNavigation: Status updated to IDLE (600)")
     }
 
     override fun getBatteryLevel(): Flow<Float> {

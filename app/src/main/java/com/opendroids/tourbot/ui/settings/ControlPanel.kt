@@ -1,9 +1,14 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.opendroids.tourbot.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,7 +20,6 @@ import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.MainViewModel
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ControlPanel(
     onDismiss: () -> Unit,
@@ -26,7 +30,11 @@ fun ControlPanel(
 ) {
     val preSpeakDelay by settingsViewModel.preSpeakDelay.collectAsState()
     val robotUrl by mainViewModel.robotUrl.collectAsState() // Get robotUrl from MainViewModel
+    val isTestMode by mainViewModel.isTestMode.collectAsState()
+    val waypointIds by tourManager.waypointIds.collectAsState()
     var showScriptEditor by remember { mutableStateOf<String?>(null) }
+    var showAddWaypointDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -41,6 +49,15 @@ fun ControlPanel(
                     label = { Text("Robot WebSocket URL") },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
                 )
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Test Mode")
+                    Spacer(modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = isTestMode,
+                        onCheckedChange = { mainViewModel.setTestMode(it) }
+                    )
+                }
 
                 Divider(modifier = Modifier.padding(vertical = 16.dp))
 
@@ -60,12 +77,29 @@ fun ControlPanel(
                 Divider(modifier = Modifier.padding(vertical = 16.dp))
 
                 // Waypoint script list
-                Text("Waypoint Scripts", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Waypoint Scripts", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(onClick = { showAddWaypointDialog = true }) {
+                        Icon(Icons.Default.Add, contentDescription = "Add Waypoint")
+                    }
+                }
+                // The LazyColumn is inherently scrollable on Android.
+                // The scrollbar appears automatically on drag.
                 LazyColumn(modifier = Modifier.height(300.dp)) {
-                    items(tourManager.waypointIds) { waypointId ->
+                    items(waypointIds) { waypointId ->
                         ListItem(
                             headlineContent = { Text(waypointId) },
-                            modifier = Modifier.clickable { showScriptEditor = waypointId }
+                            modifier = Modifier.clickable { showScriptEditor = waypointId },
+                            trailingContent = {
+                                IconButton(onClick = {
+                                    scope.launch {
+                                        tourConfigRepository.removeWaypoint(waypointId)
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Delete Waypoint")
+                                }
+                            }
                         )
                     }
                 }
@@ -84,6 +118,19 @@ fun ControlPanel(
             waypointId = waypointId,
             tourConfigRepository = tourConfigRepository,
             onDismiss = { showScriptEditor = null }
+        )
+    }
+
+    if (showAddWaypointDialog) {
+        AddWaypointDialog(
+            onDismiss = { showAddWaypointDialog = false },
+            onAdd = { newId ->
+                scope.launch {
+                    tourConfigRepository.addWaypoint(newId)
+                    showAddWaypointDialog = false
+                    showScriptEditor = newId
+                }
+            }
         )
     }
 }
@@ -119,6 +166,44 @@ fun ScriptEditorDialog(
                 onDismiss()
             }) {
                 Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun AddWaypointDialog(
+    onDismiss: () -> Unit,
+    onAdd: (String) -> Unit
+) {
+    var newWaypointId by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Waypoint") },
+        text = {
+            OutlinedTextField(
+                value = newWaypointId,
+                onValueChange = { newWaypointId = it },
+                label = { Text("Waypoint ID") },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (newWaypointId.isNotBlank()) {
+                        onAdd(newWaypointId)
+                    }
+                },
+                enabled = newWaypointId.isNotBlank()
+            ) {
+                Text("Add")
             }
         },
         dismissButton = {

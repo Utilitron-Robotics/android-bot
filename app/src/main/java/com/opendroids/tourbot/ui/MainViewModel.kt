@@ -2,6 +2,7 @@ package com.opendroids.tourbot.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourRepository
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import com.opendroids.tourbot.data.settings.SettingsManager
@@ -15,7 +16,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
-    private val tourRepository: TourRepository
+    private val tourRepository: TourRepository,
+    private val masterTourRepository: MasterTourRepository
 ) : ViewModel() {
 
     val robotUrl: StateFlow<String> = settingsManager.robotUrl
@@ -23,6 +25,13 @@ class MainViewModel @Inject constructor(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ""
+        )
+
+    val isTestMode: StateFlow<Boolean> = masterTourRepository.isInTestMode
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false
         )
 
     val robotStatus: StateFlow<RobotStatusMessage?> = tourRepository.observeStatus()
@@ -38,6 +47,10 @@ class MainViewModel @Inject constructor(
         }
     }
 
+    fun setTestMode(isTestMode: Boolean) {
+        masterTourRepository.setTestMode(isTestMode)
+    }
+
     fun connectToRobot(url: String) {
         tourRepository.connect(url)
     }
@@ -47,9 +60,7 @@ class MainViewModel @Inject constructor(
     }
 
     fun goToPoi(poi: String) {
-        viewModelScope.launch {
-            tourRepository.goTo(poi)
-        }
+        tourRepository.goTo(poi)
     }
 
     fun cancelNavigation() {

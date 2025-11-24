@@ -32,7 +32,7 @@ class RealTourRepository @Inject constructor(
         robotClient.disconnect()
     }
 
-    override suspend fun goTo(poi: String) {
+    override fun goTo(poi: String) {
         val command = RobotCommand(
             op = "call_service",
             service = "/poi",
