@@ -1,9 +1,14 @@
 package com.opendroids.tourbot.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,25 +31,32 @@ fun MainScreen(
     tourManager: TourManager,
     audioPlayer: AudioPlayer,
     tourConfigRepository: TourConfigRepository,
-    masterTourRepository: MasterTourRepository, // Inject MasterTourRepository
+    masterTourRepository: MasterTourRepository,
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val tourState by tourManager.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
     val captionText by audioPlayer.captionText.collectAsState()
-    val isInTestMode by masterTourRepository.isInTestMode.collectAsState() // Observe test mode
+    val isInTestMode by masterTourRepository.isInTestMode.collectAsState()
     var showControlPanel by remember { mutableStateOf(false) }
+    var isHeaderVisible by remember { mutableStateOf(true) } // State for header visibility
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("TourBot") },
-                actions = {
-                    IconButton(onClick = { showControlPanel = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+            AnimatedVisibility(
+                visible = isHeaderVisible,
+                enter = slideInVertically(),
+                exit = slideOutVertically()
+            ) {
+                TopAppBar(
+                    title = { Text("TourBot") },
+                    actions = {
+                        IconButton(onClick = { showControlPanel = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize()) {
@@ -140,6 +152,20 @@ fun MainScreen(
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
+            }
+
+            // Header visibility toggle icon
+            IconButton(
+                onClick = { isHeaderVisible = !isHeaderVisible },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+            ) {
+                Icon(
+                    imageVector = if (isHeaderVisible) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (isHeaderVisible) "Hide Header" else "Show Header",
+                    tint = Color.White
+                )
             }
         }
     }

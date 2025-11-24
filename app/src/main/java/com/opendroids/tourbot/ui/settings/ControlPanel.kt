@@ -26,11 +26,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.opendroids.tourbot.data.AppError
 import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.MainViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.util.Collections
 
 @Composable
 fun ControlPanel(
@@ -62,87 +64,44 @@ fun ControlPanel(
         }
     }
 
+    val tabs = listOf("Settings", "Error Log")
+    var selectedTabIndex by remember { mutableStateOf(0) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Control Panel") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                // ... (rest of the settings remain the same)
-                Text("Base Control", style = MaterialTheme.typography.titleMedium)
-                OutlinedTextField(
-                    value = robotUrl,
-                    onValueChange = { mainViewModel.setRobotUrl(it) },
-                    label = { Text("Robot WebSocket URL") },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Test Mode")
-                    Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = isTestMode, onCheckedChange = { mainViewModel.setTestMode(it) })
-                }
-                Divider(modifier = Modifier.padding(vertical = 16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                    Text("Pre-speak delay (ms):", modifier = Modifier.weight(1f))
-                    OutlinedTextField(
-                        value = preSpeakDelay.toString(),
-                        onValueChange = { settingsViewModel.setPreSpeakDelay(it.toIntOrNull() ?: 0) },
-                        modifier = Modifier.width(100.dp)
-                    )
-                }
-                Divider(modifier = Modifier.padding(vertical = 16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Waypoint Scripts", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.weight(1f))
-                    IconButton(onClick = { showAddWaypointDialog = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Add Waypoint")
+                TabRow(selectedTabIndex = selectedTabIndex) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTabIndex == index,
+                            onClick = { selectedTabIndex = index },
+                            text = { Text(title) }
+                        )
                     }
                 }
 
-                Box(modifier = Modifier.height(300.dp)) {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.pointerInput(dragDropState) {
-                            detectDragGesturesAfterLongPress(
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    dragDropState.onDrag(dragAmount)
-                                },
-                                onDragStart = { offset -> dragDropState.onDragStart(offset) },
-                                onDragEnd = { dragDropState.onDragEnd() },
-                                onDragCancel = { dragDropState.onDragCancel() }
-                            )
+                when (selectedTabIndex) {
+                    0 -> SettingsTab(
+                        preSpeakDelay = preSpeakDelay,
+                        onPreSpeakDelayChange = { settingsViewModel.setPreSpeakDelay(it) },
+                        robotUrl = robotUrl,
+                        onRobotUrlChange = { mainViewModel.setRobotUrl(it) },
+                        isTestMode = isTestMode,
+                        onTestModeChange = { mainViewModel.setTestMode(it) },
+                        waypointIds = waypointIds,
+                        onWaypointClick = { showScriptEditor = it },
+                        onRemoveWaypoint = { id ->
+                            scope.launch { tourConfigRepository.removeWaypoint(id) }
                         },
-                        userScrollEnabled = !dragDropState.isDragging
-                    ) {
-                        itemsIndexed(waypointIds, key = { _, item -> item }) { index, waypointId ->
-                            val displacementOffset = if (index == dragDropState.draggingItemIndex) {
-                                dragDropState.draggingItemOffset
-                            } else {
-                                0f
-                            }
-                            ListItem(
-                                headlineContent = { Text(waypointId) },
-                                modifier = Modifier
-                                    .graphicsLayer { translationY = displacementOffset }
-                                    .clickable { showScriptEditor = waypointId },
-                                leadingContent = {
-                                    Icon(
-                                        imageVector = Icons.Default.Menu,
-                                        contentDescription = "Drag to reorder"
-                                    )
-                                },
-                                trailingContent = {
-                                    IconButton(onClick = {
-                                        scope.launch {
-                                            tourConfigRepository.removeWaypoint(waypointId)
-                                        }
-                                    }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete Waypoint")
-                                    }
-                                }
-                            )
+                        onAddWaypointClick = { showAddWaypointDialog = true },
+                        dragDropState = dragDropState,
+                        onSaveWaypoints = { newWaypointIds ->
+                            scope.launch { tourConfigRepository.saveWaypoints(newWaypointIds) }
                         }
-                    }
+                    )
+                    1 -> ErrorLogTab(mainViewModel = mainViewModel)
                 }
             }
         },
@@ -153,7 +112,7 @@ fun ControlPanel(
                 }
                 onDismiss()
             }) {
-                Text("Save & Close")
+                Text("Close")
             }
         }
     )
@@ -180,6 +139,138 @@ fun ControlPanel(
     }
 }
 
+@Composable
+fun SettingsTab(
+    preSpeakDelay: Int,
+    onPreSpeakDelayChange: (Int) -> Unit,
+    robotUrl: String,
+    onRobotUrlChange: (String) -> Unit,
+    isTestMode: Boolean,
+    onTestModeChange: (Boolean) -> Unit,
+    waypointIds: List<String>,
+    onWaypointClick: (String) -> Unit,
+    onRemoveWaypoint: (String) -> Unit,
+    onAddWaypointClick: () -> Unit,
+    dragDropState: DragDropState,
+    onSaveWaypoints: (List<String>) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val listState = dragDropState.listState
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text("Base Control", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            value = robotUrl,
+            onValueChange = onRobotUrlChange,
+            label = { Text("Robot WebSocket URL") },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Test Mode")
+            Spacer(modifier = Modifier.weight(1f))
+            Switch(checked = isTestMode, onCheckedChange = onTestModeChange)
+        }
+        Divider(modifier = Modifier.padding(vertical = 16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+            Text("Pre-speak delay (ms):", modifier = Modifier.weight(1f))
+            OutlinedTextField(
+                value = preSpeakDelay.toString(),
+                onValueChange = { onPreSpeakDelayChange(it.toIntOrNull() ?: 0) },
+                modifier = Modifier.width(100.dp)
+            )
+        }
+        Divider(modifier = Modifier.padding(vertical = 16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Waypoint Scripts", style = MaterialTheme.typography.titleMedium)
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = onAddWaypointClick) {
+                Icon(Icons.Default.Add, contentDescription = "Add Waypoint")
+            }
+        }
+        Box(modifier = Modifier.height(300.dp)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.pointerInput(dragDropState) {
+                    detectDragGesturesAfterLongPress(
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragDropState.onDrag(dragAmount)
+                        },
+                        onDragStart = { offset -> dragDropState.onDragStart(offset) },
+                        onDragEnd = { dragDropState.onDragEnd() },
+                        onDragCancel = { dragDropState.onDragCancel() }
+                    )
+                },
+                userScrollEnabled = !dragDropState.isDragging
+            ) {
+                itemsIndexed(waypointIds, key = { _, item -> item }) { index, waypointId ->
+                    val displacementOffset = if (index == dragDropState.draggingItemIndex) {
+                        dragDropState.draggingItemOffset
+                    } else {
+                        0f
+                    }
+                    ListItem(
+                        headlineContent = { Text(waypointId) },
+                        modifier = Modifier
+                            .graphicsLayer { translationY = displacementOffset }
+                            .clickable { onWaypointClick(waypointId) },
+                        leadingContent = {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Drag to reorder"
+                            )
+                        },
+                        trailingContent = {
+                            IconButton(onClick = { onRemoveWaypoint(waypointId) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete Waypoint")
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ErrorLogTab(mainViewModel: MainViewModel) {
+    val errors by mainViewModel.errors.collectAsState()
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Error Log", style = MaterialTheme.typography.titleMedium)
+            Button(onClick = { mainViewModel.clearErrors() }) {
+                Text("Clear Log")
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Box(modifier = Modifier.height(300.dp)) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                if (errors.isEmpty()) {
+                    item { Text("No errors logged yet.", color = Color.Gray) }
+                } else {
+                    itemsIndexed(errors, key = { _, error -> error.timestamp + error.message }) { _, error ->
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text(text = error.timestamp, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                            Text(text = error.message, color = Color.Red)
+                            error.stackTrace?.let {
+                                Text(text = it, style = MaterialTheme.typography.bodySmall, color = Color.Red.copy(alpha = 0.7f))
+                            }
+                        }
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+}
+
 // Drag and Drop State Helper
 class DragDropState(
     val listState: LazyListState,
@@ -201,7 +292,7 @@ class DragDropState(
         draggingItemOffset += dragAmount.y
         val currentIndex = draggingItemIndex ?: return
         val currentItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == currentIndex } ?: return
-        val currentItemCenter = currentItem.offset + draggingItemOffset
+        val currentItemCenter = currentItem.offset + currentItem.size / 2 + draggingItemOffset
 
         val targetIndex = listState.layoutInfo.visibleItemsInfo
             .firstOrNull {

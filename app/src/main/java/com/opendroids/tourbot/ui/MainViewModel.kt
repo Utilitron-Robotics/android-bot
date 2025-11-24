@@ -2,6 +2,7 @@ package com.opendroids.tourbot.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.opendroids.tourbot.data.ErrorLogger
 import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourRepository
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
@@ -17,7 +18,8 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     private val settingsManager: SettingsManager,
     private val tourRepository: TourRepository,
-    private val masterTourRepository: MasterTourRepository
+    private val masterTourRepository: MasterTourRepository,
+    private val errorLogger: ErrorLogger
 ) : ViewModel() {
 
     val robotUrl: StateFlow<String> = settingsManager.robotUrl
@@ -40,6 +42,8 @@ class MainViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null
         )
+
+    val errors = errorLogger.errors
 
     fun setRobotUrl(url: String) {
         viewModelScope.launch {
@@ -67,5 +71,13 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             tourRepository.cancelNavigation()
         }
+    }
+
+    fun logError(message: String, throwable: Throwable? = null) {
+        errorLogger.logError(message, throwable)
+    }
+
+    fun clearErrors() {
+        errorLogger.clearErrors()
     }
 }
