@@ -68,6 +68,12 @@ class TourConfigRepository @Inject constructor(
         }
     }
 
+    suspend fun saveWaypoints(waypoints: List<String>) {
+        context.dataStore.edit { settings ->
+            settings[waypointListKey] = waypoints.toSet()
+        }
+    }
+
     suspend fun getScript(waypointId: String): String {
         val key = scriptKey(waypointId)
         val preferences = context.dataStore.data.first()
