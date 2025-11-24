@@ -106,7 +106,11 @@ class TourManager @Inject constructor(
             Log.i(TAG, "Playing START script")
             createWaypoint("start")?.let {
                 _tourState.value = TourState.Speaking(it)
-                audioPlayer.speak(it.scriptContent) // Use TTS for script
+                if (it.audioResId != 0) {
+                    audioPlayer.play(it.audioResId, it.scriptContent)
+                } else {
+                    audioPlayer.speak(it.scriptContent)
+                }
             }
 
             // 3. Iterate through waypoints (excluding "start")
@@ -136,7 +140,11 @@ class TourManager @Inject constructor(
                 // Speak
                 _tourState.value = TourState.Speaking(waypoint)
                 Log.i(TAG, "Playing audio for ${waypoint.id}")
-                audioPlayer.speak(waypoint.scriptContent) // Use TTS for script
+                if (waypoint.audioResId != 0) {
+                    audioPlayer.play(waypoint.audioResId, waypoint.scriptContent)
+                } else {
+                    audioPlayer.speak(waypoint.scriptContent) // Fallback to TTS
+                }
                 Log.i(TAG, "✓ Audio playback complete for ${waypoint.id}")
             }
 
