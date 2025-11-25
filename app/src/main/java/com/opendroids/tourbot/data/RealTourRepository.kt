@@ -5,7 +5,12 @@ import com.opendroids.tourbot.data.remote.RobotClient
 import com.opendroids.tourbot.data.remote.model.RobotCommand
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.collect
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,10 +57,37 @@ class RealTourRepository @Inject constructor(
         robotClient.sendCommand(unadvertiseCommand)
     }
 
-    override fun getBatteryLevel(): Flow<Float> {
-        // This requires a more complex implementation to request and listen for battery status
-        // For now, returning a flow from the main status message
-        return observeStatus().map { it.battery ?: 0f }
+    override fun getBatteryLevel(): Flow<Float> = flow {
+        // Subscribe to sensor core topic matching Python implementation
+        val subscribeCommand = RobotCommand(
+            op = "subscribe",
+            topic = "/mobile_base/sensors/core",
+            type = "kobuki_msgs/SensorState",
+            id = "get_sensors_core"
+        )
+        robotClient.sendCommand(subscribeCommand)
+        Log.d(TAG, "Subscribed to /mobile_base/sensors/core for battery reading")
+
+        try {
+            // Listen for battery messages
+            robotClient.messages
+                .filter { it.topic == "/mobile_base/sensors/core" }
+                .mapNotNull { it.msg?.battery }
+                .take(1)
+                .collect { battery ->
+                    Log.i(TAG, "🔋 Battery level: $battery%")
+                    emit(battery)
+                }
+        } finally {
+            // Unsubscribe after getting value or if flow is cancelled
+            val unsubscribeCommand = RobotCommand(
+                op = "unsubscribe",
+                topic = "/mobile_base/sensors/core",
+                id = "get_sensors_core"
+            )
+            robotClient.sendCommand(unsubscribeCommand)
+            Log.d(TAG, "Unsubscribed from /mobile_base/sensors/core")
+        }
     }
 
     override fun observeStatus(): Flow<RobotStatusMessage> {
@@ -64,5 +96,15 @@ class RealTourRepository @Inject constructor(
         robotClient.sendCommand(subscribeCommand)
         
         return robotClient.messages.map { it.msg ?: RobotStatusMessage() }
+    }
+
+    override suspend fun unsubscribeStatus() {
+        val unsubscribeCommand = RobotCommand(
+            op = "unsubscribe",
+            topic = "/robot_status",
+            id = "get_robot_status"
+        )
+        robotClient.sendCommand(unsubscribeCommand)
+        Log.i(TAG, "Unsubscribed from robot status updates")
     }
 }

@@ -73,4 +73,5 @@ class MasterTourRepository @Inject constructor(
     override suspend fun cancelNavigation() = activeRepository.cancelNavigation()
     override fun getBatteryLevel(): Flow<Float> = activeRepository.getBatteryLevel()
     override fun observeStatus(): Flow<RobotStatusMessage> = activeRepository.observeStatus()
+    override suspend fun unsubscribeStatus() = activeRepository.unsubscribeStatus()
 }
