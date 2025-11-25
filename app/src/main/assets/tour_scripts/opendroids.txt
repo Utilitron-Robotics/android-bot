@@ -1,3 +1,1 @@
-Open Droids is a robotics startup based in the U.S. that designs, manufactures, develops, and integrates custom robotic solutions—especially mobile manipulators (robots with arms + mobility)—for industrial and transformation-use cases.  
-
-They aim to reduce costs and improve efficiency for businesses by providing tailored robotic systems rather than off-the-shelf robots
+This is the Open Droids office.

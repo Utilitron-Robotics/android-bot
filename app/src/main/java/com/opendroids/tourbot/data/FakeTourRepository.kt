@@ -74,6 +74,10 @@ class FakeTourRepository @Inject constructor() : TourRepository {
         return _robotStatus.asStateFlow()
     }
 
+    override suspend fun subscribeStatus() {
+        Log.d(TAG, "subscribeStatus called")
+    }
+
     override suspend fun unsubscribeStatus() {
         Log.d(TAG, "unsubscribeStatus called")
     }

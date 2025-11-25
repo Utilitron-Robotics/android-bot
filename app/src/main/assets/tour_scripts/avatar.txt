@@ -1,1 +1,1 @@
-Avatar Robotics supplies flexible, human-supervised industrial robot fleets for tasks like pick & place, parts handling, inspection and assembly. Their robots learn from existing employee training (no code required), scale 24/7, and adapt to changing workflows—bridging the gap where traditional automation is too rigid. 
+This is the Avatar office.
