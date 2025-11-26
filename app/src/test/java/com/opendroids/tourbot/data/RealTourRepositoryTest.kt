@@ -1,0 +1,68 @@
+package com.opendroids.tourbot.data
+
+import com.opendroids.tourbot.data.remote.RobotClient
+import com.opendroids.tourbot.data.remote.model.RobotMessage
+import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.mockk
+import io.mockk.Ordering
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Before
+import org.junit.Test
+
+class RealTourRepositoryTest {
+
+    private lateinit var robotClient: RobotClient
+    private lateinit var tourRepository: RealTourRepository
+
+    @Before
+    fun setUp() {
+        robotClient = mockk(relaxed = true)
+        tourRepository = RealTourRepository(robotClient)
+    }
+
+    @Test
+    fun `goTo sends correct command`() = runTest {
+        val poi = "test_poi"
+        tourRepository.goTo(poi)
+
+        coVerify { robotClient.sendCommand(match { 
+            it.op == "call_service" &&
+            it.service == "/poi" &&
+            it.id == "nav_$poi" &&
+            it.args == mapOf("poi" to poi)
+        }) }
+    }
+
+    @Test
+    fun `cancelNavigation sends correct commands`() = runTest {
+        tourRepository.cancelNavigation()
+
+        coVerify(ordering = Ordering.SEQUENCE) { 
+            robotClient.sendCommand(match { it.op == "advertise" && it.topic == "/move_base/cancel" })
+            robotClient.sendCommand(match { it.op == "publish" && it.topic == "/move_base/cancel" })
+            robotClient.sendCommand(match { it.op == "unadvertise" && it.topic == "/move_base/cancel" })
+        }
+    }
+
+    @Test
+    fun `observeStatus sends subscribe and returns status flow`() = runTest {
+        val statusMessage = RobotStatusMessage(navStatus = 601, battery = 95f)
+        val robotMessage = RobotMessage(topic = "/robot_status", msg = statusMessage)
+        val messagesFlow = MutableStateFlow(robotMessage)
+
+        coEvery { robotClient.messages } returns messagesFlow
+
+        val result = tourRepository.observeStatus().first()
+
+        coVerify { robotClient.sendCommand(match { 
+            it.op == "subscribe" && it.topic == "/robot_status"
+        }) }
+        
+        assertEquals(statusMessage, result)
+    }
+}

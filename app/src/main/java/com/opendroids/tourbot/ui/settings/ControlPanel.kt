@@ -2,49 +2,74 @@
 
 package com.opendroids.tourbot.ui.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.opendroids.tourbot.data.AppError
+import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.MainViewModel
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import java.util.Collections
 
 @Composable
 fun ControlPanel(
     onDismiss: () -> Unit,
     tourManager: TourManager,
     tourConfigRepository: TourConfigRepository,
+    masterTourRepository: MasterTourRepository,
     mainViewModel: MainViewModel,
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
     val preSpeakDelay by settingsViewModel.preSpeakDelay.collectAsState()
     val robotUrl by mainViewModel.robotUrl.collectAsState()
-    val isTestMode by mainViewModel.isTestMode.collectAsState()
     var waypointIds by remember { mutableStateOf(emptyList<String>()) }
     var showScriptEditor by remember { mutableStateOf<String?>(null) }
     var showAddWaypointDialog by remember { mutableStateOf(false) }
@@ -55,6 +80,7 @@ fun ControlPanel(
             add(toIndex, removeAt(fromIndex))
         }
     }
+    val isInTestMode by masterTourRepository.isInTestMode.collectAsState()
 
     LaunchedEffect(key1 = Unit) {
         tourManager.waypointIds.collect {
@@ -88,8 +114,6 @@ fun ControlPanel(
                         onPreSpeakDelayChange = { settingsViewModel.setPreSpeakDelay(it) },
                         robotUrl = robotUrl,
                         onRobotUrlChange = { mainViewModel.setRobotUrl(it) },
-                        isTestMode = isTestMode,
-                        onTestModeChange = { mainViewModel.setTestMode(it) },
                         waypointIds = waypointIds,
                         onWaypointClick = { showScriptEditor = it },
                         onRemoveWaypoint = { id ->
@@ -99,7 +123,9 @@ fun ControlPanel(
                         dragDropState = dragDropState,
                         onSaveWaypoints = { newWaypointIds ->
                             scope.launch { tourConfigRepository.saveWaypoints(newWaypointIds) }
-                        }
+                        },
+                        isInTestMode = isInTestMode,
+                        onTestModeChange = { masterTourRepository.setTestMode(it) }
                     )
                     1 -> ErrorLogTab(mainViewModel = mainViewModel)
                 }
@@ -145,16 +171,15 @@ fun SettingsTab(
     onPreSpeakDelayChange: (Int) -> Unit,
     robotUrl: String,
     onRobotUrlChange: (String) -> Unit,
-    isTestMode: Boolean,
-    onTestModeChange: (Boolean) -> Unit,
     waypointIds: List<String>,
     onWaypointClick: (String) -> Unit,
     onRemoveWaypoint: (String) -> Unit,
     onAddWaypointClick: () -> Unit,
     dragDropState: DragDropState,
-    onSaveWaypoints: (List<String>) -> Unit
+    onSaveWaypoints: (List<String>) -> Unit,
+    isInTestMode: Boolean,
+    onTestModeChange: (Boolean) -> Unit
 ) {
-    val scope = rememberCoroutineScope()
     val listState = dragDropState.listState
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -165,10 +190,12 @@ fun SettingsTab(
             label = { Text("Robot WebSocket URL") },
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
         )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Test Mode")
-            Spacer(modifier = Modifier.weight(1f))
-            Switch(checked = isTestMode, onCheckedChange = onTestModeChange)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        ) {
+            Text("Test Mode", modifier = Modifier.weight(1f))
+            Switch(checked = isInTestMode, onCheckedChange = onTestModeChange)
         }
         Divider(modifier = Modifier.padding(vertical = 16.dp))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
@@ -236,7 +263,6 @@ fun SettingsTab(
 fun ErrorLogTab(mainViewModel: MainViewModel) {
     val errors by mainViewModel.errors.collectAsState()
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -253,14 +279,14 @@ fun ErrorLogTab(mainViewModel: MainViewModel) {
         Box(modifier = Modifier.height(300.dp)) {
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 if (errors.isEmpty()) {
-                    item { Text("No errors logged yet.", color = Color.Gray) }
+                    item { Text("No errors logged yet.") }
                 } else {
                     itemsIndexed(errors, key = { _, error -> error.timestamp + error.message }) { _, error ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                            Text(text = error.timestamp, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                            Text(text = error.message, color = Color.Red)
+                            Text(text = error.timestamp, style = MaterialTheme.typography.labelSmall)
+                            Text(text = error.message, color = MaterialTheme.colorScheme.error)
                             error.stackTrace?.let {
-                                Text(text = it, style = MaterialTheme.typography.bodySmall, color = Color.Red.copy(alpha = 0.7f))
+                                Text(text = it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
                             }
                         }
                         Divider()
@@ -271,7 +297,6 @@ fun ErrorLogTab(mainViewModel: MainViewModel) {
     }
 }
 
-// Drag and Drop State Helper
 class DragDropState(
     val listState: LazyListState,
     private val onMove: (Int, Int) -> Unit
@@ -328,7 +353,6 @@ fun rememberDragDropState(
 ): DragDropState {
     return remember { DragDropState(lazyListState, onMove) }
 }
-
 
 @Composable
 fun ScriptEditorDialog(
