@@ -18,21 +18,26 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
     // Animation state
     enum class AnimationState {
-        SWIRLING,       // Initial swirling globe
-        COALESCING,     // Transitioning to face
-        FACE_IDLE,      // Face formed, idle animation
-        SPEAKING        // Face with mouth animation
+        SWIRLING,       // Idle swirling globe (not speaking)
+        COALESCING,     // Transitioning to face (starting to speak)
+        SPEAKING,       // Face formed, mouth animating
+        DISSOLVING      // Transitioning back to swirl (stopped speaking)
     }
 
     private var animationState = AnimationState.SWIRLING
-    private var stateTransitionProgress = 0f
-    private var coalescenceProgress = 0f
+    private var coalescenceProgress = 0f  // 0 = full swirl, 1 = full face
     private var timeElapsed = 0f
     private var lastFrameTime = System.nanoTime()
 
     // Audio amplitude (0-1 normalized)
     @Volatile
     var amplitude: Float = 0f
+
+    // Speaking detection with hysteresis
+    private var isSpeaking = false
+    private var silenceTimer = 0f
+    private val silenceThreshold = 0.5f  // Seconds of silence before dissolving
+    private val speakingThreshold = 0.05f  // Amplitude threshold to detect speech
 
     // Point cloud data
     private lateinit var facePoints: List<FaceGeometry.FacePoint>
@@ -197,63 +202,98 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     }
 
     private fun updateAnimation(deltaTime: Float) {
-        // State machine for animation
+        // Detect speaking state with hysteresis to avoid flickering
+        val currentlySpeaking = amplitude > speakingThreshold
+        if (currentlySpeaking) {
+            isSpeaking = true
+            silenceTimer = 0f
+        } else if (isSpeaking) {
+            silenceTimer += deltaTime
+            if (silenceTimer > silenceThreshold) {
+                isSpeaking = false
+            }
+        }
+
+        // State machine for animation - driven by speech
         when (animationState) {
             AnimationState.SWIRLING -> {
+                // Fast swirling globe
                 globalRotation += deltaTime * 60f
-                // Auto-transition to coalescing after 2 seconds
-                if (timeElapsed > 2f) {
+                // Transition to coalescing when speaking starts
+                if (isSpeaking) {
                     animationState = AnimationState.COALESCING
                 }
             }
             AnimationState.COALESCING -> {
+                // Slow down rotation as face forms
                 globalRotation += deltaTime * 60f * (1f - coalescenceProgress)
-                coalescenceProgress = (coalescenceProgress + deltaTime * 0.5f).coerceAtMost(1f)
+                // Fast coalescence (0.8 seconds to form face)
+                coalescenceProgress = (coalescenceProgress + deltaTime * 1.25f).coerceAtMost(1f)
                 if (coalescenceProgress >= 1f) {
-                    animationState = AnimationState.FACE_IDLE
+                    animationState = AnimationState.SPEAKING
+                }
+                // If speaking stops during coalescence, still complete the formation
+            }
+            AnimationState.SPEAKING -> {
+                // Very subtle rotation while speaking
+                globalRotation += deltaTime * 2f
+                // Transition to dissolving when speaking stops
+                if (!isSpeaking) {
+                    animationState = AnimationState.DISSOLVING
                 }
             }
-            AnimationState.FACE_IDLE, AnimationState.SPEAKING -> {
-                // Subtle idle rotation
-                globalRotation += deltaTime * 2f
+            AnimationState.DISSOLVING -> {
+                // Speed up rotation as face dissolves
+                globalRotation += deltaTime * 60f * (1f - coalescenceProgress)
+                // Dissolve back to swirl (1.2 seconds)
+                coalescenceProgress = (coalescenceProgress - deltaTime * 0.83f).coerceAtLeast(0f)
+                if (coalescenceProgress <= 0f) {
+                    animationState = AnimationState.SWIRLING
+                }
+                // If speaking starts again during dissolve, go back to coalescing
+                if (isSpeaking) {
+                    animationState = AnimationState.COALESCING
+                }
             }
         }
 
-        // Update breathing
-        breathingPhase += deltaTime * 1.5f
-
-        // Update blinking
-        blinkTimer += deltaTime
-        if (blinkTimer > nextBlinkTime) {
-            isBlinking = true
-            blinkTimer = 0f
-            nextBlinkTime = 2f + (Math.random() * 4f).toFloat()
+        // Update breathing (only when face is formed)
+        if (coalescenceProgress > 0.5f) {
+            breathingPhase += deltaTime * 1.5f
         }
-        if (isBlinking && blinkTimer > 0.15f) {
+
+        // Update blinking (only when face is mostly formed)
+        if (coalescenceProgress > 0.8f) {
+            blinkTimer += deltaTime
+            if (blinkTimer > nextBlinkTime) {
+                isBlinking = true
+                blinkTimer = 0f
+                nextBlinkTime = 2f + (Math.random() * 4f).toFloat()
+            }
+            if (isBlinking && blinkTimer > 0.15f) {
+                isBlinking = false
+            }
+        } else {
             isBlinking = false
         }
 
-        // Update eye movement
-        if (timeElapsed > nextEyeMoveTime) {
-            eyeLookTarget[0] = ((Math.random() * 2 - 1) * 0.03f).toFloat()
-            eyeLookTarget[1] = ((Math.random() * 2 - 1) * 0.02f).toFloat()
-            nextEyeMoveTime = timeElapsed + 1.5f + (Math.random() * 3f).toFloat()
+        // Update eye movement (only when face is formed)
+        if (coalescenceProgress > 0.9f) {
+            if (timeElapsed > nextEyeMoveTime) {
+                eyeLookTarget[0] = ((Math.random() * 2 - 1) * 0.03f).toFloat()
+                eyeLookTarget[1] = ((Math.random() * 2 - 1) * 0.02f).toFloat()
+                nextEyeMoveTime = timeElapsed + 1.5f + (Math.random() * 3f).toFloat()
+            }
+            eyeLookX += (eyeLookTarget[0] - eyeLookX) * deltaTime * 3f
+            eyeLookY += (eyeLookTarget[1] - eyeLookY) * deltaTime * 3f
+        } else {
+            eyeLookX = 0f
+            eyeLookY = 0f
         }
-        eyeLookX += (eyeLookTarget[0] - eyeLookX) * deltaTime * 3f
-        eyeLookY += (eyeLookTarget[1] - eyeLookY) * deltaTime * 3f
 
         // Update mouth based on amplitude
         targetMouthOpen = amplitude
         mouthOpenAmount += (targetMouthOpen - mouthOpenAmount) * deltaTime * 15f
-
-        // Update animation state based on amplitude
-        animationState = if (amplitude > 0.05f && coalescenceProgress >= 1f) {
-            AnimationState.SPEAKING
-        } else if (coalescenceProgress >= 1f) {
-            AnimationState.FACE_IDLE
-        } else {
-            animationState
-        }
     }
 
     private fun updatePointPositions() {
@@ -492,13 +532,16 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         coalescenceProgress = 0f
         timeElapsed = 0f
         globalRotation = 0f
+        isSpeaking = false
+        silenceTimer = 0f
     }
 
     /**
-     * Skip directly to face formed state.
+     * Skip directly to face formed state (useful for testing).
      */
     fun skipToFace() {
-        animationState = AnimationState.FACE_IDLE
+        animationState = AnimationState.SPEAKING
         coalescenceProgress = 1f
+        isSpeaking = true
     }
 }
