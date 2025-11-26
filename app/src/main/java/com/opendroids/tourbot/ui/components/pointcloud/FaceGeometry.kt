@@ -153,22 +153,22 @@ object FaceGeometry {
     private fun generateNose(count: Int): List<FacePoint> {
         val points = mutableListOf<FacePoint>()
 
-        // Nose bridge
+        // Nose bridge - slim and delicate
         for (i in 0 until count / 2) {
             val t = i.toFloat() / (count / 2)
-            val y = 0.1f - t * 0.35f
-            val x = randomJitter(0.015f)
-            val z = 0.2f + t * 0.15f + randomJitter(0.01f)
+            val y = 0.1f - t * 0.30f  // Shorter nose bridge, ends at -0.2
+            val x = randomJitter(0.012f)  // Narrower
+            val z = 0.2f + t * 0.12f + randomJitter(0.01f)
             points.add(FacePoint(x, y, z, FaceRegion.NOSE))
         }
 
-        // Nose tip and nostrils (delicate, feminine)
+        // Nose tip only (small, no wide nostrils)
         for (i in 0 until count / 2) {
             val angle = Random.nextFloat() * 2 * PI.toFloat()
-            val r = Random.nextFloat() * 0.06f
+            val r = Random.nextFloat() * 0.035f  // Smaller, more delicate
             val x = r * cos(angle)
-            val y = -0.22f + r * sin(angle) * 0.5f
-            val z = 0.35f - r * 0.5f + randomJitter(0.01f)
+            val y = -0.20f + r * sin(angle) * 0.3f  // Tighter vertical spread
+            val z = 0.32f - r * 0.3f + randomJitter(0.01f)
             points.add(FacePoint(x, y, z, FaceRegion.NOSE, intensity = 0.9f))
         }
 
@@ -271,7 +271,13 @@ object FaceGeometry {
                 val inLeftEye = (x + 0.25f).pow(2) / 0.015f + (y - 0.15f).pow(2) / 0.005f < 1
                 val inRightEye = (x - 0.25f).pow(2) / 0.015f + (y - 0.15f).pow(2) / 0.005f < 1
 
-                if (!inLeftEye && !inRightEye) {
+                // Avoid mustache zone (between nose and upper lip)
+                val inMustacheZone = y > -0.38f && y < -0.18f && x.absoluteValue < 0.25f
+
+                // Avoid mouth area
+                val inMouthArea = y > -0.52f && y < -0.35f && x.absoluteValue < 0.25f
+
+                if (!inLeftEye && !inRightEye && !inMustacheZone && !inMouthArea) {
                     val z = 0.05f + 0.1f * (1 - sqrt(x.pow(2) + y.pow(2))) + randomJitter(0.03f)
                     points.add(FacePoint(x, y, z, FaceRegion.FACE_OUTLINE, intensity = 0.4f))
                 }
