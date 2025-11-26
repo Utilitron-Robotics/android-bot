@@ -340,18 +340,18 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                         y += eyeLookY
                     }
                     FaceGeometry.FaceRegion.UPPER_LIP -> {
-                        // Mouth opening - move upper lip up
-                        y += mouthOpenAmount * 0.08f
-                        z += mouthOpenAmount * 0.02f
+                        // Mouth opening - move upper lip up significantly
+                        y += mouthOpenAmount * 0.15f
+                        z += mouthOpenAmount * 0.05f
                     }
                     FaceGeometry.FaceRegion.LOWER_LIP -> {
-                        // Mouth opening - move lower lip down
-                        y -= mouthOpenAmount * 0.12f
-                        z += mouthOpenAmount * 0.03f
+                        // Mouth opening - move lower lip down significantly
+                        y -= mouthOpenAmount * 0.25f
+                        z += mouthOpenAmount * 0.08f
                     }
                     FaceGeometry.FaceRegion.LEFT_EYEBROW, FaceGeometry.FaceRegion.RIGHT_EYEBROW -> {
-                        // Subtle eyebrow raise when speaking
-                        y += mouthOpenAmount * 0.02f
+                        // Eyebrow raise when speaking
+                        y += mouthOpenAmount * 0.04f
                     }
                     else -> {}
                 }
@@ -390,9 +390,9 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                 else floatArrayOf(0f, 1f, 1f, 1f * point.intensity)
             }
             FaceGeometry.FaceRegion.UPPER_LIP, FaceGeometry.FaceRegion.LOWER_LIP -> {
-                // Lips glow when speaking
-                val speakGlow = if (mouthOpenAmount > 0.1f) 0.3f else 0f
-                floatArrayOf(0.2f + speakGlow, 0.8f, 1f, 0.9f * point.intensity)
+                // Lips glow brightly when speaking
+                val speakGlow = mouthOpenAmount * 0.5f
+                floatArrayOf(0.4f + speakGlow, 0.9f, 1f, 1f)
             }
             FaceGeometry.FaceRegion.LEFT_EYEBROW, FaceGeometry.FaceRegion.RIGHT_EYEBROW -> {
                 floatArrayOf(0f, 0.9f, 0.9f, 0.85f)
@@ -430,7 +430,8 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                 if (isBlinking) 2f else 8f * point.intensity
             }
             FaceGeometry.FaceRegion.UPPER_LIP, FaceGeometry.FaceRegion.LOWER_LIP -> {
-                6f + mouthOpenAmount * 4f
+                // Lips get bigger when mouth opens
+                8f + mouthOpenAmount * 6f
             }
             FaceGeometry.FaceRegion.LEFT_EYEBROW, FaceGeometry.FaceRegion.RIGHT_EYEBROW -> 5f
             FaceGeometry.FaceRegion.NOSE -> 5f * point.intensity
