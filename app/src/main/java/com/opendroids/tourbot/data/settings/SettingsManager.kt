@@ -21,7 +21,7 @@ class SettingsManager @Inject constructor(@ApplicationContext appContext: Contex
 
     val robotUrl: Flow<String> = settingsDataStore.data
         .map { preferences ->
-            preferences[KEY_ROBOT_URL] ?: "ws://192.168.1.100:8765"
+            preferences[KEY_ROBOT_URL] ?: "ws://10.42.0.1:9090"
         }
 
     suspend fun setRobotUrl(url: String) {

@@ -26,13 +26,12 @@ fun MainScreen(
     tourManager: TourManager,
     audioPlayer: AudioPlayer,
     tourConfigRepository: TourConfigRepository,
-    masterTourRepository: MasterTourRepository,
+    masterTourRepository: MasterTourRepository, // Add this line
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val tourState by tourManager.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
     val captionText by audioPlayer.captionText.collectAsState()
-    val isInTestMode by masterTourRepository.isInTestMode.collectAsState()
     var showControlPanel by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -105,24 +104,8 @@ fun MainScreen(
                     onDismiss = { showControlPanel = false },
                     tourManager = tourManager,
                     tourConfigRepository = tourConfigRepository,
+                    masterTourRepository = masterTourRepository,
                     mainViewModel = viewModel
-                )
-            }
-        }
-
-        // Test Mode Banner
-        if (isInTestMode) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .background(Color.Red.copy(alpha = 0.7f))
-                    .padding(4.dp)
-            ) {
-                Text(
-                    text = "TEST MODE",
-                    color = Color.White,
-                    modifier = Modifier.align(Alignment.Center)
                 )
             }
         }
