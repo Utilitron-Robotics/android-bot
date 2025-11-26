@@ -178,23 +178,48 @@ object FaceGeometry {
     private fun generateLips(count: Int, isUpper: Boolean): List<FacePoint> {
         val points = mutableListOf<FacePoint>()
         val region = if (isUpper) FaceRegion.UPPER_LIP else FaceRegion.LOWER_LIP
-        val baseY = if (isUpper) -0.38f else -0.45f
+
+        // Mouth center position
+        val mouthCenterY = -0.42f
+        val mouthWidth = 0.20f
+        val mouthHeight = 0.04f  // Height of closed mouth (thin ellipse)
+
+        // Generate points along the ellipse arc
+        // Upper lip: angles from PI to 0 (top arc)
+        // Lower lip: angles from PI to 2*PI (bottom arc)
+        val startAngle = if (isUpper) PI.toFloat() else 0f
+        val endAngle = if (isUpper) 0f else PI.toFloat()
 
         for (i in 0 until count) {
-            val t = (i.toFloat() / count) * 2 - 1  // -1 to 1
-            val x = t * 0.22f
+            val t = i.toFloat() / (count - 1)
+            val angle = startAngle + (endAngle - startAngle) * t
 
-            val y = if (isUpper) {
-                // Cupid's bow shape for upper lip
-                val cupidsBow = 0.025f * cos(t * PI.toFloat() * 2)
-                baseY + cupidsBow + 0.02f * (1 - t.absoluteValue)
-            } else {
-                // Fuller lower lip
-                baseY - 0.04f * sqrt(1 - t * t) + randomJitter(0.005f)
+            // Ellipse coordinates
+            val x = mouthWidth * cos(angle)
+            var y = mouthCenterY + mouthHeight * sin(angle)
+
+            // Add cupid's bow for upper lip center
+            if (isUpper && t > 0.3f && t < 0.7f) {
+                val bowT = (t - 0.3f) / 0.4f  // 0 to 1 across center
+                y += 0.015f * sin(bowT * PI.toFloat())  // Small dip
             }
 
-            val z = 0.25f + 0.05f * (1 - t.absoluteValue) + randomJitter(0.01f)
-            points.add(FacePoint(x, y, z, region, intensity = 1.1f))
+            val z = 0.28f + 0.03f * (1 - x.absoluteValue / mouthWidth) + randomJitter(0.005f)
+            points.add(FacePoint(x, y, z, region, intensity = 1.2f))
+        }
+
+        // Add some fill points to make lips fuller
+        for (i in 0 until count / 3) {
+            val t = Random.nextFloat()
+            val angle = startAngle + (endAngle - startAngle) * t
+            val r = Random.nextFloat() * 0.6f + 0.4f  // 40-100% of radius
+
+            val x = mouthWidth * r * cos(angle) + randomJitter(0.01f)
+            val lipThickness = if (isUpper) 0.02f else 0.03f  // Lower lip fuller
+            val y = mouthCenterY + mouthHeight * sin(angle) + randomJitter(lipThickness)
+
+            val z = 0.26f + randomJitter(0.01f)
+            points.add(FacePoint(x, y, z, region, intensity = 0.9f))
         }
 
         return points
@@ -272,10 +297,10 @@ object FaceGeometry {
                 val inRightEye = (x - 0.25f).pow(2) / 0.015f + (y - 0.15f).pow(2) / 0.005f < 1
 
                 // Avoid mustache zone (between nose and upper lip)
-                val inMustacheZone = y > -0.38f && y < -0.18f && x.absoluteValue < 0.25f
+                val inMustacheZone = y > -0.38f && y < -0.22f && x.absoluteValue < 0.22f
 
-                // Avoid mouth area
-                val inMouthArea = y > -0.52f && y < -0.35f && x.absoluteValue < 0.25f
+                // Avoid mouth area (ellipse centered at -0.42)
+                val inMouthArea = y > -0.50f && y < -0.36f && x.absoluteValue < 0.22f
 
                 if (!inLeftEye && !inRightEye && !inMustacheZone && !inMouthArea) {
                     val z = 0.05f + 0.1f * (1 - sqrt(x.pow(2) + y.pow(2))) + randomJitter(0.03f)
