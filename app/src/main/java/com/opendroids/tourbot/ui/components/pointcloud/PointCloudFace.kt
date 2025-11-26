@@ -29,19 +29,15 @@ fun PointCloudFace(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // Normalize amplitude to 0-1 range
-    val normalizedAmplitude = remember(amplitude) {
-        val normalized = (amplitude / 15000f).coerceIn(0f, 1f)
-        // Apply dead zone for silence
-        if (normalized < 0.05f) 0f else normalized
-    }
-
     // Create renderer instance
     val renderer = remember { PointCloudRenderer() }
 
-    // Update amplitude on renderer
-    LaunchedEffect(normalizedAmplitude) {
-        renderer.amplitude = normalizedAmplitude
+    // Update amplitude on renderer directly - no dead zone here, let renderer handle it
+    // TTS produces 500-2000 amplitude, MediaPlayer around 1000
+    // Normalize to 0-1 with lower max for better sensitivity
+    LaunchedEffect(amplitude) {
+        val normalized = (amplitude / 5000f).coerceIn(0f, 1f)
+        renderer.amplitude = normalized
     }
 
     // Skip intro if requested

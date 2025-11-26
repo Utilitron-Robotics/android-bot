@@ -36,8 +36,8 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     // Speaking detection with hysteresis
     private var isSpeaking = false
     private var silenceTimer = 0f
-    private val silenceThreshold = 0.5f  // Seconds of silence before dissolving
-    private val speakingThreshold = 0.05f  // Amplitude threshold to detect speech
+    private val silenceThreshold = 0.4f  // Seconds of silence before dissolving
+    private val speakingThreshold = 0.02f  // Low threshold - TTS gives ~0.1-0.4 normalized
 
     // Point cloud data
     private lateinit var facePoints: List<FaceGeometry.FacePoint>
