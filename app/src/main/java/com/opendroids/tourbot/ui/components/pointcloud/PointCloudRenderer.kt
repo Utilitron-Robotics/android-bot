@@ -449,95 +449,164 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private fun smootherstep(t: Float): Float = t * t * t * (t * (t * 6 - 15) + 10)
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
-    // ========== Face Displacement with Lip Sync ==========
+    // ========== Face Displacement - Angelina Jolie Proportions ==========
+    // Based on Golden Ratio (1:1.618) facial analysis
+    // Key features: high cheekbones, full lips, almond eyes, sharp jaw
 
     private fun calculateFaceDisplacement(x: Float, y: Float, z: Float): Float {
-        if (z < 0) return 0f
+        if (z < 0.1f) return 0f  // Only front hemisphere
 
-        val faceX = x / (z + 0.5f)
-        val faceY = y / (z + 0.5f)
+        // Project to face plane with slight perspective
+        val faceX = x / (z + 0.3f)
+        val faceY = y / (z + 0.3f)
 
-        if (faceX.absoluteValue > 0.9f || faceY.absoluteValue > 1.1f) return 0f
+        // Golden ratio face bounds (1:1.618 height to width)
+        val faceWidth = 0.55f
+        val faceHeight = faceWidth * 1.618f  // ~0.89
+
+        if (faceX.absoluteValue > faceWidth || faceY.absoluteValue > faceHeight / 2) return 0f
 
         var displacement = 0f
+        val zFactor = z.coerceIn(0.3f, 1f)  // Depth scaling
 
-        // Face oval
-        val inFace = (faceX / 0.6f).pow(2) + (faceY / 0.85f).pow(2) < 1f
-        if (inFace) displacement = 0.25f * z
-
-        // Nose
-        val noseX = faceX.absoluteValue
-        val noseY = faceY + 0.1f
-        if (noseX < 0.1f && noseY > -0.15f && noseY < 0.2f) {
-            val noseFactor = (1f - noseX / 0.1f) * (1f - (noseY - 0.05f).absoluteValue / 0.2f)
-            displacement = max(displacement, 0.75f * noseFactor * z)
+        // === FACE OVAL - Angelina's angular oval ===
+        val faceOvalX = faceX / faceWidth
+        val faceOvalY = faceY / (faceHeight / 2)
+        val inFace = faceOvalX.pow(2) + faceOvalY.pow(2) < 1f
+        if (inFace) {
+            // Subtle base protrusion, stronger in center
+            val centerFalloff = 1f - sqrt(faceOvalX.pow(2) + faceOvalY.pow(2))
+            displacement = 0.15f * centerFalloff * zFactor
         }
 
-        // Brow ridge
-        if (faceY > 0.25f && faceY < 0.45f && faceX.absoluteValue < 0.5f) {
-            val browFactor = (1f - (faceY - 0.35f).absoluteValue / 0.1f).coerceIn(0f, 1f)
-            displacement = max(displacement, 0.35f * browFactor * z)
+        // === FOREHEAD - Smooth dome ===
+        if (faceY > 0.25f && faceX.absoluteValue < 0.4f) {
+            val foreheadFactor = ((faceY - 0.25f) / 0.35f).coerceIn(0f, 1f)
+            val foreheadCurve = cos(faceX / 0.4f * PI.toFloat() / 2).pow(2)
+            displacement = max(displacement, 0.25f * foreheadFactor * foreheadCurve * zFactor)
         }
 
-        // Cheekbones
-        val cheekDist = sqrt((faceX.absoluteValue - 0.35f).pow(2) + (faceY + 0.05f).pow(2))
-        if (cheekDist < 0.2f) {
-            displacement = max(displacement, 0.3f * (1f - cheekDist / 0.2f) * z)
+        // === BROW RIDGE - Strong, defined (Angelina signature) ===
+        val browY = faceY - 0.22f
+        if (browY.absoluteValue < 0.08f && faceX.absoluteValue < 0.42f) {
+            val browCurve = cos(faceX / 0.42f * PI.toFloat() / 2).pow(1.5f)
+            val browPeak = 1f - (browY.absoluteValue / 0.08f)
+            displacement = max(displacement, 0.4f * browCurve * browPeak * zFactor)
         }
 
-        // === LIPS with Viseme Animation ===
-        val lipY = faceY + 0.45f
-        val lipX = faceX.absoluteValue
+        // === CHEEKBONES - High and prominent (Angelina's defining feature) ===
+        val cheekCenterX = 0.38f
+        val cheekCenterY = 0.0f
+        val leftCheekDist = sqrt((faceX + cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
+        val rightCheekDist = sqrt((faceX - cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
+        val cheekDist = min(leftCheekDist, rightCheekDist)
+        if (cheekDist < 0.18f) {
+            val cheekFactor = (1f - cheekDist / 0.18f).pow(1.5f)
+            displacement = max(displacement, 0.55f * cheekFactor * zFactor)  // Strong cheekbones
+        }
 
-        if (lipX < 0.3f && lipY.absoluteValue < 0.2f) {
-            // Base lip shape
-            var lipDisplacement = 0.4f * z
+        // === NOSE - Refined, straight bridge ===
+        val noseWidth = 0.06f
+        val noseBridgeTop = 0.15f
+        val noseTip = -0.18f
+        if (faceX.absoluteValue < noseWidth && faceY < noseBridgeTop && faceY > noseTip) {
+            val noseLength = noseBridgeTop - noseTip
+            val noseProgress = (noseBridgeTop - faceY) / noseLength
+            // Nose gets slightly wider and more prominent toward tip
+            val noseProfile = 0.5f + 0.5f * sin(noseProgress * PI.toFloat() / 2)
+            val noseCenterFalloff = 1f - (faceX.absoluteValue / noseWidth)
+            displacement = max(displacement, 0.7f * noseProfile * noseCenterFalloff * zFactor)
+        }
+        // Nose tip ball
+        val noseTipDist = sqrt(faceX.pow(2) + (faceY - noseTip).pow(2))
+        if (noseTipDist < 0.07f) {
+            displacement = max(displacement, 0.75f * (1f - noseTipDist / 0.07f) * zFactor)
+        }
 
-            // Mouth opening - vertical stretch
-            val openOffset = if (lipY > 0) {
-                -mouthOpenAmount * 0.12f  // Upper lip up
-            } else {
-                mouthOpenAmount * 0.18f   // Lower lip down more
+        // === EYES - Wide-set, almond/feline shape (indent) ===
+        val eyeY = 0.12f
+        val eyeSpacing = 0.22f  // Wide-set
+        val eyeWidth = 0.1f
+        val eyeHeight = 0.045f  // Almond shape (wider than tall)
+
+        for (eyeX in listOf(-eyeSpacing, eyeSpacing)) {
+            val relX = (faceX - eyeX) / eyeWidth
+            val relY = (faceY - eyeY) / eyeHeight
+            val eyeEllipse = relX.pow(2) + relY.pow(2)
+            if (eyeEllipse < 1f) {
+                val eyeDepth = (1f - eyeEllipse).pow(0.7f)
+                displacement -= 0.25f * eyeDepth * zFactor  // Indent for eye sockets
             }
+        }
 
-            // Mouth width - horizontal stretch for EE
-            val wideOffset = mouthWideAmount * 0.08f
-            val effectiveLipX = lipX - wideOffset
+        // === LIPS - Full, pillowy (Angelina's most famous feature) ===
+        val lipCenterY = -0.35f
+        val lipWidth = 0.22f
+        val upperLipHeight = 0.035f
+        val lowerLipHeight = 0.055f  // Fuller lower lip
 
-            // Mouth rounding - horizontal compress for OO
-            val roundCompress = 1f + mouthRoundAmount * 0.5f
-            val roundedLipX = lipX * roundCompress
+        val lipY = faceY - lipCenterY
+        val lipXNorm = faceX.absoluteValue / lipWidth
 
-            // Lip tuck for F/V - lower lip pulls in
-            if (lipY < 0 && lipTuckAmount > 0.1f) {
-                lipDisplacement *= (1f - lipTuckAmount * 0.5f)
+        if (lipXNorm < 1f) {
+            // Viseme adjustments
+            val openAmount = mouthOpenAmount * 0.15f
+            val wideStretch = 1f + mouthWideAmount * 0.3f
+            val roundCompress = 1f - mouthRoundAmount * 0.25f
+
+            val effectiveLipWidth = lipWidth * wideStretch * roundCompress
+            val effectiveLipXNorm = faceX.absoluteValue / effectiveLipWidth
+
+            if (effectiveLipXNorm < 1f) {
+                // Upper lip with cupid's bow
+                val upperLipY = lipY + openAmount
+                if (upperLipY > 0 && upperLipY < upperLipHeight * (1.5f + openAmount * 3f)) {
+                    val cupidsBow = if (effectiveLipXNorm < 0.3f) {
+                        0.7f + 0.3f * cos(effectiveLipXNorm / 0.3f * PI.toFloat())
+                    } else {
+                        0.7f * (1f - (effectiveLipXNorm - 0.3f) / 0.7f)
+                    }
+                    val upperProfile = cupidsBow * (1f - effectiveLipXNorm.pow(2))
+                    displacement = max(displacement, 0.5f * upperProfile * zFactor)
+                }
+
+                // Lower lip - fuller, pillowy
+                val lowerLipY = lipY - openAmount * 1.3f
+                if (lowerLipY < 0 && lowerLipY > -lowerLipHeight * (2f + openAmount * 4f)) {
+                    val lowerProfile = cos(effectiveLipXNorm * PI.toFloat() / 2).pow(1.3f)
+                    val lowerFullness = 1f - (lowerLipY / (-lowerLipHeight * 2f)).pow(2)
+                    var lowerDisp = 0.6f * lowerProfile * lowerFullness.coerceIn(0f, 1f) * zFactor
+
+                    // Lip tuck for F/V sounds
+                    if (lipTuckAmount > 0.1f) {
+                        lowerDisp *= (1f - lipTuckAmount * 0.6f)
+                    }
+                    displacement = max(displacement, lowerDisp)
+                }
             }
+        }
 
-            // Check if point is on visible lip surface
-            val adjustedLipY = lipY + openOffset
-            val finalLipX = if (mouthRoundAmount > mouthWideAmount) roundedLipX else max(0f, effectiveLipX)
-
-            if (finalLipX < 0.25f && adjustedLipY.absoluteValue < 0.15f + mouthOpenAmount * 0.1f) {
-                val lipFactor = (1f - finalLipX / 0.25f) * (1f - adjustedLipY.absoluteValue / 0.2f)
-                displacement = max(displacement, lipDisplacement * lipFactor)
+        // === JAWLINE - Sharp, angular (Angelina signature) ===
+        val jawY = -0.42f
+        val jawWidth = 0.45f
+        if (faceY < jawY && faceY > -0.55f) {
+            val jawProgress = (jawY - faceY) / 0.13f
+            val jawAngle = faceX.absoluteValue / (jawWidth * (1f - jawProgress * 0.4f))
+            if (jawAngle < 1f) {
+                val jawSharpness = (1f - jawAngle).pow(2f) * (1f - jawProgress)
+                displacement = max(displacement, 0.35f * jawSharpness * zFactor)
             }
         }
 
-        // Eye sockets (indent)
-        val leftEyeDist = sqrt((faceX + 0.25f).pow(2) + (faceY - 0.15f).pow(2))
-        val rightEyeDist = sqrt((faceX - 0.25f).pow(2) + (faceY - 0.15f).pow(2))
-        val eyeDist = min(leftEyeDist, rightEyeDist)
-        if (eyeDist < 0.12f) {
-            displacement -= 0.15f * (1f - eyeDist / 0.12f) * z
+        // === CHIN - Defined, slightly pointed ===
+        val chinY = -0.52f
+        val chinDist = sqrt(faceX.pow(2) + (faceY - chinY).pow(2))
+        if (chinDist < 0.1f) {
+            val chinFactor = (1f - chinDist / 0.1f).pow(1.5f)
+            displacement = max(displacement, 0.4f * chinFactor * zFactor)
         }
 
-        // Chin
-        if (faceY < -0.6f && faceX.absoluteValue < 0.2f) {
-            val chinFactor = (1f - (faceY + 0.7f).absoluteValue / 0.1f).coerceIn(0f, 1f)
-            displacement = max(displacement, 0.25f * chinFactor * z)
-        }
-
-        return displacement.coerceIn(-0.2f, 1f)
+        return displacement.coerceIn(-0.3f, 1f)
     }
 
     // ========== Rendering ==========
