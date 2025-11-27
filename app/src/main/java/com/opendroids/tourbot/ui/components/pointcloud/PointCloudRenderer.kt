@@ -12,22 +12,10 @@ import kotlin.math.*
 
 /**
  * OpenGL ES 2.0 renderer for point cloud face animation.
- * Renders thousands of particles that swirl and coalesce into a female face.
+ * Renders a swirling globe of particles with a face that presses through
+ * like a membrane/balloon effect when speaking.
  */
 class PointCloudRenderer : GLSurfaceView.Renderer {
-
-    // Animation state
-    enum class AnimationState {
-        SWIRLING,       // Idle swirling globe (not speaking)
-        COALESCING,     // Transitioning to face (starting to speak)
-        SPEAKING,       // Face formed, mouth animating
-        DISSOLVING      // Transitioning back to swirl (stopped speaking)
-    }
-
-    private var animationState = AnimationState.SWIRLING
-    private var coalescenceProgress = 0f  // 0 = full swirl, 1 = full face
-    private var timeElapsed = 0f
-    private var lastFrameTime = System.nanoTime()
 
     // Audio amplitude (0-1 normalized)
     @Volatile
@@ -36,12 +24,18 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     // Speaking detection with hysteresis
     private var isSpeaking = false
     private var silenceTimer = 0f
-    private val silenceThreshold = 0.4f  // Seconds of silence before dissolving
-    private val speakingThreshold = 0.02f  // Low threshold - TTS gives ~0.1-0.4 normalized
+    private val silenceThreshold = 0.4f
+    private val speakingThreshold = 0.02f
+
+    // Face impression strength (0 = no face, 1 = full face pushing through)
+    private var faceImpressionStrength = 0f
+    private var targetFaceStrength = 0f
+
+    // Mouth animation
+    private var mouthOpenAmount = 0f
 
     // Point cloud data
-    private lateinit var facePoints: List<FaceGeometry.FacePoint>
-    private lateinit var spherePoints: List<FloatArray>
+    private lateinit var spherePoints: List<FloatArray>  // Base sphere positions
     private var pointCount = 0
 
     // OpenGL buffers
@@ -58,29 +52,14 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private val viewMatrix = FloatArray(16)
     private val modelMatrix = FloatArray(16)
 
-    // Animation parameters
+    // Animation
+    private var timeElapsed = 0f
+    private var lastFrameTime = System.nanoTime()
     private var globalRotation = 0f
-    private var breathingPhase = 0f
-    private var blinkTimer = 0f
-    private var nextBlinkTime = 3f
-    private var isBlinking = false
-    private var eyeLookX = 0f
-    private var eyeLookY = 0f
-    private var eyeLookTarget = floatArrayOf(0f, 0f)
-    private var nextEyeMoveTime = 2f
-
-    // Mouth animation
-    private var mouthOpenAmount = 0f
-    private var targetMouthOpen = 0f
-
-    // Colors
-    private val primaryColor = floatArrayOf(0f, 1f, 1f, 1f)      // Cyan
-    private val secondaryColor = floatArrayOf(0f, 0.8f, 1f, 1f)  // Light blue
-    private val accentColor = floatArrayOf(1f, 0f, 0.8f, 1f)     // Magenta accent
 
     companion object {
         private const val COORDS_PER_VERTEX = 3
-        private const val POINT_COUNT = 3000
+        private const val POINT_COUNT = 4000  // More points for smoother surface
 
         private const val VERTEX_SHADER = """
             uniform mat4 uMVPMatrix;
@@ -101,16 +80,10 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             varying vec4 vColor;
 
             void main() {
-                // Create soft circular points with glow
                 vec2 coord = gl_PointCoord - vec2(0.5);
                 float dist = length(coord);
-
-                // Soft falloff
                 float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
-
-                // Glow effect
                 float glow = exp(-dist * 4.0) * 0.5;
-
                 gl_FragColor = vec4(vColor.rgb, vColor.a * (alpha + glow));
             }
         """
@@ -120,49 +93,45 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         GLES20.glClearColor(0.02f, 0.02f, 0.05f, 1f)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-
-        // Enable point sprites
         GLES20.glEnable(0x8861) // GL_POINT_SPRITE_OES
         GLES20.glEnable(0x8642) // GL_VERTEX_PROGRAM_POINT_SIZE
 
-        // Initialize geometry
         initializeGeometry()
-
-        // Create shader program
         shaderProgram = createShaderProgram()
     }
 
     private fun initializeGeometry() {
-        facePoints = FaceGeometry.generateFacePoints(POINT_COUNT)
-        spherePoints = FaceGeometry.generateSpherePoints(POINT_COUNT)
+        // Generate evenly distributed sphere points (Fibonacci sphere)
+        spherePoints = generateFibonacciSphere(POINT_COUNT)
         pointCount = POINT_COUNT
 
-        // Allocate buffers
         vertexBuffer = ByteBuffer.allocateDirect(pointCount * COORDS_PER_VERTEX * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
         colorBuffer = ByteBuffer.allocateDirect(pointCount * 4 * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
         sizeBuffer = ByteBuffer.allocateDirect(pointCount * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
+            .order(ByteOrder.nativeOrder()).asFloatBuffer()
+    }
+
+    private fun generateFibonacciSphere(count: Int): List<FloatArray> {
+        val points = mutableListOf<FloatArray>()
+        val goldenRatio = (1 + sqrt(5f)) / 2
+        for (i in 0 until count) {
+            val theta = 2 * PI.toFloat() * i / goldenRatio
+            val phi = acos(1 - 2 * (i + 0.5f) / count)
+            val x = sin(phi) * cos(theta)
+            val y = cos(phi)  // Y is up
+            val z = sin(phi) * sin(theta)
+            points.add(floatArrayOf(x, y, z))
+        }
+        return points
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
-
         val ratio = width.toFloat() / height.toFloat()
         Matrix.frustumM(projectionMatrix, 0, -ratio, ratio, -1f, 1f, 2f, 10f)
-
-        Matrix.setLookAtM(
-            viewMatrix, 0,
-            0f, 0f, 4f,   // Eye position
-            0f, 0f, 0f,   // Look at
-            0f, 1f, 0f    // Up vector
-        )
+        Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, 3.5f, 0f, 0f, 0f, 0f, 1f, 0f)
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -171,38 +140,26 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         lastFrameTime = currentTime
         timeElapsed += deltaTime
 
-        // Update animation state
         updateAnimation(deltaTime)
 
-        // Clear screen
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
-        // Update point positions based on animation state
         updatePointPositions()
 
-        // Set up matrices
         Matrix.setIdentityM(modelMatrix, 0)
-
-        // Global rotation for swirl effect
-        if (animationState == AnimationState.SWIRLING || coalescenceProgress < 1f) {
-            Matrix.rotateM(modelMatrix, 0, globalRotation, 0f, 1f, 0.2f)
-        }
-
-        // Breathing animation when face is formed
-        if (coalescenceProgress > 0.5f) {
-            val breathScale = 1f + sin(breathingPhase) * 0.01f * coalescenceProgress
-            Matrix.scaleM(modelMatrix, 0, breathScale, breathScale, breathScale)
-        }
+        // Slow rotation - face stays mostly forward
+        Matrix.rotateM(modelMatrix, 0, globalRotation, 0f, 1f, 0f)
+        // Slight tilt for 3D feel
+        Matrix.rotateM(modelMatrix, 0, sin(timeElapsed * 0.3f) * 5f, 1f, 0f, 0f)
 
         Matrix.multiplyMM(mvpMatrix, 0, viewMatrix, 0, modelMatrix, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvpMatrix, 0)
 
-        // Render points
         renderPoints()
     }
 
     private fun updateAnimation(deltaTime: Float) {
-        // Detect speaking state with hysteresis to avoid flickering
+        // Speaking detection
         val currentlySpeaking = amplitude > speakingThreshold
         if (currentlySpeaking) {
             isSpeaking = true
@@ -214,86 +171,19 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             }
         }
 
-        // State machine for animation - driven by speech
-        when (animationState) {
-            AnimationState.SWIRLING -> {
-                // Fast swirling globe
-                globalRotation += deltaTime * 60f
-                // Transition to coalescing when speaking starts
-                if (isSpeaking) {
-                    animationState = AnimationState.COALESCING
-                }
-            }
-            AnimationState.COALESCING -> {
-                // Slow down rotation as face forms
-                globalRotation += deltaTime * 60f * (1f - coalescenceProgress)
-                // Fast coalescence (0.8 seconds to form face)
-                coalescenceProgress = (coalescenceProgress + deltaTime * 1.25f).coerceAtMost(1f)
-                if (coalescenceProgress >= 1f) {
-                    animationState = AnimationState.SPEAKING
-                }
-                // If speaking stops during coalescence, still complete the formation
-            }
-            AnimationState.SPEAKING -> {
-                // Very subtle rotation while speaking
-                globalRotation += deltaTime * 2f
-                // Transition to dissolving when speaking stops
-                if (!isSpeaking) {
-                    animationState = AnimationState.DISSOLVING
-                }
-            }
-            AnimationState.DISSOLVING -> {
-                // Speed up rotation as face dissolves
-                globalRotation += deltaTime * 60f * (1f - coalescenceProgress)
-                // Dissolve back to swirl (1.2 seconds)
-                coalescenceProgress = (coalescenceProgress - deltaTime * 0.83f).coerceAtLeast(0f)
-                if (coalescenceProgress <= 0f) {
-                    animationState = AnimationState.SWIRLING
-                }
-                // If speaking starts again during dissolve, go back to coalescing
-                if (isSpeaking) {
-                    animationState = AnimationState.COALESCING
-                }
-            }
-        }
+        // Face impression target
+        targetFaceStrength = if (isSpeaking) 1f else 0f
 
-        // Update breathing (only when face is formed)
-        if (coalescenceProgress > 0.5f) {
-            breathingPhase += deltaTime * 1.5f
-        }
+        // Smooth transition for face appearing/disappearing
+        val transitionSpeed = if (isSpeaking) 3f else 2f  // Faster appear, slower disappear
+        faceImpressionStrength += (targetFaceStrength - faceImpressionStrength) * deltaTime * transitionSpeed
 
-        // Update blinking (only when face is mostly formed)
-        if (coalescenceProgress > 0.8f) {
-            blinkTimer += deltaTime
-            if (blinkTimer > nextBlinkTime) {
-                isBlinking = true
-                blinkTimer = 0f
-                nextBlinkTime = 2f + (Math.random() * 4f).toFloat()
-            }
-            if (isBlinking && blinkTimer > 0.15f) {
-                isBlinking = false
-            }
-        } else {
-            isBlinking = false
-        }
+        // Mouth animation
+        val targetMouth = amplitude * 1.5f  // Amplify for visibility
+        mouthOpenAmount += (targetMouth - mouthOpenAmount) * deltaTime * 12f
 
-        // Update eye movement (only when face is formed)
-        if (coalescenceProgress > 0.9f) {
-            if (timeElapsed > nextEyeMoveTime) {
-                eyeLookTarget[0] = ((Math.random() * 2 - 1) * 0.03f).toFloat()
-                eyeLookTarget[1] = ((Math.random() * 2 - 1) * 0.02f).toFloat()
-                nextEyeMoveTime = timeElapsed + 1.5f + (Math.random() * 3f).toFloat()
-            }
-            eyeLookX += (eyeLookTarget[0] - eyeLookX) * deltaTime * 3f
-            eyeLookY += (eyeLookTarget[1] - eyeLookY) * deltaTime * 3f
-        } else {
-            eyeLookX = 0f
-            eyeLookY = 0f
-        }
-
-        // Update mouth based on amplitude
-        targetMouthOpen = amplitude
-        mouthOpenAmount += (targetMouthOpen - mouthOpenAmount) * deltaTime * 15f
+        // Slow continuous rotation
+        globalRotation += deltaTime * 8f
     }
 
     private fun updatePointPositions() {
@@ -302,79 +192,47 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         sizeBuffer?.clear()
 
         for (i in 0 until pointCount) {
-            val facePoint = facePoints[i]
-            val spherePoint = spherePoints[i]
+            val basePoint = spherePoints[i]
 
-            // Interpolate between sphere and face position
-            var x: Float
-            var y: Float
-            var z: Float
+            // Add swirling motion to base sphere
+            val swirlSpeed = 0.5f
+            val swirlAngle = timeElapsed * swirlSpeed + basePoint[1] * 2f  // Latitude-based swirl
+            val swirlAmount = 0.1f * (1f - faceImpressionStrength * 0.5f)  // Less swirl when face shows
 
-            if (coalescenceProgress < 1f) {
-                // Swirling sphere to face transition
-                val t = easeInOutCubic(coalescenceProgress)
+            // Base position with swirl
+            var x = basePoint[0] + sin(swirlAngle + i * 0.1f) * swirlAmount * basePoint[2]
+            var y = basePoint[1]
+            var z = basePoint[2] + cos(swirlAngle + i * 0.1f) * swirlAmount * basePoint[0]
 
-                // Add spiral motion during transition
-                val spiralAngle = timeElapsed * 2f + i * 0.01f
-                val spiralRadius = 0.3f * (1f - t)
-                val spiralX = cos(spiralAngle) * spiralRadius
-                val spiralZ = sin(spiralAngle) * spiralRadius
+            // Normalize to keep on sphere surface
+            val len = sqrt(x * x + y * y + z * z)
+            x /= len
+            y /= len
+            z /= len
 
-                x = lerp(spherePoint[0] + spiralX, facePoint.x, t)
-                y = lerp(spherePoint[1], facePoint.y, t)
-                z = lerp(spherePoint[2] + spiralZ, facePoint.z, t)
-            } else {
-                x = facePoint.x
-                y = facePoint.y
-                z = facePoint.z
+            // Calculate face displacement for this point
+            // Face is on the +Z side of the sphere (front)
+            val faceDisplacement = calculateFaceDisplacement(x, y, z)
 
-                // Apply face animations
-                when (facePoint.region) {
-                    FaceGeometry.FaceRegion.LEFT_EYE, FaceGeometry.FaceRegion.RIGHT_EYE -> {
-                        // Blinking - flatten eyes
-                        if (isBlinking) {
-                            y = facePoint.y * 0.1f + 0.15f * 0.9f
-                        }
-                        // Eye look offset
-                        x += eyeLookX
-                        y += eyeLookY
-                    }
-                    FaceGeometry.FaceRegion.UPPER_LIP -> {
-                        // Mouth opening - move upper lip up significantly
-                        y += mouthOpenAmount * 0.15f
-                        z += mouthOpenAmount * 0.05f
-                    }
-                    FaceGeometry.FaceRegion.LOWER_LIP -> {
-                        // Mouth opening - move lower lip down significantly
-                        y -= mouthOpenAmount * 0.25f
-                        z += mouthOpenAmount * 0.08f
-                    }
-                    FaceGeometry.FaceRegion.LEFT_EYEBROW, FaceGeometry.FaceRegion.RIGHT_EYEBROW -> {
-                        // Eyebrow raise when speaking
-                        y += mouthOpenAmount * 0.04f
-                    }
-                    else -> {}
-                }
-
-                // Add subtle particle drift for organic feel
-                val drift = sin(timeElapsed * 2f + i * 0.1f) * 0.005f
-                x += drift
-                y += cos(timeElapsed * 1.5f + i * 0.15f) * 0.003f
-            }
+            // Apply face impression - push points outward where face is
+            val displacement = faceDisplacement * faceImpressionStrength
+            x += x * displacement * 0.3f
+            y += y * displacement * 0.3f
+            z += z * displacement * 0.3f
 
             vertexBuffer?.put(x)
             vertexBuffer?.put(y)
             vertexBuffer?.put(z)
 
-            // Calculate color based on region and state
-            val color = calculatePointColor(facePoint, i)
+            // Color - brighter where face features are
+            val color = calculatePointColor(x, y, z, faceDisplacement)
             colorBuffer?.put(color[0])
             colorBuffer?.put(color[1])
             colorBuffer?.put(color[2])
             colorBuffer?.put(color[3])
 
-            // Calculate point size
-            val size = calculatePointSize(facePoint, i)
+            // Size - larger for face features
+            val size = calculatePointSize(faceDisplacement)
             sizeBuffer?.put(size)
         }
 
@@ -383,114 +241,146 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         sizeBuffer?.position(0)
     }
 
-    private fun calculatePointColor(point: FaceGeometry.FacePoint, index: Int): FloatArray {
-        val baseColor = when (point.region) {
-            FaceGeometry.FaceRegion.LEFT_EYE, FaceGeometry.FaceRegion.RIGHT_EYE -> {
-                if (isBlinking) floatArrayOf(0f, 0.5f, 0.5f, 0.3f)
-                else floatArrayOf(0f, 1f, 1f, 1f * point.intensity)
-            }
-            FaceGeometry.FaceRegion.UPPER_LIP, FaceGeometry.FaceRegion.LOWER_LIP -> {
-                // Lips glow brightly when speaking
-                val speakGlow = mouthOpenAmount * 0.5f
-                floatArrayOf(0.4f + speakGlow, 0.9f, 1f, 1f)
-            }
-            FaceGeometry.FaceRegion.LEFT_EYEBROW, FaceGeometry.FaceRegion.RIGHT_EYEBROW -> {
-                floatArrayOf(0f, 0.9f, 0.9f, 0.85f)
-            }
-            FaceGeometry.FaceRegion.NOSE -> {
-                floatArrayOf(0f, 0.85f, 0.95f, 0.7f * point.intensity)
-            }
-            FaceGeometry.FaceRegion.FACE_OUTLINE -> {
-                floatArrayOf(0f, 0.7f, 0.9f, 0.6f * point.intensity)
-            }
-            else -> {
-                floatArrayOf(0f, 0.6f, 0.8f, 0.4f * point.intensity)
+    /**
+     * Calculate how much the face pushes out at this point on the sphere.
+     * Returns 0-1 where higher values = more protrusion.
+     */
+    private fun calculateFaceDisplacement(x: Float, y: Float, z: Float): Float {
+        // Only affect front-facing points (positive Z)
+        if (z < 0) return 0f
+
+        // Project onto face plane (front of sphere)
+        // Face is mapped to roughly -0.5 to 0.5 in X and Y
+        val faceX = x / (z + 0.5f)  // Perspective projection
+        val faceY = y / (z + 0.5f)
+
+        // Check if within face bounds
+        if (faceX.absoluteValue > 0.8f || faceY.absoluteValue > 1.0f) return 0f
+
+        var displacement = 0f
+
+        // Face oval base - slight overall protrusion
+        val inFaceOval = (faceX / 0.6f).pow(2) + (faceY / 0.85f).pow(2) < 1f
+        if (inFaceOval) {
+            displacement = 0.3f * z  // Base face shape, stronger at front
+        }
+
+        // Nose - strongest protrusion
+        val noseX = faceX.absoluteValue
+        val noseY = faceY + 0.1f  // Nose is slightly below center
+        if (noseX < 0.1f && noseY > -0.15f && noseY < 0.2f) {
+            val noseFactor = (1f - noseX / 0.1f) * (1f - (noseY - 0.05f).absoluteValue / 0.2f)
+            displacement = max(displacement, 0.8f * noseFactor * z)
+        }
+
+        // Brow ridge
+        if (faceY > 0.25f && faceY < 0.45f && faceX.absoluteValue < 0.5f) {
+            val browFactor = (1f - (faceY - 0.35f).absoluteValue / 0.1f).coerceIn(0f, 1f)
+            displacement = max(displacement, 0.4f * browFactor * z)
+        }
+
+        // Cheekbones
+        val cheekDist = sqrt((faceX.absoluteValue - 0.35f).pow(2) + (faceY + 0.05f).pow(2))
+        if (cheekDist < 0.2f) {
+            val cheekFactor = 1f - cheekDist / 0.2f
+            displacement = max(displacement, 0.35f * cheekFactor * z)
+        }
+
+        // Lips - protrude and animate with speech
+        val lipY = faceY + 0.45f  // Lips below center
+        val lipX = faceX.absoluteValue
+        if (lipX < 0.25f && lipY.absoluteValue < 0.15f) {
+            val lipFactor = (1f - lipX / 0.25f) * (1f - lipY.absoluteValue / 0.15f)
+            // Mouth opens - upper lip up, lower lip down
+            val mouthOffset = if (lipY > 0) -mouthOpenAmount * 0.1f else mouthOpenAmount * 0.15f
+            val adjustedLipY = lipY + mouthOffset
+            if (adjustedLipY.absoluteValue < 0.15f) {
+                displacement = max(displacement, 0.5f * lipFactor * z)
             }
         }
 
-        // Add shimmer effect
-        val shimmer = (sin(timeElapsed * 3f + index * 0.05f) * 0.5f + 0.5f) * 0.2f
-        baseColor[0] = (baseColor[0] + shimmer).coerceAtMost(1f)
-        baseColor[1] = (baseColor[1] + shimmer * 0.5f).coerceAtMost(1f)
-
-        // During swirling, use more varied colors
-        if (coalescenceProgress < 1f) {
-            val variety = 1f - coalescenceProgress
-            val hueShift = sin(index * 0.1f + timeElapsed) * variety
-            baseColor[0] = (baseColor[0] + hueShift * 0.3f).coerceIn(0f, 1f)
-            baseColor[2] = (baseColor[2] + hueShift * 0.2f).coerceIn(0f, 1f)
+        // Eye sockets - slight INDENT (negative displacement)
+        val leftEyeDist = sqrt((faceX + 0.25f).pow(2) + (faceY - 0.15f).pow(2))
+        val rightEyeDist = sqrt((faceX - 0.25f).pow(2) + (faceY - 0.15f).pow(2))
+        val eyeDist = min(leftEyeDist, rightEyeDist)
+        if (eyeDist < 0.12f) {
+            val eyeFactor = 1f - eyeDist / 0.12f
+            displacement -= 0.15f * eyeFactor * z  // Indent for eyes
         }
 
-        return baseColor
+        // Chin
+        if (faceY < -0.6f && faceX.absoluteValue < 0.2f) {
+            val chinFactor = (1f - (faceY + 0.7f).absoluteValue / 0.1f).coerceIn(0f, 1f)
+            displacement = max(displacement, 0.3f * chinFactor * z)
+        }
+
+        return displacement.coerceIn(-0.2f, 1f)
     }
 
-    private fun calculatePointSize(point: FaceGeometry.FacePoint, index: Int): Float {
-        var size = when (point.region) {
-            FaceGeometry.FaceRegion.LEFT_EYE, FaceGeometry.FaceRegion.RIGHT_EYE -> {
-                if (isBlinking) 2f else 8f * point.intensity
-            }
-            FaceGeometry.FaceRegion.UPPER_LIP, FaceGeometry.FaceRegion.LOWER_LIP -> {
-                // Lips get bigger when mouth opens
-                8f + mouthOpenAmount * 6f
-            }
-            FaceGeometry.FaceRegion.LEFT_EYEBROW, FaceGeometry.FaceRegion.RIGHT_EYEBROW -> 5f
-            FaceGeometry.FaceRegion.NOSE -> 5f * point.intensity
-            FaceGeometry.FaceRegion.FACE_OUTLINE -> 4f
-            else -> 3f * point.intensity
+    private fun calculatePointColor(x: Float, y: Float, z: Float, displacement: Float): FloatArray {
+        // Base swirling color
+        val hue = (timeElapsed * 0.1f + y * 0.5f + x * 0.3f) % 1f
+
+        // Cyan base with slight variation
+        var r = 0f + hue * 0.1f
+        var g = 0.7f + displacement * 0.3f
+        var b = 0.9f + displacement * 0.1f
+        var a = 0.6f + displacement * 0.4f
+
+        // Face features glow brighter
+        if (displacement > 0.3f && faceImpressionStrength > 0.5f) {
+            r += 0.2f * displacement
+            g = min(1f, g + 0.2f)
+            a = min(1f, a + 0.2f)
         }
+
+        // Eye areas glow cyan
+        if (displacement < 0 && faceImpressionStrength > 0.5f) {
+            g = 1f
+            b = 1f
+            a = 1f
+        }
+
+        // Add shimmer
+        val shimmer = sin(timeElapsed * 3f + x * 10f + y * 10f) * 0.1f + 0.1f
+        r += shimmer
+        g += shimmer * 0.5f
+
+        return floatArrayOf(r.coerceIn(0f, 1f), g.coerceIn(0f, 1f), b.coerceIn(0f, 1f), a.coerceIn(0f, 1f))
+    }
+
+    private fun calculatePointSize(displacement: Float): Float {
+        var size = 4f + displacement * 4f  // Larger where face protrudes
 
         // Pulsing effect
-        val pulse = sin(timeElapsed * 4f + index * 0.02f) * 0.2f + 1f
-        size *= pulse
+        size *= 1f + sin(timeElapsed * 2f) * 0.1f
 
-        // Larger points during swirl for visibility
-        if (coalescenceProgress < 1f) {
-            size *= 1f + (1f - coalescenceProgress) * 0.5f
-        }
+        // Smaller when no face
+        size *= 0.7f + faceImpressionStrength * 0.3f
 
-        return size
+        return size.coerceIn(2f, 12f)
     }
 
     private fun renderPoints() {
         GLES20.glUseProgram(shaderProgram)
 
-        // Get attribute/uniform locations
         val positionHandle = GLES20.glGetAttribLocation(shaderProgram, "aPosition")
         val colorHandle = GLES20.glGetAttribLocation(shaderProgram, "aColor")
         val sizeHandle = GLES20.glGetAttribLocation(shaderProgram, "aPointSize")
         val mvpMatrixHandle = GLES20.glGetUniformLocation(shaderProgram, "uMVPMatrix")
 
-        // Pass MVP matrix
         GLES20.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mvpMatrix, 0)
 
-        // Enable vertex arrays
         GLES20.glEnableVertexAttribArray(positionHandle)
         GLES20.glEnableVertexAttribArray(colorHandle)
         GLES20.glEnableVertexAttribArray(sizeHandle)
 
-        // Set vertex data
-        GLES20.glVertexAttribPointer(
-            positionHandle, COORDS_PER_VERTEX,
-            GLES20.GL_FLOAT, false,
-            COORDS_PER_VERTEX * 4, vertexBuffer
-        )
+        GLES20.glVertexAttribPointer(positionHandle, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, COORDS_PER_VERTEX * 4, vertexBuffer)
+        GLES20.glVertexAttribPointer(colorHandle, 4, GLES20.GL_FLOAT, false, 4 * 4, colorBuffer)
+        GLES20.glVertexAttribPointer(sizeHandle, 1, GLES20.GL_FLOAT, false, 4, sizeBuffer)
 
-        GLES20.glVertexAttribPointer(
-            colorHandle, 4,
-            GLES20.GL_FLOAT, false,
-            4 * 4, colorBuffer
-        )
-
-        GLES20.glVertexAttribPointer(
-            sizeHandle, 1,
-            GLES20.GL_FLOAT, false,
-            4, sizeBuffer
-        )
-
-        // Draw points
         GLES20.glDrawArrays(GLES20.GL_POINTS, 0, pointCount)
 
-        // Disable vertex arrays
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(colorHandle)
         GLES20.glDisableVertexAttribArray(sizeHandle)
@@ -499,7 +389,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private fun createShaderProgram(): Int {
         val vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER)
         val fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, FRAGMENT_SHADER)
-
         return GLES20.glCreateProgram().also { program ->
             GLES20.glAttachShader(program, vertexShader)
             GLES20.glAttachShader(program, fragmentShader)
@@ -514,35 +403,14 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         }
     }
 
-    // Utility functions
-    private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
-
-    private fun easeInOutCubic(t: Float): Float {
-        return if (t < 0.5f) {
-            4f * t * t * t
-        } else {
-            1f - (-2f * t + 2f).pow(3) / 2f
-        }
-    }
-
-    /**
-     * Reset animation to swirling state (useful when restarting).
-     */
     fun resetAnimation() {
-        animationState = AnimationState.SWIRLING
-        coalescenceProgress = 0f
-        timeElapsed = 0f
-        globalRotation = 0f
+        faceImpressionStrength = 0f
         isSpeaking = false
         silenceTimer = 0f
     }
 
-    /**
-     * Skip directly to face formed state (useful for testing).
-     */
     fun skipToFace() {
-        animationState = AnimationState.SPEAKING
-        coalescenceProgress = 1f
+        faceImpressionStrength = 1f
         isSpeaking = true
     }
 }
