@@ -13,41 +13,51 @@ import kotlin.random.Random
 
 /**
  * Advanced point cloud renderer with real-time physics simulation
- * and viseme-based lip sync for speech animation.
+ * and text-driven phoneme lip sync for speech animation.
  *
  * Physics: Verlet integration with curl noise turbulence
- * Lip Sync: Amplitude-driven viseme blending
+ * Lip Sync: Text-to-phoneme estimation with proper articulation
  */
 class PointCloudRenderer : GLSurfaceView.Renderer {
 
     // ========== Audio & Speech ==========
     @Volatile var amplitude: Float = 0f
+    @Volatile var currentText: String = ""  // Current word/phrase being spoken
 
     // Viseme system for lip sync
     enum class Viseme {
         NEUTRAL,    // Closed relaxed mouth
-        AA,         // Open (ah, a)
-        EE,         // Wide smile (ee, i)
-        OO,         // Round pursed (oo, u, w)
-        OH,         // Open round (oh, o)
-        FV,         // Lower lip tucked (f, v)
-        MBP,        // Lips pressed (m, b, p)
-        TH,         // Tongue between teeth
-        L           // Tongue up
+        AA,         // Open jaw (ah, father)
+        EE,         // Wide stretched (ee, feet)
+        OO,         // Round pursed (oo, boot)
+        OH,         // Open round (oh, go)
+        AH,         // Neutral open (uh, but)
+        FV,         // Lower lip curls under teeth (f, v)
+        MBP,        // Lips pressed together (m, b, p)
+        TH,         // Tongue visible, lips parted
+        L,          // Tongue up, lips neutral
+        WR,         // Rounded like OO but tighter (w, r)
+        SZ,         // Slight smile, teeth together (s, z)
+        SH,         // Lips slightly protruded (sh, ch, j)
+        KG          // Back tongue, lips neutral (k, g)
     }
 
+    // Phoneme queue for coarticulation
+    private val visemeQueue = ArrayDeque<Pair<Viseme, Float>>()  // viseme + duration
     private var currentViseme = Viseme.NEUTRAL
-    private var targetViseme = Viseme.NEUTRAL
-    private var visemeBlend = 0f
-    private var visemeTimer = 0f
-    private var lastAmplitude = 0f
-    private var amplitudeVelocity = 0f  // For detecting sharp changes
+    private var nextViseme = Viseme.NEUTRAL
+    private var visemeProgress = 0f  // 0-1 progress through current viseme
+    private var visemeDuration = 0.08f
+    private var lastProcessedText = ""
 
-    // Mouth shape parameters (interpolated)
+    // Mouth shape parameters (interpolated with coarticulation)
     private var mouthOpenAmount = 0f
-    private var mouthWideAmount = 0f   // Smile width
-    private var mouthRoundAmount = 0f  // Pursed lips
-    private var lipTuckAmount = 0f     // F/V sounds
+    private var mouthWideAmount = 0f     // Smile width (EE)
+    private var mouthRoundAmount = 0f    // Pursed lips (OO)
+    private var lipClosureAmount = 0f    // Lips pressed together (MBP) - NEW!
+    private var lipTuckAmount = 0f       // Lower lip under teeth (FV)
+    private var lipProtrudeAmount = 0f   // Lips pushed forward (SH)
+    private var jawOpenAmount = 0f       // Jaw drop separate from lips
 
     // ========== Physics Simulation ==========
     private lateinit var positions: FloatArray      // Current positions (x,y,z per point)
@@ -225,77 +235,209 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
         // Slow rotation
         globalRotation += deltaTime * 6f
-
-        // Track amplitude velocity for viseme detection
-        amplitudeVelocity = (amplitude - lastAmplitude) / deltaTime.coerceAtLeast(0.001f)
-        lastAmplitude = amplitude
     }
 
     private fun updateVisemes(deltaTime: Float) {
-        visemeTimer += deltaTime
+        // Process new text into viseme queue
+        if (currentText != lastProcessedText && currentText.isNotEmpty()) {
+            processTextToVisemes(currentText)
+            lastProcessedText = currentText
+        }
 
-        // Determine target viseme based on amplitude patterns
-        if (isSpeaking && amplitude > 0.02f) {
-            targetViseme = when {
-                // Sharp attack = plosive (B, P, M)
-                amplitudeVelocity > 2f && amplitude > 0.3f -> Viseme.MBP
-                // High sustained = open vowel (AA)
-                amplitude > 0.5f -> Viseme.AA
-                // Medium with variation = EE or OH
-                amplitude > 0.3f -> if (sin(visemeTimer * 8f) > 0) Viseme.EE else Viseme.OH
-                // Lower amplitude = rounded sounds
-                amplitude > 0.15f -> Viseme.OO
-                // Quiet fricatives
-                amplitude > 0.05f -> if (sin(visemeTimer * 12f) > 0.5f) Viseme.FV else Viseme.TH
-                else -> Viseme.NEUTRAL
-            }
+        // Advance through viseme queue
+        if (isSpeaking && visemeQueue.isNotEmpty()) {
+            visemeProgress += deltaTime / visemeDuration
 
-            // Vary visemes more naturally with pseudo-random timing
-            if (visemeTimer > 0.08f + Random.nextFloat() * 0.06f) {
-                currentViseme = targetViseme
-                visemeTimer = 0f
+            if (visemeProgress >= 1f) {
+                visemeProgress = 0f
+                currentViseme = if (visemeQueue.isNotEmpty()) {
+                    val (viseme, duration) = visemeQueue.removeFirst()
+                    visemeDuration = duration
+                    viseme
+                } else {
+                    Viseme.NEUTRAL
+                }
+                // Lookahead for coarticulation
+                nextViseme = visemeQueue.firstOrNull()?.first ?: Viseme.NEUTRAL
             }
-        } else {
-            targetViseme = Viseme.NEUTRAL
+        } else if (!isSpeaking) {
             currentViseme = Viseme.NEUTRAL
+            nextViseme = Viseme.NEUTRAL
+            visemeQueue.clear()
         }
 
-        // Calculate mouth shape parameters from viseme
-        val targetOpen = when (currentViseme) {
-            Viseme.AA -> 1.0f
-            Viseme.OH -> 0.7f
-            Viseme.EE -> 0.3f
-            Viseme.OO -> 0.4f
-            Viseme.FV -> 0.15f
-            Viseme.TH -> 0.2f
-            Viseme.L -> 0.25f
-            Viseme.MBP -> 0.0f
-            Viseme.NEUTRAL -> 0.0f
-        }
+        // Calculate mouth shape with coarticulation blending
+        // Blend current viseme with next viseme in final 30% of duration
+        val coarticulationBlend = if (visemeProgress > 0.7f) {
+            (visemeProgress - 0.7f) / 0.3f
+        } else 0f
 
-        val targetWide = when (currentViseme) {
-            Viseme.EE -> 1.0f
-            Viseme.AA -> 0.3f
-            else -> 0.0f
-        }
+        val currentParams = getVisemeParams(currentViseme)
+        val nextParams = getVisemeParams(nextViseme)
 
-        val targetRound = when (currentViseme) {
-            Viseme.OO -> 1.0f
-            Viseme.OH -> 0.6f
-            else -> 0.0f
-        }
+        // Target values with coarticulation
+        val targetOpen = lerp(currentParams.open, nextParams.open, coarticulationBlend)
+        val targetWide = lerp(currentParams.wide, nextParams.wide, coarticulationBlend)
+        val targetRound = lerp(currentParams.round, nextParams.round, coarticulationBlend)
+        val targetClosure = lerp(currentParams.closure, nextParams.closure, coarticulationBlend)
+        val targetTuck = lerp(currentParams.tuck, nextParams.tuck, coarticulationBlend)
+        val targetProtrude = lerp(currentParams.protrude, nextParams.protrude, coarticulationBlend)
+        val targetJaw = lerp(currentParams.jaw, nextParams.jaw, coarticulationBlend)
 
-        val targetTuck = when (currentViseme) {
-            Viseme.FV -> 1.0f
-            else -> 0.0f
-        }
-
-        // Smooth interpolation
-        val blendSpeed = 20f
+        // Smooth interpolation with faster response for closure (bilabials are quick)
+        val blendSpeed = 25f
+        val closureSpeed = 40f  // Faster for sharp bilabial closure
         mouthOpenAmount += (targetOpen - mouthOpenAmount) * deltaTime * blendSpeed
         mouthWideAmount += (targetWide - mouthWideAmount) * deltaTime * blendSpeed
         mouthRoundAmount += (targetRound - mouthRoundAmount) * deltaTime * blendSpeed
-        lipTuckAmount += (targetTuck - lipTuckAmount) * deltaTime * blendSpeed
+        lipClosureAmount += (targetClosure - lipClosureAmount) * deltaTime * closureSpeed
+        lipTuckAmount += (targetTuck - lipTuckAmount) * deltaTime * closureSpeed
+        lipProtrudeAmount += (targetProtrude - lipProtrudeAmount) * deltaTime * blendSpeed
+        jawOpenAmount += (targetJaw - jawOpenAmount) * deltaTime * blendSpeed
+    }
+
+    // Viseme parameter bundle
+    private data class VisemeParams(
+        val open: Float = 0f,      // Lip separation (vertical)
+        val wide: Float = 0f,      // Smile stretch (horizontal)
+        val round: Float = 0f,     // Lip pursing
+        val closure: Float = 0f,   // Lips pressed (1 = fully closed/pressed)
+        val tuck: Float = 0f,      // Lower lip under teeth
+        val protrude: Float = 0f,  // Lips pushed forward
+        val jaw: Float = 0f        // Jaw drop
+    )
+
+    private fun getVisemeParams(viseme: Viseme): VisemeParams = when (viseme) {
+        Viseme.NEUTRAL -> VisemeParams()
+        Viseme.AA -> VisemeParams(open = 1.0f, wide = 0.3f, jaw = 1.0f)  // "ah" - wide open
+        Viseme.EE -> VisemeParams(open = 0.2f, wide = 1.0f, jaw = 0.3f)  // "ee" - wide smile
+        Viseme.OO -> VisemeParams(open = 0.3f, round = 1.0f, protrude = 0.7f, jaw = 0.4f)  // "oo" - pursed
+        Viseme.OH -> VisemeParams(open = 0.7f, round = 0.6f, jaw = 0.7f)  // "oh" - open round
+        Viseme.AH -> VisemeParams(open = 0.5f, jaw = 0.5f)  // "uh" - neutral open
+        Viseme.FV -> VisemeParams(open = 0.1f, tuck = 1.0f, jaw = 0.2f)  // f/v - lip tuck
+        Viseme.MBP -> VisemeParams(closure = 1.0f)  // m/b/p - LIPS PRESSED TOGETHER
+        Viseme.TH -> VisemeParams(open = 0.25f, jaw = 0.2f)  // th - slight open
+        Viseme.L -> VisemeParams(open = 0.3f, jaw = 0.35f)  // l - neutral open
+        Viseme.WR -> VisemeParams(open = 0.2f, round = 0.8f, protrude = 0.9f)  // w/r - tight round
+        Viseme.SZ -> VisemeParams(open = 0.05f, wide = 0.4f)  // s/z - teeth together, slight smile
+        Viseme.SH -> VisemeParams(open = 0.15f, round = 0.3f, protrude = 0.5f)  // sh/ch - protruded
+        Viseme.KG -> VisemeParams(open = 0.4f, jaw = 0.4f)  // k/g - back tongue
+    }
+
+    /**
+     * Convert text to a sequence of visemes with durations.
+     * Uses grapheme-to-phoneme estimation.
+     */
+    private fun processTextToVisemes(text: String) {
+        visemeQueue.clear()
+        val lowerText = text.lowercase()
+
+        var i = 0
+        while (i < lowerText.length) {
+            val (viseme, consumed) = mapCharToViseme(lowerText, i)
+            if (viseme != null) {
+                // Duration based on phoneme type
+                val duration = when (viseme) {
+                    Viseme.MBP -> 0.06f  // Plosives are quick
+                    Viseme.FV, Viseme.SZ, Viseme.TH -> 0.08f  // Fricatives medium
+                    Viseme.AA, Viseme.OH -> 0.12f  // Open vowels longer
+                    else -> 0.09f
+                }
+                visemeQueue.addLast(viseme to duration)
+            }
+            i += consumed
+        }
+
+        // Start immediately if queue was empty
+        if (visemeQueue.isNotEmpty() && currentViseme == Viseme.NEUTRAL) {
+            val (viseme, duration) = visemeQueue.removeFirst()
+            currentViseme = viseme
+            visemeDuration = duration
+            nextViseme = visemeQueue.firstOrNull()?.first ?: Viseme.NEUTRAL
+            visemeProgress = 0f
+        }
+    }
+
+    /**
+     * Map character(s) at position to viseme.
+     * Returns (viseme, charsConsumed).
+     */
+    private fun mapCharToViseme(text: String, pos: Int): Pair<Viseme?, Int> {
+        val c = text[pos]
+        val next = text.getOrNull(pos + 1)
+        val prev = text.getOrNull(pos - 1)
+
+        // Two-character combinations first
+        if (next != null) {
+            val digraph = "$c$next"
+            when (digraph) {
+                "th" -> return Viseme.TH to 2
+                "sh", "ch" -> return Viseme.SH to 2
+                "wh" -> return Viseme.WR to 2
+                "ph" -> return Viseme.FV to 2
+                "oo", "ou" -> return Viseme.OO to 2
+                "ee", "ea", "ie" -> return Viseme.EE to 2
+                "oa", "ow" -> return Viseme.OH to 2
+                "ai", "ay", "ei", "ey" -> return Viseme.EE to 2
+                "oi", "oy" -> return Viseme.OH to 2  // Starts with OH
+                "au", "aw" -> return Viseme.OH to 2
+                "ng" -> return Viseme.KG to 2
+                "qu" -> return Viseme.WR to 2
+            }
+        }
+
+        // Single characters
+        return when (c) {
+            // Vowels
+            'a' -> {
+                // Context: "a" before consonant often = AA, "a" at end = AH
+                if (next in listOf('l', 'r', 'w')) Viseme.OH else Viseme.AA
+            } to 1
+            'e' -> {
+                if (next == null || next == ' ') null to 1  // Silent e
+                else Viseme.EE to 1
+            }
+            'i', 'y' -> Viseme.EE to 1
+            'o' -> {
+                if (next == 'n' || next == 'm') Viseme.AH else Viseme.OH
+            } to 1
+            'u' -> {
+                if (prev == 'q') null to 1  // Already handled in "qu"
+                else Viseme.OO to 1
+            }
+
+            // Bilabials - LIPS MUST CLOSE
+            'm', 'b', 'p' -> Viseme.MBP to 1
+
+            // Labiodentals - lip tucks under teeth
+            'f', 'v' -> Viseme.FV to 1
+
+            // Alveolar fricatives
+            's', 'z' -> Viseme.SZ to 1
+
+            // Rounded consonants
+            'w', 'r' -> Viseme.WR to 1
+
+            // Alveolar stops/nasals
+            't', 'd', 'n' -> Viseme.L to 1
+
+            // Velar stops
+            'k', 'g', 'c' -> {
+                if (c == 'c' && next in listOf('e', 'i', 'y')) Viseme.SZ to 1  // Soft c
+                else Viseme.KG to 1
+            }
+
+            // Others with lip involvement
+            'l' -> Viseme.L to 1
+            'j' -> Viseme.SH to 1
+            'h' -> Viseme.AH to 1  // Glottal, use neutral open
+            'x' -> Viseme.KG to 1  // "ks"
+
+            // Skip spaces/punctuation
+            ' ', ',', '.', '!', '?', '-', '\'' -> null to 1
+
+            else -> null to 1
+        }
     }
 
     // ========== Physics Simulation ==========
@@ -540,6 +682,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         }
 
         // === LIPS - Full, pillowy (Angelina's most famous feature) ===
+        // With proper articulation physics for all visemes
         val lipCenterY = -0.35f
         val lipWidth = 0.22f
         val upperLipHeight = 0.035f
@@ -548,40 +691,101 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         val lipY = faceY - lipCenterY
         val lipXNorm = faceX.absoluteValue / lipWidth
 
-        if (lipXNorm < 1f) {
-            // Viseme adjustments
-            val openAmount = mouthOpenAmount * 0.15f
-            val wideStretch = 1f + mouthWideAmount * 0.3f
-            val roundCompress = 1f - mouthRoundAmount * 0.25f
+        if (lipXNorm < 1.2f) {  // Slightly wider check for protrusion
+            // === Articulation parameters ===
+            // Jaw drop opens space between lips
+            val jawDrop = jawOpenAmount * 0.08f
+            // Lip opening (separate from jaw)
+            val lipOpen = mouthOpenAmount * 0.12f
+            // Wide stretch for EE
+            val wideStretch = 1f + mouthWideAmount * 0.35f
+            // Round compression for OO
+            val roundCompress = 1f - mouthRoundAmount * 0.3f
+            // Forward protrusion for OO/WR
+            val protrudeZ = lipProtrudeAmount * 0.15f
+            // BILABIAL CLOSURE - lips press together (M/B/P)
+            val closurePress = lipClosureAmount * 0.12f  // Moves lips toward center
 
             val effectiveLipWidth = lipWidth * wideStretch * roundCompress
             val effectiveLipXNorm = faceX.absoluteValue / effectiveLipWidth
 
             if (effectiveLipXNorm < 1f) {
-                // Upper lip with cupid's bow
-                val upperLipY = lipY + openAmount
-                if (upperLipY > 0 && upperLipY < upperLipHeight * (1.5f + openAmount * 3f)) {
+                // === UPPER LIP ===
+                // For M/B/P: upper lip moves DOWN toward center
+                // For open sounds: upper lip moves UP
+                val upperLipOffset = if (lipClosureAmount > 0.5f) {
+                    -closurePress  // Move DOWN for closure
+                } else {
+                    lipOpen + jawDrop * 0.3f  // Move UP for opening
+                }
+
+                val upperLipYPos = lipY + upperLipOffset
+                val upperLipThickness = upperLipHeight * (1.2f + lipOpen * 2f)
+
+                if (upperLipYPos > -closurePress && upperLipYPos < upperLipThickness) {
+                    // Cupid's bow shape
                     val cupidsBow = if (effectiveLipXNorm < 0.3f) {
                         0.7f + 0.3f * cos(effectiveLipXNorm / 0.3f * PI.toFloat())
                     } else {
-                        0.7f * (1f - (effectiveLipXNorm - 0.3f) / 0.7f)
+                        0.7f * (1f - (effectiveLipXNorm - 0.3f) / 0.7f).coerceAtLeast(0f)
                     }
                     val upperProfile = cupidsBow * (1f - effectiveLipXNorm.pow(2))
-                    displacement = max(displacement, 0.5f * upperProfile * zFactor)
+
+                    // Base displacement + protrusion
+                    var upperDisp = 0.5f * upperProfile * zFactor + protrudeZ
+
+                    // For closure, ADD displacement to make lips bulge slightly when pressed
+                    if (lipClosureAmount > 0.5f) {
+                        upperDisp += 0.1f * lipClosureAmount * (1f - effectiveLipXNorm)
+                    }
+
+                    displacement = max(displacement, upperDisp)
                 }
 
-                // Lower lip - fuller, pillowy
-                val lowerLipY = lipY - openAmount * 1.3f
-                if (lowerLipY < 0 && lowerLipY > -lowerLipHeight * (2f + openAmount * 4f)) {
-                    val lowerProfile = cos(effectiveLipXNorm * PI.toFloat() / 2).pow(1.3f)
-                    val lowerFullness = 1f - (lowerLipY / (-lowerLipHeight * 2f)).pow(2)
-                    var lowerDisp = 0.6f * lowerProfile * lowerFullness.coerceIn(0f, 1f) * zFactor
+                // === LOWER LIP ===
+                // For M/B/P: lower lip moves UP toward center
+                // For F/V: lower lip curls UP AND INWARD (under upper teeth)
+                // For open sounds: lower lip moves DOWN
+                val lowerLipOffset = when {
+                    lipClosureAmount > 0.5f -> closurePress  // Move UP for closure
+                    lipTuckAmount > 0.3f -> lipTuckAmount * 0.06f  // Slight UP for tuck
+                    else -> -(lipOpen * 1.3f + jawDrop)  // Move DOWN for opening
+                }
 
-                    // Lip tuck for F/V sounds
-                    if (lipTuckAmount > 0.1f) {
-                        lowerDisp *= (1f - lipTuckAmount * 0.6f)
+                val lowerLipYPos = lipY + lowerLipOffset
+                val lowerLipThickness = lowerLipHeight * (1.5f + lipOpen * 3f)
+
+                if (lowerLipYPos < closurePress && lowerLipYPos > -lowerLipThickness) {
+                    val lowerProfile = cos(effectiveLipXNorm * PI.toFloat() / 2).pow(1.3f)
+                    val lowerFullness = (1f - (lowerLipYPos / (-lowerLipThickness)).pow(2)).coerceIn(0f, 1f)
+
+                    var lowerDisp = 0.6f * lowerProfile * lowerFullness * zFactor + protrudeZ
+
+                    // === F/V ARTICULATION - Lower lip curls INWARD under upper teeth ===
+                    if (lipTuckAmount > 0.3f) {
+                        // Reduce forward displacement (lip curls back)
+                        lowerDisp *= (1f - lipTuckAmount * 0.7f)
+                        // Pull lip inward (negative Z)
+                        lowerDisp -= lipTuckAmount * 0.08f * lowerProfile
                     }
+
+                    // For closure, ADD displacement for pressed bulge
+                    if (lipClosureAmount > 0.5f) {
+                        lowerDisp += 0.12f * lipClosureAmount * (1f - effectiveLipXNorm)
+                    }
+
                     displacement = max(displacement, lowerDisp)
+                }
+
+                // === BILABIAL PRESSED SEAM ===
+                // When lips close, create a slight ridge where they meet
+                if (lipClosureAmount > 0.7f) {
+                    val seamY = lipY.absoluteValue
+                    if (seamY < 0.02f) {
+                        val seamFactor = (1f - seamY / 0.02f) * lipClosureAmount
+                        val seamProfile = (1f - effectiveLipXNorm.pow(2))
+                        displacement = max(displacement, 0.55f * seamFactor * seamProfile * zFactor)
+                    }
                 }
             }
         }
@@ -733,8 +937,19 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         faceImpressionStrength = 0f
         isSpeaking = false
         silenceTimer = 0f
+        // Reset all mouth shape parameters
         mouthOpenAmount = 0f
+        mouthWideAmount = 0f
+        mouthRoundAmount = 0f
+        lipClosureAmount = 0f
+        lipTuckAmount = 0f
+        lipProtrudeAmount = 0f
+        jawOpenAmount = 0f
+        // Reset viseme state
         currentViseme = Viseme.NEUTRAL
+        nextViseme = Viseme.NEUTRAL
+        visemeQueue.clear()
+        lastProcessedText = ""
     }
 
     fun skipToFace() {
