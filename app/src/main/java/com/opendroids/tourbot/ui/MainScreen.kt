@@ -58,14 +58,17 @@ fun MainScreen(
                     modifier = Modifier.padding(16.dp)
                 )
 
-                // 3D Point Cloud Face
+                // 3D Point Cloud Face with text-driven lip sync
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(32.dp)
                 ) {
-                    PointCloudFace(amplitude = amplitude)
+                    PointCloudFace(
+                        amplitude = amplitude,
+                        captionText = captionText
+                    )
                 }
 
                 // Captions

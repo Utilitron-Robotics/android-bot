@@ -14,15 +14,17 @@ import androidx.lifecycle.LifecycleEventObserver
  * Jetpack Compose wrapper for the 3D point cloud face animation.
  *
  * Renders a swirling globe of particles that coalesces into a female face
- * and animates mouth movements synced to audio amplitude.
+ * with text-driven phoneme lip sync for realistic speech animation.
  *
  * @param amplitude Audio amplitude value (0-15000 range from AudioPlayer)
+ * @param captionText Current word/phrase being spoken for phoneme estimation
  * @param modifier Compose modifier for layout
  * @param skipIntro If true, skips the swirling intro and shows face immediately
  */
 @Composable
 fun PointCloudFace(
     amplitude: Int,
+    captionText: String = "",
     modifier: Modifier = Modifier,
     skipIntro: Boolean = false
 ) {
@@ -38,6 +40,11 @@ fun PointCloudFace(
     LaunchedEffect(amplitude) {
         val normalized = (amplitude / 5000f).coerceIn(0f, 1f)
         renderer.amplitude = normalized
+    }
+
+    // Pass current text to renderer for phoneme-based lip sync
+    LaunchedEffect(captionText) {
+        renderer.currentText = captionText
     }
 
     // Skip intro if requested
