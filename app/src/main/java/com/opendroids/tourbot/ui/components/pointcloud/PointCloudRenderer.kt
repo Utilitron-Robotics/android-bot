@@ -366,9 +366,9 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     }
 
     private fun mapCharToViseme(text: String, pos: Int): Pair<Viseme?, Int> {
-        val c = text[pos]
-        val next = text.getOrNull(pos + 1)
-        val prev = text.getOrNull(pos - 1)
+        val c: Char = text[pos]
+        val next: Char? = text.getOrNull(pos + 1)
+        val prev: Char? = text.getOrNull(pos - 1)
 
         if (next != null) {
             val digraph = "$c$next"
@@ -389,7 +389,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         }
 
         return when (c) {
-            'a' -> (if (next in listOf('l', 'r', 'w')) Viseme.OH else Viseme.AA) to 1
+            'a' -> (if (next == 'l' || next == 'r' || next == 'w') Viseme.OH else Viseme.AA) to 1
             'e' -> (if (next == null || next == ' ') null else Viseme.EE) to 1
             'i', 'y' -> Viseme.EE to 1
             'o' -> (if (next == 'n' || next == 'm') Viseme.AH else Viseme.OH) to 1
@@ -399,7 +399,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             's', 'z' -> Viseme.SZ to 1
             'w', 'r' -> Viseme.WR to 1
             't', 'd', 'n' -> Viseme.L to 1
-            'k', 'g', 'c' -> (if (c == 'c' && next in listOf('e', 'i', 'y')) Viseme.SZ else Viseme.KG) to 1
+            'k', 'g', 'c' -> (if (c == 'c' && (next == 'e' || next == 'i' || next == 'y')) Viseme.SZ else Viseme.KG) to 1
             'l' -> Viseme.L to 1
             'j' -> Viseme.SH to 1
             'h' -> Viseme.AH to 1
