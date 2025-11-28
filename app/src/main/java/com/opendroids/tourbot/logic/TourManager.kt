@@ -14,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -28,8 +29,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -38,6 +42,7 @@ private const val MAX_RECONNECTION_ATTEMPTS = 3
 private const val RECONNECTION_DELAY_MS = 2000L
 private const val AUDIO_PLAYBACK_TIMEOUT_MS = 120_000L // 2 minutes
 private const val MAX_IDLE_MESSAGES = 50
+private const val AUTO_RESET_DELAY_MS = 5000L // Reset to Idle 5 seconds after completion
 
 @Singleton
 class TourManager @Inject constructor(
@@ -52,7 +57,12 @@ class TourManager @Inject constructor(
     val tourState: StateFlow<TourState> = _tourState.asStateFlow()
 
     private var tourJob: Job? = null
-    private val tourScope = CoroutineScope(Dispatchers.Main)
+    // Use SupervisorJob so child failures don't cancel the scope
+    private val tourScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // Guard against double-execution of startTour()
+    private val isStartingTour = AtomicBoolean(false)
+    private val tourMutex = Mutex()
 
     // Shared flow for status updates to handle single subscription and avoid stale states
     private var statusCollectionJob: Job? = null
@@ -66,12 +76,34 @@ class TourManager @Inject constructor(
         .stateIn(tourScope, SharingStarted.Eagerly, emptyList())
 
     fun startTour() {
-        tourJob?.cancel() 
-        _tourState.value = TourState.Idle
+        // Guard against double-tap / rapid multiple calls
+        if (!isStartingTour.compareAndSet(false, true)) {
+            Log.w(TAG, "⚠️ startTour() called while already starting - ignoring duplicate call")
+            return
+        }
+
+        // If a tour is actively running (not idle/completed/error), ignore the request
+        val currentState = _tourState.value
+        if (currentState !is TourState.Idle &&
+            currentState !is TourState.Completed &&
+            currentState !is TourState.Error) {
+            Log.w(TAG, "⚠️ Tour already in progress (state: $currentState) - ignoring start request")
+            isStartingTour.set(false)
+            return
+        }
 
         Log.i(TAG, "🎬 Tour start requested.")
+
+        // Cancel any previous tour job that might be lingering
+        tourJob?.cancel()
+        _tourState.value = TourState.Idle
+
         tourJob = tourScope.launch {
-            runTour()
+            try {
+                runTour()
+            } finally {
+                isStartingTour.set(false)
+            }
         }
     }
 
@@ -162,10 +194,15 @@ class TourManager @Inject constructor(
         _tourState.value = TourState.Completed
         audioPlayer.speak("Tour completed.")
         Log.i(TAG, "✅ TOUR COMPLETED")
-        
+
         // Disconnect after successful completion (matches Python)
         cleanupAndDisconnect()
         Log.i(TAG, "Disconnected from robot after tour completion")
+
+        // Auto-reset to Idle after a brief display of completion status
+        delay(AUTO_RESET_DELAY_MS)
+        _tourState.value = TourState.Idle
+        Log.i(TAG, "Tour state reset to Idle")
 
     } catch (e: CancellationException) {
         // Tour cancelled by user - matches Python's asyncio.CancelledError handler
@@ -334,6 +371,13 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
 
     _tourState.value = TourState.Speaking(waypoint)
 
+    // Apply pre-speak delay from settings (allows robot to settle before speaking)
+    val preSpeakDelayMs = tourConfigRepository.preSpeakDelay.first()
+    if (preSpeakDelayMs > 0) {
+        Log.d(TAG, "Pre-speak delay: ${preSpeakDelayMs}ms")
+        delay(preSpeakDelayMs.toLong())
+    }
+
     try {
         withTimeout(AUDIO_PLAYBACK_TIMEOUT_MS) {
             if (waypoint.audioResId != 0) {
@@ -449,12 +493,23 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
 
     private suspend fun createWaypoint(id: String): Waypoint? {
         return try {
-            val script = tourConfigRepository.getScript(id) // Get script from repository
+            val script = tourConfigRepository.getScript(id)
             val resId = context.resources.getIdentifier(id.lowercase(), "raw", context.packageName)
-            if (resId == 0) Log.w(TAG, "Audio resource not found for: $id")
+
+            if (resId == 0) {
+                Log.w(TAG, "⚠️ DEPLOYMENT WARNING: Audio resource 'R.raw.${id.lowercase()}' not found!")
+                Log.w(TAG, "   Expected file: app/src/main/res/raw/${id.lowercase()}.wav")
+                Log.w(TAG, "   Falling back to TTS for waypoint '$id'")
+            }
+
+            if (script.isBlank() || script.startsWith("Script for")) {
+                Log.w(TAG, "⚠️ DEPLOYMENT WARNING: Script not found for waypoint '$id'")
+                Log.w(TAG, "   Expected file: app/src/main/assets/tour_scripts/$id.txt")
+            }
+
             Waypoint(id, script.trim(), resId)
         } catch (e: IOException) {
-            Log.e(TAG, "Error loading assets for waypoint $id", e)
+            Log.e(TAG, "❌ Error loading assets for waypoint $id", e)
             null
         }
     }

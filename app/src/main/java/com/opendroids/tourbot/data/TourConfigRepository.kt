@@ -6,7 +6,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +16,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "tour_config")
+private const val WAYPOINT_DELIMITER = "|"
 
 @Singleton
 class TourConfigRepository @Inject constructor(
@@ -24,7 +24,8 @@ class TourConfigRepository @Inject constructor(
 ) {
     // --- Keys ---
     private val preSpeakDelayKey = intPreferencesKey("pre_speak_delay_ms")
-    private val waypointListKey = stringSetPreferencesKey("waypoint_list")
+    // Changed from stringSetPreferencesKey to stringPreferencesKey to preserve order
+    private val waypointListKey = stringPreferencesKey("waypoint_list_ordered")
     private fun scriptKey(waypointId: String) = stringPreferencesKey("script_$waypointId")
 
     // --- Defaults ---
@@ -49,15 +50,12 @@ class TourConfigRepository @Inject constructor(
 
     // This flow provides the ordered list of waypoints for the tour.
     val waypointIds: Flow<List<String>> = context.dataStore.data.map { preferences ->
-        // For this version, we will use the hardcoded default list to ensure correctness.
-        // The logic for loading from DataStore is preserved but defaults to the correct ordered list.
-        val savedWaypoints = preferences[waypointListKey]
-        if (savedWaypoints == null || savedWaypoints.isEmpty()) {
+        val savedWaypointsString = preferences[waypointListKey]
+        if (savedWaypointsString.isNullOrBlank()) {
             defaultWaypoints
         } else {
-            // If you use the control panel to save, it will use that order.
-            // To restore default order, clear app data or implement a "reset" button.
-            savedWaypoints.toList() 
+            // Parse the delimiter-separated string back to ordered list
+            savedWaypointsString.split(WAYPOINT_DELIMITER).filter { it.isNotBlank() }
         }
     }
 
@@ -70,22 +68,38 @@ class TourConfigRepository @Inject constructor(
 
     suspend fun addWaypoint(id: String) {
         context.dataStore.edit { settings ->
-            val currentWaypoints = settings[waypointListKey] ?: emptySet()
-            settings[waypointListKey] = currentWaypoints + id
+            val currentWaypointsString = settings[waypointListKey] ?: ""
+            val currentWaypoints = if (currentWaypointsString.isBlank()) {
+                mutableListOf()
+            } else {
+                currentWaypointsString.split(WAYPOINT_DELIMITER).toMutableList()
+            }
+            if (!currentWaypoints.contains(id)) {
+                currentWaypoints.add(id)
+                settings[waypointListKey] = currentWaypoints.joinToString(WAYPOINT_DELIMITER)
+            }
         }
     }
 
     suspend fun removeWaypoint(id: String) {
         context.dataStore.edit { settings ->
-            val currentWaypoints = settings[waypointListKey] ?: emptySet()
-            settings[waypointListKey] = currentWaypoints - id
+            val currentWaypointsString = settings[waypointListKey] ?: ""
+            val currentWaypoints = currentWaypointsString.split(WAYPOINT_DELIMITER)
+                .filter { it.isNotBlank() && it != id }
+            settings[waypointListKey] = currentWaypoints.joinToString(WAYPOINT_DELIMITER)
         }
     }
 
     suspend fun saveWaypoints(waypoints: List<String>) {
         context.dataStore.edit { settings ->
-            // Saving preserves the order from the UI drag-and-drop feature.
-            settings[waypointListKey] = waypoints.toSet()
+            // Store as delimiter-separated string to preserve order
+            settings[waypointListKey] = waypoints.joinToString(WAYPOINT_DELIMITER)
+        }
+    }
+
+    suspend fun resetToDefaults() {
+        context.dataStore.edit { settings ->
+            settings.remove(waypointListKey)
         }
     }
 

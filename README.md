@@ -1,39 +1,58 @@
-# TourBot - Native Android Edition
+# TourBot - Native Android Service Droid Application
 
-🚀 **The TourBot project has migrated to a Native Android Application.**
+A Kotlin/Jetpack Compose Android application for service droids, interactive kiosks, and tour guide robots. Designed to run on Android tablets mounted on robot bases like the Tibo.
 
-This repository contains the source code for the TourBot application, now completely rewritten in Kotlin/Jetpack Compose to run directly on the robot's tablet. This architecture simplifies deployment, improves UI responsiveness, and removes the need for an intermediate Python server.
+## Features
 
-## 📱 Android Project
+- **Animated Robot Face**: Point cloud 3D face with phoneme-based lip sync
+- **Tour Management**: Waypoint navigation with audio narration
+- **Multi-Base Support**: Works with Tibo, robots with Orin Nano, Raspberry Pi bases
+- **WebSocket Communication**: Real-time robot control via ROS bridge
+- **Test Mode**: Full simulation for development without robot hardware
 
-The complete Android project is located in the [`android/`](android/) directory.
+## Quick Start
 
-**Quick Links:**
-*   [**Getting Started & Architecture**](android/README.md) - How to build and run the app.
-*   [**Switching to Real Robot**](android/HANDOFF_TO_REAL.md) - Instructions for moving from simulation to real hardware.
-*   [**Deployment Script**](android/deploy.sh) - Automated build and install script.
+1. **Open in Android Studio:**
+   Open the project root folder in Android Studio (Ladybug or newer recommended).
 
-## 🐍 Legacy Python Version
+2. **Build & Deploy:**
+   ```bash
+   ./deploy.sh
+   ```
+   Or use Android Studio's Run button.
 
-The original Python/FastAPI implementation has been archived. If you need to reference the original Python logic, adapters, or web UI, please access the **legacy-python** branch:
+3. **Test Mode:**
+   The app starts in test mode by default. Use the Control Panel to toggle between test and real robot modes.
 
-👉 **[Access Legacy Python Code (Branch: legacy-python)](../../tree/legacy-python)**
+## Documentation
 
-## 🛠️ Development
+- [**HANDOFF_TO_REAL.md**](HANDOFF_TO_REAL.md) - Instructions for connecting to real robot hardware
+- [**ANDROID_MIGRATION_PLAN.md**](ANDROID_MIGRATION_PLAN.md) - Architecture documentation
+- [**PRODUCTION_READINESS_REVIEW.md**](PRODUCTION_READINESS_REVIEW.md) - Codebase review and deployment checklist
 
-1.  **Open in Android Studio:**
-    Open the `android` folder as an existing project in Android Studio (Ladybug or newer recommended).
-
-2.  **Build & Deploy:**
-    You can build via Android Studio or use the included helper script:
-    ```bash
-    ./android/deploy.sh
-    ```
-
-## 🤖 Robot Configuration
+## Robot Configuration
 
 The app uses WebSockets to communicate with the robot base (ROS bridge).
-By default, it is configured for the Android Emulator (`ws://10.0.2.2:9090`).
 
-**To connect to a real robot:**
-Follow the instructions in [**HANDOFF_TO_REAL.md**](android/HANDOFF_TO_REAL.md).
+| Mode | Default URL | Description |
+|------|-------------|-------------|
+| Emulator | `ws://10.0.2.2:9090` | Connects to localhost on host machine |
+| Real Robot | `ws://10.42.0.1:9090` | Tibo robot default IP |
+
+Configure the robot URL in **Settings** or modify `SettingsManager.kt`.
+
+## Project Structure
+
+```
+app/src/main/java/com/opendroids/tourbot/
+├── data/           # Repository layer, models, settings
+├── di/             # Hilt dependency injection modules
+├── logic/          # TourManager business logic
+├── ui/             # Compose UI, screens, components
+│   └── components/pointcloud/  # 3D face animation
+└── MainActivity.kt
+```
+
+## Security Note
+
+This app uses cleartext WebSocket (`ws://`) for local robot communication. This is intentional for LAN-only robot control. See `network_security_config.xml`.
