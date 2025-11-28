@@ -389,22 +389,11 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         // Single characters
         return when (c) {
             // Vowels
-            'a' -> {
-                // Context: "a" before consonant often = AA, "a" at end = AH
-                if (next in listOf('l', 'r', 'w')) Viseme.OH else Viseme.AA
-            } to 1
-            'e' -> {
-                if (next == null || next == ' ') null to 1  // Silent e
-                else Viseme.EE to 1
-            }
+            'a' -> (if (next in listOf('l', 'r', 'w')) Viseme.OH else Viseme.AA) to 1
+            'e' -> (if (next == null || next == ' ') null else Viseme.EE) to 1
             'i', 'y' -> Viseme.EE to 1
-            'o' -> {
-                if (next == 'n' || next == 'm') Viseme.AH else Viseme.OH
-            } to 1
-            'u' -> {
-                if (prev == 'q') null to 1  // Already handled in "qu"
-                else Viseme.OO to 1
-            }
+            'o' -> (if (next == 'n' || next == 'm') Viseme.AH else Viseme.OH) to 1
+            'u' -> (if (prev == 'q') null else Viseme.OO) to 1
 
             // Bilabials - LIPS MUST CLOSE
             'm', 'b', 'p' -> Viseme.MBP to 1
@@ -422,10 +411,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             't', 'd', 'n' -> Viseme.L to 1
 
             // Velar stops
-            'k', 'g', 'c' -> {
-                if (c == 'c' && next in listOf('e', 'i', 'y')) Viseme.SZ to 1  // Soft c
-                else Viseme.KG to 1
-            }
+            'k', 'g', 'c' -> (if (c == 'c' && next in listOf('e', 'i', 'y')) Viseme.SZ else Viseme.KG) to 1
 
             // Others with lip involvement
             'l' -> Viseme.L to 1
@@ -458,9 +444,9 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             val idx = i * 3
 
             // Current position
-            var x = positions[idx]
-            var y = positions[idx + 1]
-            var z = positions[idx + 2]
+            val x = positions[idx]
+            val y = positions[idx + 1]
+            val z = positions[idx + 2]
 
             // Previous position
             val px = prevPositions[idx]
@@ -585,7 +571,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private fun hash3D(x: Int, y: Int, z: Int): Float {
         var h = x * 374761393 + y * 668265263 + z * 1274126177
         h = (h xor (h shr 13)) * 1274126177
-        return (h and 0x7fffffff) / 2147483647f
+        return (h and 0x7fffffff) / Int.MAX_VALUE.toFloat()
     }
 
     private fun smootherstep(t: Float): Float = t * t * t * (t * (t * 6 - 15) + 10)
@@ -834,7 +820,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                 basePositions[idx], basePositions[idx + 1], basePositions[idx + 2]
             )
 
-            val color = calculatePointColor(x, y, z, displacement)
+            val color = calculatePointColor(x, y, displacement)
             colorBuffer?.put(color[0])
             colorBuffer?.put(color[1])
             colorBuffer?.put(color[2])
@@ -848,7 +834,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         sizeBuffer?.position(0)
     }
 
-    private fun calculatePointColor(x: Float, y: Float, z: Float, displacement: Float): FloatArray {
+    private fun calculatePointColor(x: Float, y: Float, displacement: Float): FloatArray {
         val hue = (timeElapsed * 0.08f + y * 0.3f) % 1f
 
         var r = 0.05f + hue * 0.15f
@@ -931,25 +917,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             GLES20.glAttachShader(it, fs)
             GLES20.glLinkProgram(it)
         }
-    }
-
-    fun resetAnimation() {
-        faceImpressionStrength = 0f
-        isSpeaking = false
-        silenceTimer = 0f
-        // Reset all mouth shape parameters
-        mouthOpenAmount = 0f
-        mouthWideAmount = 0f
-        mouthRoundAmount = 0f
-        lipClosureAmount = 0f
-        lipTuckAmount = 0f
-        lipProtrudeAmount = 0f
-        jawOpenAmount = 0f
-        // Reset viseme state
-        currentViseme = Viseme.NEUTRAL
-        nextViseme = Viseme.NEUTRAL
-        visemeQueue.clear()
-        lastProcessedText = ""
     }
 
     fun skipToFace() {
