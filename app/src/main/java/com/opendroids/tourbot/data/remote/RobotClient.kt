@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -23,23 +25,19 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.TimeUnit
 import java.util.zip.Inflater
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "RobotClient"
+private const val CONNECTION_TIMEOUT_MS = 5000L
 
 @Singleton
-class RobotClient @Inject constructor() {
-
-    private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .pingInterval(20, TimeUnit.SECONDS)
-        .build()
-
+class RobotClient @Inject constructor(
+    private val client: OkHttpClient,
+    private val json: Json
+) {
     private var webSocket: WebSocket? = null
-    private val json = Json { ignoreUnknownKeys = true }
 
     private val _messages = MutableSharedFlow<RobotMessage>()
     val messages: Flow<RobotMessage> = _messages.asSharedFlow()
@@ -47,30 +45,55 @@ class RobotClient @Inject constructor() {
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
-    private var connectionResult = CompletableDeferred<Boolean>()
+    // Mutex to prevent concurrent connection attempts
+    private val connectionMutex = Mutex()
+    private var connectionResult: CompletableDeferred<Boolean>? = null
 
     suspend fun tryConnect(url: String): Boolean {
-        if (isConnected.value) return true
-        connectionResult = CompletableDeferred()
-        val request = Request.Builder().url(url).build()
-        webSocket = client.newWebSocket(request, createListener())
+        // Use mutex to ensure only one connection attempt at a time
+        return connectionMutex.withLock {
+            // Already connected
+            if (isConnected.value) {
+                Log.d(TAG, "Already connected, returning true")
+                return@withLock true
+            }
 
-        // Wait for 5 seconds for the connection to establish or fail
-        return withTimeoutOrNull(5000) {
-            connectionResult.await()
-        } ?: false
+            // Create new deferred for this connection attempt
+            val result = CompletableDeferred<Boolean>()
+            connectionResult = result
+
+            Log.d(TAG, "Attempting to connect to $url")
+            val request = Request.Builder().url(url).build()
+            webSocket = client.newWebSocket(request, createListener())
+
+            // Wait for connection to establish or fail
+            withTimeoutOrNull(CONNECTION_TIMEOUT_MS) {
+                result.await()
+            } ?: run {
+                Log.w(TAG, "Connection timed out after ${CONNECTION_TIMEOUT_MS}ms")
+                webSocket?.cancel()
+                webSocket = null
+                false
+            }
+        }
     }
 
     fun connect(url: String) {
-        if (isConnected.value) return
+        if (isConnected.value) {
+            Log.d(TAG, "Already connected, skipping connect()")
+            return
+        }
+        Log.d(TAG, "Initiating connection to $url")
         val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, createListener())
     }
 
     fun disconnect() {
+        Log.d(TAG, "Disconnecting...")
         webSocket?.close(1000, "Disconnect requested")
         webSocket = null
         _isConnected.value = false
+        connectionResult = null
     }
 
     fun sendCommand(command: RobotCommand) {
@@ -88,7 +111,7 @@ class RobotClient @Inject constructor() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "✓ Connected to robot")
                 _isConnected.value = true
-                connectionResult.complete(true)
+                connectionResult?.complete(true)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -120,7 +143,7 @@ class RobotClient @Inject constructor() {
                 Log.e(TAG, "Connection failure", t)
                 this@RobotClient.webSocket = null
                 _isConnected.value = false
-                connectionResult.complete(false)
+                connectionResult?.complete(false)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
