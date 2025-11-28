@@ -1,11 +1,15 @@
 package com.opendroids.tourbot.ui.audio
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.media.MediaPlayer
+import android.media.audiofx.Visualizer
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,15 +21,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import kotlin.math.abs
 import kotlin.random.Random
 
 private const val TAG = "AudioPlayer"
+private const val DEFAULT_WPM = 150 // Words per minute for caption timing estimation
 
 @Singleton
 class AudioPlayer @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private var mediaPlayer: MediaPlayer? = null
+    private var visualizer: Visualizer? = null
     private lateinit var tts: TextToSpeech
     private val ttsInitialized = CompletableDeferred<Boolean>()
 
@@ -36,7 +43,15 @@ class AudioPlayer @Inject constructor(
     val captionText: StateFlow<String> = _captionText.asStateFlow()
 
     private var amplitudeJob: Job? = null
+    private var captionJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    // Check if we have audio recording permission for Visualizer
+    private val hasRecordAudioPermission: Boolean
+        get() = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
 
     init {
         tts = TextToSpeech(context) { status ->
@@ -58,7 +73,6 @@ class AudioPlayer @Inject constructor(
 
     suspend fun play(resourceId: Int, caption: String = "") = suspendCoroutine<Unit> { cont ->
         stop(releaseMedia = true) // Stop any existing playback
-        _captionText.value = caption // Set caption text
 
         try {
             if (resourceId == 0) {
@@ -78,7 +92,7 @@ class AudioPlayer @Inject constructor(
                 stop()
                 if (cont.context.isActive) cont.resume(Unit)
             }
-            
+
             mediaPlayer?.setOnErrorListener { _, what, extra ->
                 Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
                 stop()
@@ -87,12 +101,79 @@ class AudioPlayer @Inject constructor(
             }
 
             mediaPlayer?.start()
-            startAmplitudePolling(isTts = false) // Start polling for MediaPlayer amplitude
+
+            // Start real audio visualization if we have permission
+            val audioSessionId = mediaPlayer?.audioSessionId ?: 0
+            if (audioSessionId != 0 && hasRecordAudioPermission) {
+                startVisualizerCapture(audioSessionId)
+            } else {
+                // Fallback to simulated amplitude if no permission
+                startAmplitudePolling(isTts = false)
+            }
+
+            // Start progressive caption display if caption text is provided
+            if (caption.isNotBlank()) {
+                val duration = mediaPlayer?.duration ?: 0
+                startProgressiveCaptions(caption, duration)
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing playback", e)
             stop()
             if (cont.context.isActive) cont.resume(Unit)
+        }
+    }
+
+    /**
+     * Display captions progressively word-by-word, synchronized with audio duration.
+     * Words are displayed at a rate that matches the audio playback.
+     */
+    private fun startProgressiveCaptions(fullText: String, audioDurationMs: Int) {
+        captionJob?.cancel()
+
+        val words = fullText.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.isEmpty()) {
+            _captionText.value = fullText
+            return
+        }
+
+        // Calculate time per word based on audio duration
+        // Use audio duration if available, otherwise estimate based on WPM
+        val totalDurationMs = if (audioDurationMs > 0) {
+            audioDurationMs.toLong()
+        } else {
+            // Estimate: words / WPM * 60 * 1000
+            (words.size.toFloat() / DEFAULT_WPM * 60 * 1000).toLong()
+        }
+
+        val msPerWord = (totalDurationMs / words.size).coerceAtLeast(100L)
+
+        captionJob = scope.launch {
+            var displayedText = StringBuilder()
+            for ((index, word) in words.withIndex()) {
+                if (!isActive) break
+
+                // Build up the displayed text progressively
+                if (displayedText.isNotEmpty()) {
+                    displayedText.append(" ")
+                }
+                displayedText.append(word)
+
+                // Show recent words (last ~10 words to keep captions readable)
+                val recentWords = words.subList(
+                    maxOf(0, index - 9),
+                    index + 1
+                ).joinToString(" ")
+
+                _captionText.value = recentWords
+                delay(msPerWord)
+            }
+
+            // Keep final caption visible briefly
+            delay(500)
+            if (isActive) {
+                _captionText.value = ""
+            }
         }
     }
 
@@ -158,6 +239,8 @@ class AudioPlayer @Inject constructor(
 
     fun stop(releaseMedia: Boolean = true, releaseTts: Boolean = true) {
         stopAmplitudePolling()
+        stopCaptions()
+
         if (releaseTts && ::tts.isInitialized && tts.isSpeaking) {
             tts.stop()
         }
@@ -175,14 +258,85 @@ class AudioPlayer @Inject constructor(
         _captionText.value = ""
     }
 
+    private fun stopCaptions() {
+        captionJob?.cancel()
+        captionJob = null
+    }
+
+    /**
+     * Start capturing real audio amplitude using Android's Visualizer API.
+     * This provides actual waveform data for accurate lip sync.
+     */
+    private fun startVisualizerCapture(audioSessionId: Int) {
+        releaseVisualizer()
+
+        try {
+            visualizer = Visualizer(audioSessionId).apply {
+                captureSize = Visualizer.getCaptureSizeRange()[0] // Minimum size for efficiency
+                setDataCaptureListener(
+                    object : Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(
+                            visualizer: Visualizer?,
+                            waveform: ByteArray?,
+                            samplingRate: Int
+                        ) {
+                            waveform?.let { data ->
+                                // Calculate RMS amplitude from waveform
+                                var sum = 0L
+                                for (byte in data) {
+                                    // Convert unsigned byte to signed (-128 to 127) then to absolute
+                                    val sample = (byte.toInt() and 0xFF) - 128
+                                    sum += sample * sample
+                                }
+                                val rms = kotlin.math.sqrt(sum.toDouble() / data.size)
+                                // Scale to 0-15000 range for compatibility with existing code
+                                val scaledAmplitude = (rms * 100).toInt().coerceIn(0, 15000)
+                                _amplitude.value = scaledAmplitude
+                            }
+                        }
+
+                        override fun onFftDataCapture(
+                            visualizer: Visualizer?,
+                            fft: ByteArray?,
+                            samplingRate: Int
+                        ) {
+                            // We use waveform, not FFT
+                        }
+                    },
+                    Visualizer.getMaxCaptureRate() / 2, // Capture rate
+                    true,  // Enable waveform capture
+                    false  // Disable FFT capture
+                )
+                enabled = true
+            }
+            Log.d(TAG, "Visualizer started for audio session $audioSessionId")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create Visualizer, falling back to simulated amplitude", e)
+            releaseVisualizer()
+            startAmplitudePolling(isTts = false)
+        }
+    }
+
+    private fun releaseVisualizer() {
+        try {
+            visualizer?.enabled = false
+            visualizer?.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error releasing visualizer", e)
+        }
+        visualizer = null
+    }
+
     private fun startAmplitudePolling(isTts: Boolean) {
         amplitudeJob?.cancel()
         amplitudeJob = scope.launch {
             while (isActive) {
                 val currentAmplitude = if (isTts) {
+                    // For TTS, generate random amplitude that varies naturally
                     Random.nextInt(500, 2000)
                 } else {
-                    1000 // Placeholder for MediaPlayer amplitude
+                    // Fallback when Visualizer isn't available
+                    Random.nextInt(800, 1500)
                 }
                 _amplitude.value = currentAmplitude
                 delay(50) // Poll every 50ms
@@ -193,16 +347,19 @@ class AudioPlayer @Inject constructor(
     private fun stopAmplitudePolling() {
         amplitudeJob?.cancel()
         amplitudeJob = null
+        releaseVisualizer()
         _amplitude.value = 0
     }
 
     fun release() {
+        stopCaptions()
+        stopAmplitudePolling()
         if (::tts.isInitialized) {
             tts.stop()
             tts.shutdown()
         }
-        scope.cancel() // Cancel coroutine scope for amplitude polling
-        mediaPlayer?.release() // Ensure media player is also released
+        scope.cancel() // Cancel coroutine scope
+        mediaPlayer?.release()
         mediaPlayer = null
     }
 }
