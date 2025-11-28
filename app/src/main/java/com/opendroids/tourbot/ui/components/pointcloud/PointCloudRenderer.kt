@@ -588,7 +588,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         return (h and 0x7fffffff) / Int.MAX_VALUE.toFloat()
     }
 
-    private fun smootherstep(t: Float): Float = t * t * t * (t * (t * 6 - 15) + 10)
+    private fun smootherstep(t: Float): Float = t * t * t * (t * (t * 6f - 15f) + 10f)
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
     // ========== Face Displacement - Angelina Jolie Proportions ==========
@@ -614,10 +614,10 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         // === FACE OVAL - Angelina's angular oval ===
         val faceOvalX = faceX / faceWidth
         val faceOvalY = faceY / (faceHeight / 2)
-        val inFace = faceOvalX.pow(2) + faceOvalY.pow(2) < 1f
+        val inFace = faceOvalX * faceOvalX + faceOvalY * faceOvalY < 1f
         if (inFace) {
             // Subtle base protrusion, stronger in center
-            val centerFalloff = 1f - sqrt(faceOvalX.pow(2) + faceOvalY.pow(2))
+            val centerFalloff = 1f - sqrt(faceOvalX * faceOvalX + faceOvalY * faceOvalY)
             displacement = 0.15f * centerFalloff * zFactor
         }
 
