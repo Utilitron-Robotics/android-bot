@@ -8,7 +8,17 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
-import kotlin.math.*
+import kotlin.math.PI
+import kotlin.math.absoluteValue
+import kotlin.math.acos
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.floor
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
@@ -22,11 +32,10 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
     // ========== Audio & Speech ==========
     @Volatile var amplitude: Float = 0f
-    @Volatile var currentText: String = ""  // Current word/phrase being spoken
+    @Volatile var currentText: String = ""
 
-    // Viseme system for lip sync
     enum class Viseme {
-        NEUTRAL,    // Closed relaxed mouth
+        NEUTRAL,
         AA,         // Open jaw (ah, father)
         EE,         // Wide stretched (ee, feet)
         OO,         // Round pursed (oo, boot)
@@ -42,34 +51,31 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         KG          // Back tongue, lips neutral (k, g)
     }
 
-    // Phoneme queue for coarticulation
-    private val visemeQueue = ArrayDeque<Pair<Viseme, Float>>()  // viseme + duration
+    private val visemeQueue = ArrayDeque<Pair<Viseme, Float>>()
     private var currentViseme = Viseme.NEUTRAL
     private var nextViseme = Viseme.NEUTRAL
-    private var visemeProgress = 0f  // 0-1 progress through current viseme
+    private var visemeProgress = 0f
     private var visemeDuration = 0.08f
     private var lastProcessedText = ""
 
-    // Mouth shape parameters (interpolated with coarticulation)
     private var mouthOpenAmount = 0f
-    private var mouthWideAmount = 0f     // Smile width (EE)
-    private var mouthRoundAmount = 0f    // Pursed lips (OO)
-    private var lipClosureAmount = 0f    // Lips pressed together (MBP) - NEW!
-    private var lipTuckAmount = 0f       // Lower lip under teeth (FV)
-    private var lipProtrudeAmount = 0f   // Lips pushed forward (SH)
-    private var jawOpenAmount = 0f       // Jaw drop separate from lips
+    private var mouthWideAmount = 0f
+    private var mouthRoundAmount = 0f
+    private var lipClosureAmount = 0f
+    private var lipTuckAmount = 0f
+    private var lipProtrudeAmount = 0f
+    private var jawOpenAmount = 0f
 
     // ========== Physics Simulation ==========
-    private lateinit var positions: FloatArray      // Current positions (x,y,z per point)
-    private lateinit var prevPositions: FloatArray  // Previous positions for Verlet
-    private lateinit var velocities: FloatArray     // For turbulence injection
-    private lateinit var basePositions: FloatArray  // Rest positions on sphere
+    private lateinit var positions: FloatArray
+    private lateinit var prevPositions: FloatArray
+    private lateinit var velocities: FloatArray
+    private lateinit var basePositions: FloatArray
     private var pointCount = 0
 
-    // Physics constants
     private val sphereRadius = 1.0f
-    private val springStiffness = 15f      // Membrane tension
-    private val damping = 0.97f            // Velocity damping
+    private val springStiffness = 15f
+    private val damping = 0.97f
     private val turbulenceStrength = 0.3f
     private val noiseScale = 2.5f
 
@@ -92,7 +98,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private var silenceTimer = 0f
     private var faceImpressionStrength = 0f
 
-    // Curl noise offsets (for variation)
     private var noiseOffsetX = Random.nextFloat() * 1000f
     private var noiseOffsetY = Random.nextFloat() * 1000f
     private var noiseOffsetZ = Random.nextFloat() * 1000f
@@ -100,12 +105,9 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     companion object {
         private const val COORDS_PER_VERTEX = 3
         private const val POINT_COUNT = 4000
-        private const val FIXED_TIMESTEP = 1f / 60f  // Physics at 60Hz
+        private const val FIXED_TIMESTEP = 1f / 60f
 
-        // OpenGL ES extension constants (not defined in GLES20 class)
-        // GL_POINT_SPRITE_OES - enables point sprite mode (points rendered as textured quads)
         private const val GL_POINT_SPRITE_OES = 0x8861
-        // GL_VERTEX_PROGRAM_POINT_SIZE - allows vertex shader to control gl_PointSize
         private const val GL_VERTEX_PROGRAM_POINT_SIZE = 0x8642
 
         private const val VERTEX_SHADER = """
@@ -140,13 +142,10 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
 
-        // Enable point sprite extensions for smooth particle rendering
-        // Note: These are widely supported but may fail on some older devices
         try {
             GLES20.glEnable(GL_POINT_SPRITE_OES)
             GLES20.glEnable(GL_VERTEX_PROGRAM_POINT_SIZE)
         } catch (e: Exception) {
-            // Extensions not available - points will still render but may appear square
             android.util.Log.w("PointCloudRenderer", "Point sprite extensions not available: ${e.message}")
         }
 
@@ -161,15 +160,20 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         velocities = FloatArray(pointCount * 3)
         basePositions = FloatArray(pointCount * 3)
 
-        // Generate Fibonacci sphere
-        val goldenRatio = (1 + sqrt(5f)) / 2
-        for (i in 0 until pointCount) {
-            val theta = 2 * PI.toFloat() * i / goldenRatio
-            val phi = acos(1 - 2 * (i + 0.5f) / pointCount)
+        val goldenRatio = (1.0 + sqrt(5.0)) / 2.0
 
-            val x = sphereRadius * sin(phi) * cos(theta)
-            val y = sphereRadius * cos(phi)
-            val z = sphereRadius * sin(phi) * sin(theta)
+        for (i in 0 until pointCount) {
+            val theta = (2.0 * PI * i / goldenRatio).toFloat()
+            val phi = acos(1.0 - 2.0 * (i + 0.5) / pointCount).toFloat()
+
+            val sinPhi = sin(phi.toDouble()).toFloat()
+            val cosPhi = cos(phi.toDouble()).toFloat()
+            val sinTheta = sin(theta.toDouble()).toFloat()
+            val cosTheta = cos(theta.toDouble()).toFloat()
+
+            val x = sphereRadius * sinPhi * cosTheta
+            val y = sphereRadius * cosPhi
+            val z = sphereRadius * sinPhi * sinTheta
 
             val idx = i * 3
             positions[idx] = x
@@ -210,7 +214,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         lastFrameTime = currentTime
         timeElapsed += deltaTime
 
-        // Update systems
         updateSpeechDetection(deltaTime)
         updateVisemes(deltaTime)
         updatePhysics(deltaTime)
@@ -221,13 +224,19 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
         Matrix.setIdentityM(modelMatrix, 0)
         Matrix.rotateM(modelMatrix, 0, globalRotation, 0f, 1f, 0f)
-        Matrix.rotateM(modelMatrix, 0, sin(timeElapsed * 0.2f) * 3f, 1f, 0f, 0f)
+        Matrix.rotateM(modelMatrix, 0, sinF(timeElapsed * 0.2f) * 3f, 1f, 0f, 0f)
 
         Matrix.multiplyMM(mvpMatrix, 0, viewMatrix, 0, modelMatrix, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvpMatrix, 0)
 
         renderPoints()
     }
+
+    // ========== Float Math Helpers ==========
+    private fun sinF(x: Float): Float = sin(x.toDouble()).toFloat()
+    private fun cosF(x: Float): Float = cos(x.toDouble()).toFloat()
+    private fun sqrtF(x: Float): Float = sqrt(x.toDouble()).toFloat()
+    private fun expF(x: Float): Float = exp(x.toDouble()).toFloat()
 
     // ========== Speech & Viseme System ==========
 
@@ -242,23 +251,19 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             if (silenceTimer > 0.4f) isSpeaking = false
         }
 
-        // Face impression
         val targetStrength = if (isSpeaking) 1f else 0f
         val speed = if (isSpeaking) 4f else 2f
         faceImpressionStrength += (targetStrength - faceImpressionStrength) * deltaTime * speed
 
-        // Slow rotation
         globalRotation += deltaTime * 6f
     }
 
     private fun updateVisemes(deltaTime: Float) {
-        // Process new text into viseme queue
         if (currentText != lastProcessedText && currentText.isNotEmpty()) {
             processTextToVisemes(currentText)
             lastProcessedText = currentText
         }
 
-        // Advance through viseme queue
         if (isSpeaking && visemeQueue.isNotEmpty()) {
             visemeProgress += deltaTime / visemeDuration
 
@@ -271,7 +276,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                 } else {
                     Viseme.NEUTRAL
                 }
-                // Lookahead for coarticulation
                 nextViseme = visemeQueue.firstOrNull()?.first ?: Viseme.NEUTRAL
             }
         } else if (!isSpeaking) {
@@ -280,8 +284,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             visemeQueue.clear()
         }
 
-        // Calculate mouth shape with coarticulation blending
-        // Blend current viseme with next viseme in final 30% of duration
         val coarticulationBlend = if (visemeProgress > 0.7f) {
             (visemeProgress - 0.7f) / 0.3f
         } else 0f
@@ -289,7 +291,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         val currentParams = getVisemeParams(currentViseme)
         val nextParams = getVisemeParams(nextViseme)
 
-        // Target values with coarticulation
         val targetOpen = lerp(currentParams.open, nextParams.open, coarticulationBlend)
         val targetWide = lerp(currentParams.wide, nextParams.wide, coarticulationBlend)
         val targetRound = lerp(currentParams.round, nextParams.round, coarticulationBlend)
@@ -298,9 +299,8 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         val targetProtrude = lerp(currentParams.protrude, nextParams.protrude, coarticulationBlend)
         val targetJaw = lerp(currentParams.jaw, nextParams.jaw, coarticulationBlend)
 
-        // Smooth interpolation with faster response for closure (bilabials are quick)
         val blendSpeed = 25f
-        val closureSpeed = 40f  // Faster for sharp bilabial closure
+        val closureSpeed = 40f
         mouthOpenAmount += (targetOpen - mouthOpenAmount) * deltaTime * blendSpeed
         mouthWideAmount += (targetWide - mouthWideAmount) * deltaTime * blendSpeed
         mouthRoundAmount += (targetRound - mouthRoundAmount) * deltaTime * blendSpeed
@@ -310,38 +310,33 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         jawOpenAmount += (targetJaw - jawOpenAmount) * deltaTime * blendSpeed
     }
 
-    // Viseme parameter bundle
     private data class VisemeParams(
-        val open: Float = 0f,      // Lip separation (vertical)
-        val wide: Float = 0f,      // Smile stretch (horizontal)
-        val round: Float = 0f,     // Lip pursing
-        val closure: Float = 0f,   // Lips pressed (1 = fully closed/pressed)
-        val tuck: Float = 0f,      // Lower lip under teeth
-        val protrude: Float = 0f,  // Lips pushed forward
-        val jaw: Float = 0f        // Jaw drop
+        val open: Float = 0f,
+        val wide: Float = 0f,
+        val round: Float = 0f,
+        val closure: Float = 0f,
+        val tuck: Float = 0f,
+        val protrude: Float = 0f,
+        val jaw: Float = 0f
     )
 
     private fun getVisemeParams(viseme: Viseme): VisemeParams = when (viseme) {
         Viseme.NEUTRAL -> VisemeParams()
-        Viseme.AA -> VisemeParams(open = 1.0f, wide = 0.3f, jaw = 1.0f)  // "ah" - wide open
-        Viseme.EE -> VisemeParams(open = 0.2f, wide = 1.0f, jaw = 0.3f)  // "ee" - wide smile
-        Viseme.OO -> VisemeParams(open = 0.3f, round = 1.0f, protrude = 0.7f, jaw = 0.4f)  // "oo" - pursed
-        Viseme.OH -> VisemeParams(open = 0.7f, round = 0.6f, jaw = 0.7f)  // "oh" - open round
-        Viseme.AH -> VisemeParams(open = 0.5f, jaw = 0.5f)  // "uh" - neutral open
-        Viseme.FV -> VisemeParams(open = 0.1f, tuck = 1.0f, jaw = 0.2f)  // f/v - lip tuck
-        Viseme.MBP -> VisemeParams(closure = 1.0f)  // m/b/p - LIPS PRESSED TOGETHER
-        Viseme.TH -> VisemeParams(open = 0.25f, jaw = 0.2f)  // th - slight open
-        Viseme.L -> VisemeParams(open = 0.3f, jaw = 0.35f)  // l - neutral open
-        Viseme.WR -> VisemeParams(open = 0.2f, round = 0.8f, protrude = 0.9f)  // w/r - tight round
-        Viseme.SZ -> VisemeParams(open = 0.05f, wide = 0.4f)  // s/z - teeth together, slight smile
-        Viseme.SH -> VisemeParams(open = 0.15f, round = 0.3f, protrude = 0.5f)  // sh/ch - protruded
-        Viseme.KG -> VisemeParams(open = 0.4f, jaw = 0.4f)  // k/g - back tongue
+        Viseme.AA -> VisemeParams(open = 1.0f, wide = 0.3f, jaw = 1.0f)
+        Viseme.EE -> VisemeParams(open = 0.2f, wide = 1.0f, jaw = 0.3f)
+        Viseme.OO -> VisemeParams(open = 0.3f, round = 1.0f, protrude = 0.7f, jaw = 0.4f)
+        Viseme.OH -> VisemeParams(open = 0.7f, round = 0.6f, jaw = 0.7f)
+        Viseme.AH -> VisemeParams(open = 0.5f, jaw = 0.5f)
+        Viseme.FV -> VisemeParams(open = 0.1f, tuck = 1.0f, jaw = 0.2f)
+        Viseme.MBP -> VisemeParams(closure = 1.0f)
+        Viseme.TH -> VisemeParams(open = 0.25f, jaw = 0.2f)
+        Viseme.L -> VisemeParams(open = 0.3f, jaw = 0.35f)
+        Viseme.WR -> VisemeParams(open = 0.2f, round = 0.8f, protrude = 0.9f)
+        Viseme.SZ -> VisemeParams(open = 0.05f, wide = 0.4f)
+        Viseme.SH -> VisemeParams(open = 0.15f, round = 0.3f, protrude = 0.5f)
+        Viseme.KG -> VisemeParams(open = 0.4f, jaw = 0.4f)
     }
 
-    /**
-     * Convert text to a sequence of visemes with durations.
-     * Uses grapheme-to-phoneme estimation.
-     */
     private fun processTextToVisemes(text: String) {
         visemeQueue.clear()
         val lowerText = text.lowercase()
@@ -350,11 +345,10 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         while (i < lowerText.length) {
             val (viseme, consumed) = mapCharToViseme(lowerText, i)
             if (viseme != null) {
-                // Duration based on phoneme type
                 val duration = when (viseme) {
-                    Viseme.MBP -> 0.06f  // Plosives are quick
-                    Viseme.FV, Viseme.SZ, Viseme.TH -> 0.08f  // Fricatives medium
-                    Viseme.AA, Viseme.OH -> 0.12f  // Open vowels longer
+                    Viseme.MBP -> 0.06f
+                    Viseme.FV, Viseme.SZ, Viseme.TH -> 0.08f
+                    Viseme.AA, Viseme.OH -> 0.12f
                     else -> 0.09f
                 }
                 visemeQueue.addLast(viseme to duration)
@@ -362,7 +356,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             i += consumed
         }
 
-        // Start immediately if queue was empty
         if (visemeQueue.isNotEmpty() && currentViseme == Viseme.NEUTRAL) {
             val (viseme, duration) = visemeQueue.removeFirst()
             currentViseme = viseme
@@ -372,16 +365,11 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         }
     }
 
-    /**
-     * Map character(s) at position to viseme.
-     * Returns (viseme, charsConsumed).
-     */
     private fun mapCharToViseme(text: String, pos: Int): Pair<Viseme?, Int> {
         val c = text[pos]
         val next = text.getOrNull(pos + 1)
         val prev = text.getOrNull(pos - 1)
 
-        // Two-character combinations first
         if (next != null) {
             val digraph = "$c$next"
             when (digraph) {
@@ -393,49 +381,30 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                 "ee", "ea", "ie" -> return Viseme.EE to 2
                 "oa", "ow" -> return Viseme.OH to 2
                 "ai", "ay", "ei", "ey" -> return Viseme.EE to 2
-                "oi", "oy" -> return Viseme.OH to 2  // Starts with OH
+                "oi", "oy" -> return Viseme.OH to 2
                 "au", "aw" -> return Viseme.OH to 2
                 "ng" -> return Viseme.KG to 2
                 "qu" -> return Viseme.WR to 2
             }
         }
 
-        // Single characters
         return when (c) {
-            // Vowels
             'a' -> (if (next in listOf('l', 'r', 'w')) Viseme.OH else Viseme.AA) to 1
             'e' -> (if (next == null || next == ' ') null else Viseme.EE) to 1
             'i', 'y' -> Viseme.EE to 1
             'o' -> (if (next == 'n' || next == 'm') Viseme.AH else Viseme.OH) to 1
             'u' -> (if (prev == 'q') null else Viseme.OO) to 1
-
-            // Bilabials - LIPS MUST CLOSE
             'm', 'b', 'p' -> Viseme.MBP to 1
-
-            // Labiodentals - lip tucks under teeth
             'f', 'v' -> Viseme.FV to 1
-
-            // Alveolar fricatives
             's', 'z' -> Viseme.SZ to 1
-
-            // Rounded consonants
             'w', 'r' -> Viseme.WR to 1
-
-            // Alveolar stops/nasals
             't', 'd', 'n' -> Viseme.L to 1
-
-            // Velar stops
             'k', 'g', 'c' -> (if (c == 'c' && next in listOf('e', 'i', 'y')) Viseme.SZ else Viseme.KG) to 1
-
-            // Others with lip involvement
             'l' -> Viseme.L to 1
             'j' -> Viseme.SH to 1
-            'h' -> Viseme.AH to 1  // Glottal, use neutral open
-            'x' -> Viseme.KG to 1  // "ks"
-
-            // Skip spaces/punctuation
+            'h' -> Viseme.AH to 1
+            'x' -> Viseme.KG to 1
             ' ', ',', '.', '!', '?', '-', '\'' -> null to 1
-
             else -> null to 1
         }
     }
@@ -443,7 +412,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     // ========== Physics Simulation ==========
 
     private fun updatePhysics(deltaTime: Float) {
-        // Fixed timestep accumulator for stable physics
         var accumulator = deltaTime
         while (accumulator >= FIXED_TIMESTEP) {
             integrateVerlet(FIXED_TIMESTEP)
@@ -457,27 +425,22 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         for (i in 0 until pointCount) {
             val idx = i * 3
 
-            // Current position
             val x = positions[idx]
             val y = positions[idx + 1]
             val z = positions[idx + 2]
 
-            // Previous position
             val px = prevPositions[idx]
             val py = prevPositions[idx + 1]
             val pz = prevPositions[idx + 2]
 
-            // Base (rest) position
             val bx = basePositions[idx]
             val by = basePositions[idx + 1]
             val bz = basePositions[idx + 2]
 
-            // === Calculate Forces ===
             var fx = 0f
             var fy = 0f
             var fz = 0f
 
-            // 1. Curl noise turbulence (3D flow field)
             val turbulence = curlNoise(
                 x * noiseScale + noiseOffsetX + timeElapsed * 0.3f,
                 y * noiseScale + noiseOffsetY,
@@ -488,8 +451,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             fy += turbulence[1] * turbMult
             fz += turbulence[2] * turbMult
 
-            // 2. Spring force back to sphere surface
-            val currentLen = sqrt(x * x + y * y + z * z)
+            val currentLen = sqrtF(x * x + y * y + z * z)
             val targetRadius = sphereRadius + calculateFaceDisplacement(bx, by, bz) * faceImpressionStrength * 0.35f
             val springForce = (targetRadius - currentLen) * springStiffness
             if (currentLen > 0.001f) {
@@ -498,38 +460,29 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                 fz += (z / currentLen) * springForce
             }
 
-            // 3. Tangential flow (latitude-based rotation)
             val latitudeFlow = (1f - faceImpressionStrength * 0.5f) * 0.5f
             val tangentX = -z * latitudeFlow
             val tangentZ = x * latitudeFlow
             fx += tangentX
             fz += tangentZ
 
-            // === Verlet Integration ===
             val newX = x + (x - px) * damping + fx * dt2
             val newY = y + (y - py) * damping + fy * dt2
             val newZ = z + (z - pz) * damping + fz * dt2
 
-            // Store previous
             prevPositions[idx] = x
             prevPositions[idx + 1] = y
             prevPositions[idx + 2] = z
 
-            // Update current
             positions[idx] = newX
             positions[idx + 1] = newY
             positions[idx + 2] = newZ
         }
     }
 
-    /**
-     * 3D Curl noise for divergence-free turbulence.
-     * Creates swirling, smoke-like motion.
-     */
     private fun curlNoise(x: Float, y: Float, z: Float): FloatArray {
         val eps = 0.0001f
 
-        // Potential field derivatives (using simplex-like noise approximation)
         val n1 = noise3D(x, y + eps, z) - noise3D(x, y - eps, z)
         val n2 = noise3D(x, y, z + eps) - noise3D(x, y, z - eps)
         val n3 = noise3D(x + eps, y, z) - noise3D(x - eps, y, z)
@@ -537,7 +490,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         val n5 = noise3D(x, y, z + eps) - noise3D(x, y, z - eps)
         val n6 = noise3D(x + eps, y, z) - noise3D(x - eps, y, z)
 
-        // Curl = nabla x F
         val curlX = (n2 - n4) / (2f * eps)
         val curlY = (n3 - n5) / (2f * eps)
         val curlZ = (n1 - n6) / (2f * eps)
@@ -545,13 +497,10 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         return floatArrayOf(curlX, curlY, curlZ)
     }
 
-    /**
-     * Simple 3D noise function (value noise with smooth interpolation)
-     */
     private fun noise3D(x: Float, y: Float, z: Float): Float {
-        val xi = x.toInt().let { if (x < 0) it - 1 else it }
-        val yi = y.toInt().let { if (y < 0) it - 1 else it }
-        val zi = z.toInt().let { if (z < 0) it - 1 else it }
+        val xi = floor(x.toDouble()).toInt()
+        val yi = floor(y.toDouble()).toInt()
+        val zi = floor(z.toDouble()).toInt()
 
         val xf = x - xi
         val yf = y - yi
@@ -561,7 +510,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         val v = smootherstep(yf)
         val w = smootherstep(zf)
 
-        // Hash and interpolate
         val n000 = hash3D(xi, yi, zi)
         val n001 = hash3D(xi, yi, zi + 1)
         val n010 = hash3D(xi, yi + 1, zi)
@@ -591,85 +539,72 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private fun smootherstep(t: Float): Float = t * t * t * (t * (t * 6f - 15f) + 10f)
     private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
 
-    // ========== Face Displacement - Angelina Jolie Proportions ==========
-    // Based on Golden Ratio (1:1.618) facial analysis
-    // Key features: high cheekbones, full lips, almond eyes, sharp jaw
+    // ========== Face Displacement ==========
 
     private fun calculateFaceDisplacement(x: Float, y: Float, z: Float): Float {
-        if (z < 0.1f) return 0f  // Only front hemisphere
+        if (z < 0.1f) return 0f
 
-        // Project to face plane with slight perspective
         val faceX = x / (z + 0.3f)
         val faceY = y / (z + 0.3f)
 
-        // Golden ratio face bounds (1:1.618 height to width)
         val faceWidth = 0.55f
-        val faceHeight = faceWidth * 1.618f  // ~0.89
+        val faceHeight = faceWidth * 1.618f
 
         if (faceX.absoluteValue > faceWidth || faceY.absoluteValue > faceHeight / 2) return 0f
 
         var displacement = 0f
-        val zFactor = z.coerceIn(0.3f, 1f)  // Depth scaling
+        val zFactor = z.coerceIn(0.3f, 1f)
 
-        // === FACE OVAL - Angelina's angular oval ===
         val faceOvalX = faceX / faceWidth
         val faceOvalY = faceY / (faceHeight / 2)
         val inFace = faceOvalX * faceOvalX + faceOvalY * faceOvalY < 1f
         if (inFace) {
-            // Subtle base protrusion, stronger in center
-            val centerFalloff = 1f - sqrt(faceOvalX * faceOvalX + faceOvalY * faceOvalY)
+            val centerFalloff = 1f - sqrtF(faceOvalX * faceOvalX + faceOvalY * faceOvalY)
             displacement = 0.15f * centerFalloff * zFactor
         }
 
-        // === FOREHEAD - Smooth dome ===
         if (faceY > 0.25f && faceX.absoluteValue < 0.4f) {
             val foreheadFactor = ((faceY - 0.25f) / 0.35f).coerceIn(0f, 1f)
-            val foreheadCurve = cos(faceX / 0.4f * PI.toFloat() / 2).pow(2)
+            val foreheadCurve = cosF(faceX / 0.4f * PI.toFloat() / 2).pow(2)
             displacement = max(displacement, 0.25f * foreheadFactor * foreheadCurve * zFactor)
         }
 
-        // === BROW RIDGE - Strong, defined (Angelina signature) ===
         val browY = faceY - 0.22f
         if (browY.absoluteValue < 0.08f && faceX.absoluteValue < 0.42f) {
-            val browCurve = cos(faceX / 0.42f * PI.toFloat() / 2).pow(1.5f)
+            val browCurve = cosF(faceX / 0.42f * PI.toFloat() / 2).pow(1.5f)
             val browPeak = 1f - (browY.absoluteValue / 0.08f)
             displacement = max(displacement, 0.4f * browCurve * browPeak * zFactor)
         }
 
-        // === CHEEKBONES - High and prominent (Angelina's defining feature) ===
         val cheekCenterX = 0.38f
         val cheekCenterY = 0.0f
-        val leftCheekDist = sqrt((faceX + cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
-        val rightCheekDist = sqrt((faceX - cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
+        val leftCheekDist = sqrtF((faceX + cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
+        val rightCheekDist = sqrtF((faceX - cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
         val cheekDist = min(leftCheekDist, rightCheekDist)
         if (cheekDist < 0.18f) {
             val cheekFactor = (1f - cheekDist / 0.18f).pow(1.5f)
-            displacement = max(displacement, 0.55f * cheekFactor * zFactor)  // Strong cheekbones
+            displacement = max(displacement, 0.55f * cheekFactor * zFactor)
         }
 
-        // === NOSE - Refined, straight bridge ===
         val noseWidth = 0.06f
         val noseBridgeTop = 0.15f
         val noseTip = -0.18f
         if (faceX.absoluteValue < noseWidth && faceY < noseBridgeTop && faceY > noseTip) {
             val noseLength = noseBridgeTop - noseTip
             val noseProgress = (noseBridgeTop - faceY) / noseLength
-            // Nose gets slightly wider and more prominent toward tip
-            val noseProfile = 0.5f + 0.5f * sin(noseProgress * PI.toFloat() / 2)
+            val noseProfile = 0.5f + 0.5f * sinF(noseProgress * PI.toFloat() / 2)
             val noseCenterFalloff = 1f - (faceX.absoluteValue / noseWidth)
             displacement = max(displacement, 0.7f * noseProfile * noseCenterFalloff * zFactor)
         }
-        // Nose tip ball
-        val noseTipDist = sqrt(faceX.pow(2) + (faceY - noseTip).pow(2))
+        val noseTipDist = sqrtF(faceX.pow(2) + (faceY - noseTip).pow(2))
         if (noseTipDist < 0.07f) {
             displacement = max(displacement, 0.75f * (1f - noseTipDist / 0.07f) * zFactor)
         }
 
-        // === EYES - Wide-set, almond/feline shape (indent) ===
         val eyeY = 0.12f
-        val eyeSpacing = 0.22f  // Wide-set
+        val eyeSpacing = 0.22f
         val eyeWidth = 0.1f
-        val eyeHeight = 0.045f  // Almond shape (wider than tall)
+        val eyeHeight = 0.045f
 
         for (eyeX in listOf(-eyeSpacing, eyeSpacing)) {
             val relX = (faceX - eyeX) / eyeWidth
@@ -677,64 +612,49 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             val eyeEllipse = relX.pow(2) + relY.pow(2)
             if (eyeEllipse < 1f) {
                 val eyeDepth = (1f - eyeEllipse).pow(0.7f)
-                displacement -= 0.25f * eyeDepth * zFactor  // Indent for eye sockets
+                displacement -= 0.25f * eyeDepth * zFactor
             }
         }
 
-        // === LIPS - Full, pillowy (Angelina's most famous feature) ===
-        // With proper articulation physics for all visemes
         val lipCenterY = -0.35f
         val lipWidth = 0.22f
         val upperLipHeight = 0.035f
-        val lowerLipHeight = 0.055f  // Fuller lower lip
+        val lowerLipHeight = 0.055f
 
         val lipY = faceY - lipCenterY
         val lipXNorm = faceX.absoluteValue / lipWidth
 
-        if (lipXNorm < 1.2f) {  // Slightly wider check for protrusion
-            // === Articulation parameters ===
-            // Jaw drop opens space between lips
+        if (lipXNorm < 1.2f) {
             val jawDrop = jawOpenAmount * 0.08f
-            // Lip opening (separate from jaw)
             val lipOpen = mouthOpenAmount * 0.12f
-            // Wide stretch for EE
             val wideStretch = 1f + mouthWideAmount * 0.35f
-            // Round compression for OO
             val roundCompress = 1f - mouthRoundAmount * 0.3f
-            // Forward protrusion for OO/WR
             val protrudeZ = lipProtrudeAmount * 0.15f
-            // BILABIAL CLOSURE - lips press together (M/B/P)
-            val closurePress = lipClosureAmount * 0.12f  // Moves lips toward center
+            val closurePress = lipClosureAmount * 0.12f
 
             val effectiveLipWidth = lipWidth * wideStretch * roundCompress
             val effectiveLipXNorm = faceX.absoluteValue / effectiveLipWidth
 
             if (effectiveLipXNorm < 1f) {
-                // === UPPER LIP ===
-                // For M/B/P: upper lip moves DOWN toward center
-                // For open sounds: upper lip moves UP
                 val upperLipOffset = if (lipClosureAmount > 0.5f) {
-                    -closurePress  // Move DOWN for closure
+                    -closurePress
                 } else {
-                    lipOpen + jawDrop * 0.3f  // Move UP for opening
+                    lipOpen + jawDrop * 0.3f
                 }
 
                 val upperLipYPos = lipY + upperLipOffset
                 val upperLipThickness = upperLipHeight * (1.2f + lipOpen * 2f)
 
                 if (upperLipYPos > -closurePress && upperLipYPos < upperLipThickness) {
-                    // Cupid's bow shape
                     val cupidsBow = if (effectiveLipXNorm < 0.3f) {
-                        0.7f + 0.3f * cos(effectiveLipXNorm / 0.3f * PI.toFloat())
+                        0.7f + 0.3f * cosF(effectiveLipXNorm / 0.3f * PI.toFloat())
                     } else {
                         0.7f * (1f - (effectiveLipXNorm - 0.3f) / 0.7f).coerceAtLeast(0f)
                     }
                     val upperProfile = cupidsBow * (1f - effectiveLipXNorm.pow(2))
 
-                    // Base displacement + protrusion
                     var upperDisp = 0.5f * upperProfile * zFactor + protrudeZ
 
-                    // For closure, ADD displacement to make lips bulge slightly when pressed
                     if (lipClosureAmount > 0.5f) {
                         upperDisp += 0.1f * lipClosureAmount * (1f - effectiveLipXNorm)
                     }
@@ -742,34 +662,26 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                     displacement = max(displacement, upperDisp)
                 }
 
-                // === LOWER LIP ===
-                // For M/B/P: lower lip moves UP toward center
-                // For F/V: lower lip curls UP AND INWARD (under upper teeth)
-                // For open sounds: lower lip moves DOWN
                 val lowerLipOffset = when {
-                    lipClosureAmount > 0.5f -> closurePress  // Move UP for closure
-                    lipTuckAmount > 0.3f -> lipTuckAmount * 0.06f  // Slight UP for tuck
-                    else -> -(lipOpen * 1.3f + jawDrop)  // Move DOWN for opening
+                    lipClosureAmount > 0.5f -> closurePress
+                    lipTuckAmount > 0.3f -> lipTuckAmount * 0.06f
+                    else -> -(lipOpen * 1.3f + jawDrop)
                 }
 
                 val lowerLipYPos = lipY + lowerLipOffset
                 val lowerLipThickness = lowerLipHeight * (1.5f + lipOpen * 3f)
 
                 if (lowerLipYPos < closurePress && lowerLipYPos > -lowerLipThickness) {
-                    val lowerProfile = cos(effectiveLipXNorm * PI.toFloat() / 2).pow(1.3f)
+                    val lowerProfile = cosF(effectiveLipXNorm * PI.toFloat() / 2).pow(1.3f)
                     val lowerFullness = (1f - (lowerLipYPos / (-lowerLipThickness)).pow(2)).coerceIn(0f, 1f)
 
                     var lowerDisp = 0.6f * lowerProfile * lowerFullness * zFactor + protrudeZ
 
-                    // === F/V ARTICULATION - Lower lip curls INWARD under upper teeth ===
                     if (lipTuckAmount > 0.3f) {
-                        // Reduce forward displacement (lip curls back)
                         lowerDisp *= (1f - lipTuckAmount * 0.7f)
-                        // Pull lip inward (negative Z)
                         lowerDisp -= lipTuckAmount * 0.08f * lowerProfile
                     }
 
-                    // For closure, ADD displacement for pressed bulge
                     if (lipClosureAmount > 0.5f) {
                         lowerDisp += 0.12f * lipClosureAmount * (1f - effectiveLipXNorm)
                     }
@@ -777,8 +689,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
                     displacement = max(displacement, lowerDisp)
                 }
 
-                // === BILABIAL PRESSED SEAM ===
-                // When lips close, create a slight ridge where they meet
                 if (lipClosureAmount > 0.7f) {
                     val seamY = lipY.absoluteValue
                     if (seamY < 0.02f) {
@@ -790,7 +700,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             }
         }
 
-        // === JAWLINE - Sharp, angular (Angelina signature) ===
         val jawY = -0.42f
         val jawWidth = 0.45f
         if (faceY < jawY && faceY > -0.55f) {
@@ -802,9 +711,8 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             }
         }
 
-        // === CHIN - Defined, slightly pointed ===
         val chinY = -0.52f
-        val chinDist = sqrt(faceX.pow(2) + (faceY - chinY).pow(2))
+        val chinDist = sqrtF(faceX.pow(2) + (faceY - chinY).pow(2))
         if (chinDist < 0.1f) {
             val chinFactor = (1f - chinDist / 0.1f).pow(1.5f)
             displacement = max(displacement, 0.4f * chinFactor * zFactor)
@@ -856,14 +764,12 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         var b = 0.95f
         var a = 0.5f + displacement * 0.5f + faceImpressionStrength * 0.2f
 
-        // Lip area glows during speech
         if (displacement > 0.3f && faceImpressionStrength > 0.5f) {
             val speechGlow = mouthOpenAmount * 0.3f
             r += 0.3f * displacement + speechGlow
             g = min(1f, g + 0.15f)
         }
 
-        // Eyes glow
         if (displacement < 0) {
             r = 0.1f
             g = 1f
@@ -871,8 +777,7 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             a = 0.9f
         }
 
-        // Shimmer
-        val shimmer = sin(timeElapsed * 4f + x * 8f + y * 8f) * 0.08f
+        val shimmer = sinF(timeElapsed * 4f + x * 8f + y * 8f) * 0.08f
         g += shimmer
 
         return floatArrayOf(
@@ -883,9 +788,8 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
     private fun calculatePointSize(displacement: Float): Float {
         var size = 3.5f + displacement * 5f
-        size *= 1f + sin(timeElapsed * 2.5f) * 0.08f
+        size *= 1f + sinF(timeElapsed * 2.5f) * 0.08f
         size *= 0.6f + faceImpressionStrength * 0.4f
-        // Larger for mouth when speaking
         if (displacement > 0.3f && mouthOpenAmount > 0.2f) {
             size *= 1f + mouthOpenAmount * 0.3f
         }
