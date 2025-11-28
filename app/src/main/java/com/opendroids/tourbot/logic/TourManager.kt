@@ -175,7 +175,7 @@ class TourManager @Inject constructor(
 
         // 3. Iterate through waypoints (including 'end' which returns to home)
         val waypoints = waypointIds.value
-        for ((index, id) in waypoints.withIndex()) {
+        for (id in waypoints) {
             _tourState.value = TourState.Navigating(createWaypoint(id)!!)
             
             val navSuccess = navigateToWaypointWithRetry(id)
