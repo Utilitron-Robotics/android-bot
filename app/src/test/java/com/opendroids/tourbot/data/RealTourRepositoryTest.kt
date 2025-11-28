@@ -50,7 +50,7 @@ class RealTourRepositoryTest {
     }
 
     @Test
-    fun `observeStatus sends subscribe and returns status flow`() = runTest {
+    fun `observeStatus filters messages and returns status flow`() = runTest {
         val statusMessage = RobotStatusMessage(navStatus = 601, battery = 95f)
         val robotMessage = RobotMessage(topic = "/robot_status", msg = statusMessage)
         val messagesFlow = MutableStateFlow(robotMessage)
@@ -59,10 +59,26 @@ class RealTourRepositoryTest {
 
         val result = tourRepository.observeStatus().first()
 
-        coVerify { robotClient.sendCommand(match { 
+        // observeStatus() only filters messages, it doesn't send subscribe command
+        // subscribeStatus() is a separate method that sends the subscribe command
+        assertEquals(statusMessage, result)
+    }
+
+    @Test
+    fun `subscribeStatus sends subscribe command`() = runTest {
+        tourRepository.subscribeStatus()
+
+        coVerify { robotClient.sendCommand(match {
             it.op == "subscribe" && it.topic == "/robot_status"
         }) }
-        
-        assertEquals(statusMessage, result)
+    }
+
+    @Test
+    fun `unsubscribeStatus sends unsubscribe command`() = runTest {
+        tourRepository.unsubscribeStatus()
+
+        coVerify { robotClient.sendCommand(match {
+            it.op == "unsubscribe" && it.topic == "/robot_status"
+        }) }
     }
 }

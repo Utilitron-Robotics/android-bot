@@ -2,77 +2,112 @@ package com.opendroids.tourbot.data
 
 import android.util.Log
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flatMapLatest
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "MasterTourRepository"
 
+/**
+ * Master repository that delegates to either FakeTourRepository (test mode)
+ * or RealTourRepository (production mode).
+ *
+ * IMPORTANT: Test mode should NOT be changed during an active tour.
+ * The switch only takes full effect when a new tour is started.
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
 class MasterTourRepository @Inject constructor(
     private val realRepository: RealTourRepository,
     private val fakeRepository: FakeTourRepository
 ) : TourRepository {
 
-    private var activeRepository: TourRepository = fakeRepository
-
     private val _isInTestMode = MutableStateFlow(true)
     val isInTestMode: StateFlow<Boolean> = _isInTestMode.asStateFlow()
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    // Get the currently active repository based on test mode
+    private val activeRepository: TourRepository
+        get() = if (_isInTestMode.value) fakeRepository else realRepository
 
     override fun connect(url: String) {
-        scope.launch {
-            if (_isInTestMode.value) {
-                Log.d(TAG, "In test mode, using FakeRepository")
-                activeRepository = fakeRepository
-                activeRepository.connect(url)
+        Log.d(TAG, "connect() called, testMode=${_isInTestMode.value}")
+        activeRepository.connect(url)
+    }
+
+    override suspend fun tryConnect(url: String): Boolean {
+        Log.d(TAG, "tryConnect() called, testMode=${_isInTestMode.value}")
+        return activeRepository.tryConnect(url)
+    }
+
+    /**
+     * Switch between test and real mode.
+     * WARNING: Should not be called during an active tour - changes take effect on next tour start.
+     */
+    fun setTestMode(isTest: Boolean) {
+        if (_isInTestMode.value == isTest) {
+            Log.d(TAG, "Test mode already set to $isTest, no change needed")
+            return
+        }
+
+        Log.i(TAG, "Switching to ${if (isTest) "FAKE" else "REAL"} mode")
+        _isInTestMode.value = isTest
+    }
+
+    override fun disconnect() {
+        Log.d(TAG, "disconnect() called")
+        activeRepository.disconnect()
+    }
+
+    override fun goTo(poi: String) {
+        Log.d(TAG, "goTo($poi) called, testMode=${_isInTestMode.value}")
+        activeRepository.goTo(poi)
+    }
+
+    override suspend fun cancelNavigation() {
+        Log.d(TAG, "cancelNavigation() called")
+        activeRepository.cancelNavigation()
+    }
+
+    /**
+     * Returns a Flow that automatically switches to the appropriate repository's
+     * battery flow when test mode changes.
+     */
+    override fun getBatteryLevel(): Flow<Float> {
+        return _isInTestMode.flatMapLatest { isTest ->
+            if (isTest) {
+                fakeRepository.getBatteryLevel()
             } else {
-                Log.d(TAG, "Attempting to connect with RealRepository...")
-                val connectionSuccessful = realRepository.tryConnect(url)
-                if (connectionSuccessful) {
-                    Log.i(TAG, "✅ RealRepository connected. Switching to REAL mode.")
-                    activeRepository = realRepository
-                } else {
-                    Log.w(TAG, "⚠️ RealRepository failed to connect. No fallback.")
-                    // No change in active repository, user must manually switch to test mode
-                }
-                activeRepository.connect(url)
+                realRepository.getBatteryLevel()
             }
         }
     }
 
-    override suspend fun tryConnect(url: String): Boolean {
-        return if (_isInTestMode.value) {
-            fakeRepository.tryConnect(url)
-        } else {
-            realRepository.tryConnect(url)
+    /**
+     * Returns a Flow that automatically switches to the appropriate repository's
+     * status flow when test mode changes.
+     */
+    override fun observeStatus(): Flow<RobotStatusMessage> {
+        return _isInTestMode.flatMapLatest { isTest ->
+            if (isTest) {
+                fakeRepository.observeStatus()
+            } else {
+                realRepository.observeStatus()
+            }
         }
     }
 
-    fun setTestMode(isTest: Boolean) {
-        _isInTestMode.value = isTest
-        activeRepository = if (isTest) {
-            Log.i(TAG, "Switched to FAKE mode.")
-            fakeRepository
-        } else {
-            Log.i(TAG, "Switched to REAL mode.")
-            realRepository
-        }
+    override suspend fun subscribeStatus() {
+        Log.d(TAG, "subscribeStatus() called")
+        activeRepository.subscribeStatus()
     }
 
-    // Delegate all other TourRepository methods to the currently active repository
-    override fun disconnect() = activeRepository.disconnect()
-    override fun goTo(poi: String) = activeRepository.goTo(poi)
-    override suspend fun cancelNavigation() = activeRepository.cancelNavigation()
-    override fun getBatteryLevel(): Flow<Float> = activeRepository.getBatteryLevel()
-    override fun observeStatus(): Flow<RobotStatusMessage> = activeRepository.observeStatus()
-    override suspend fun subscribeStatus() = activeRepository.subscribeStatus()
-    override suspend fun unsubscribeStatus() = activeRepository.unsubscribeStatus()
+    override suspend fun unsubscribeStatus() {
+        Log.d(TAG, "unsubscribeStatus() called")
+        activeRepository.unsubscribeStatus()
+    }
 }

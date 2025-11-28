@@ -102,6 +102,12 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         private const val POINT_COUNT = 4000
         private const val FIXED_TIMESTEP = 1f / 60f  // Physics at 60Hz
 
+        // OpenGL ES extension constants (not defined in GLES20 class)
+        // GL_POINT_SPRITE_OES - enables point sprite mode (points rendered as textured quads)
+        private const val GL_POINT_SPRITE_OES = 0x8861
+        // GL_VERTEX_PROGRAM_POINT_SIZE - allows vertex shader to control gl_PointSize
+        private const val GL_VERTEX_PROGRAM_POINT_SIZE = 0x8642
+
         private const val VERTEX_SHADER = """
             uniform mat4 uMVPMatrix;
             attribute vec4 aPosition;
@@ -133,8 +139,16 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
         GLES20.glClearColor(0.01f, 0.01f, 0.03f, 1f)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-        GLES20.glEnable(0x8861)
-        GLES20.glEnable(0x8642)
+
+        // Enable point sprite extensions for smooth particle rendering
+        // Note: These are widely supported but may fail on some older devices
+        try {
+            GLES20.glEnable(GL_POINT_SPRITE_OES)
+            GLES20.glEnable(GL_VERTEX_PROGRAM_POINT_SIZE)
+        } catch (e: Exception) {
+            // Extensions not available - points will still render but may appear square
+            android.util.Log.w("PointCloudRenderer", "Point sprite extensions not available: ${e.message}")
+        }
 
         initializePhysics()
         shaderProgram = createShaderProgram()
