@@ -17,7 +17,7 @@ import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.data.model.TourState
 import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.audio.AudioPlayer
-import com.opendroids.tourbot.ui.components.RobotFace
+import com.opendroids.tourbot.ui.components.pointcloud.PointCloudFace
 import com.opendroids.tourbot.ui.settings.ControlPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,14 +58,17 @@ fun MainScreen(
                     modifier = Modifier.padding(16.dp)
                 )
 
-                // Robot Face
+                // 3D Point Cloud Face with text-driven lip sync
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(32.dp)
                 ) {
-                    RobotFace(amplitude = amplitude)
+                    PointCloudFace(
+                        amplitude = amplitude,
+                        captionText = captionText
+                    )
                 }
 
                 // Captions
