@@ -26,7 +26,7 @@ fun MainScreen(
     tourManager: TourManager,
     audioPlayer: AudioPlayer,
     tourConfigRepository: TourConfigRepository,
-    masterTourRepository: MasterTourRepository, // Add this line
+    masterTourRepository: MasterTourRepository,
     viewModel: MainViewModel = hiltViewModel()
 ) {
     val tourState by tourManager.tourState.collectAsState()
@@ -44,13 +44,14 @@ fun MainScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // Status Text
                 Text(
                     text = when (val state = tourState) {
                         is TourState.Idle -> "Ready for Tour"
                         is TourState.Navigating -> "Navigating to ${state.targetWaypoint.id}..."
                         is TourState.Speaking -> "Speaking at ${state.currentWaypoint.id}"
                         is TourState.Completed -> "Tour Completed"
+                        is TourState.Aborted -> "Tour Aborted"
+                        is TourState.ReturningHome -> "Returning to ${state.homeWaypoint.id}..."
                         is TourState.Error -> "Error: ${state.message}"
                     },
                     color = Color.White,
@@ -58,7 +59,6 @@ fun MainScreen(
                     modifier = Modifier.padding(16.dp)
                 )
 
-                // 3D Point Cloud Face with text-driven lip sync
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -71,7 +71,6 @@ fun MainScreen(
                     )
                 }
 
-                // Captions
                 Text(
                     text = captionText,
                     color = Color.White,
@@ -80,10 +79,9 @@ fun MainScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 32.dp, vertical = 16.dp)
-                        .heightIn(min = 72.dp) // Reserve space for captions
+                        .heightIn(min = 72.dp)
                 )
 
-                // Controls
                 if (tourState is TourState.Idle || tourState is TourState.Completed || tourState is TourState.Error) {
                     Button(
                         onClick = { tourManager.startTour() },
@@ -105,7 +103,6 @@ fun MainScreen(
             if (showControlPanel) {
                 ControlPanel(
                     onDismiss = { showControlPanel = false },
-                    tourManager = tourManager,
                     tourConfigRepository = tourConfigRepository,
                     masterTourRepository = masterTourRepository,
                     mainViewModel = viewModel
@@ -113,7 +110,6 @@ fun MainScreen(
             }
         }
 
-        // Settings icon
         IconButton(
             onClick = { showControlPanel = true },
             modifier = Modifier

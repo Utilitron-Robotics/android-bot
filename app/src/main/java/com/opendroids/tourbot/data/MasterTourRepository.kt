@@ -27,7 +27,7 @@ class MasterTourRepository @Inject constructor(
     private val fakeRepository: FakeTourRepository
 ) : TourRepository {
 
-    private val _isInTestMode = MutableStateFlow(true)
+    private val _isInTestMode = MutableStateFlow(false)
     val isInTestMode: StateFlow<Boolean> = _isInTestMode.asStateFlow()
 
     // Get the currently active repository based on test mode

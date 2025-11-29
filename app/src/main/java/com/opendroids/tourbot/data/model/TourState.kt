@@ -27,6 +27,18 @@ sealed class TourState {
     object Completed : TourState()
 
     /**
+     * The tour was aborted by the user.
+     */
+    object Aborted : TourState()
+
+    /**
+     * The robot is returning to the home position after an abort.
+     * @property homeWaypoint The waypoint the robot is returning to.
+     */
+    data class ReturningHome(val homeWaypoint: Waypoint) : TourState()
+
+
+    /**
      * An error occurred during the tour.
      * @property message The error message describing what went wrong.
      */
