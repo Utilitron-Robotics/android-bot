@@ -57,14 +57,11 @@ class TourManager @Inject constructor(
     val tourState: StateFlow<TourState> = _tourState.asStateFlow()
 
     private var tourJob: Job? = null
-    // Use SupervisorJob so child failures don't cancel the scope
     private val tourScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // Guard against double-execution of startTour()
     private val isStartingTour = AtomicBoolean(false)
     private val tourMutex = Mutex()
 
-    // Shared flow for status updates to handle single subscription and avoid stale states
     private var statusCollectionJob: Job? = null
     private val _sharedStatusFlow = MutableSharedFlow<RobotStatusMessage>(
         replay = 0,
@@ -76,13 +73,11 @@ class TourManager @Inject constructor(
         .stateIn(tourScope, SharingStarted.Eagerly, emptyList())
 
     fun startTour() {
-        // Guard against double-tap / rapid multiple calls
         if (!isStartingTour.compareAndSet(false, true)) {
             Log.w(TAG, "⚠️ startTour() called while already starting - ignoring duplicate call")
             return
         }
 
-        // If a tour is actively running (not idle/completed/error), ignore the request
         val currentState = _tourState.value
         if (currentState !is TourState.Idle &&
             currentState !is TourState.Completed &&
@@ -93,8 +88,6 @@ class TourManager @Inject constructor(
         }
 
         Log.i(TAG, "🎬 Tour start requested.")
-
-        // Cancel any previous tour job that might be lingering
         tourJob?.cancel()
         _tourState.value = TourState.Idle
 
@@ -108,127 +101,131 @@ class TourManager @Inject constructor(
     }
 
     fun abort() {
-        if (tourState.value is TourState.Idle) return
-        
+        if (tourState.value is TourState.Idle || tourState.value is TourState.ReturningHome) return
+
         Log.i(TAG, "⛔ Tour abort requested")
-        // Simple cancellation - matches Python behavior (just cancel the task)
         tourJob?.cancel(CancellationException("User aborted tour"))
+
+        tourScope.launch {
+            _tourState.value = TourState.Aborted
+            audioPlayer.speak("Tour aborted. Returning to start.")
+            delay(1000) // Give a moment for the message to be seen
+            returnHome()
+        }
     }
 
-    /**
-     * Main tour execution loop - Direct port of Python's _run_tour_background()
-     * 
-     * This follows the same structure as the Python version:
-     * 1. Connect to robot
-     * 2. Subscribe to status
-     * 3. Check battery level (optional, logs warning if low)
-     * 4. Play "start" script without navigation
-     * 5. Loop through waypoints: navigate -> play script
-     * 6. Disconnect and complete
-     */
-    private suspend fun runTour() {
-    try {
-        // 1. Connect and check battery
-        val robotUrl = settingsManager.robotUrl.first()
-        
-        Log.i(TAG, "Connecting to robot...")
-        if (!tourRepository.tryConnect(robotUrl)) {
-             throw IOException("Failed to connect to robot at $robotUrl")
+    private suspend fun returnHome() {
+        val homeId = tourConfigRepository.homeWaypointId.first()
+        val homeWaypoint = createWaypoint(homeId)
+        if (homeWaypoint == null) {
+            Log.e(TAG, "Cannot return home, home waypoint '$homeId' not found.")
+            _tourState.value = TourState.Error("Home waypoint not found")
+            return
         }
-        Log.i(TAG, "Robot connected successfully")
-        
-        // Start persistent status collection (Subscribe ONCE)
-        Log.i(TAG, "Subscribing to robot status updates...")
-        tourRepository.subscribeStatus() // Send subscription command
-        statusCollectionJob?.cancel()
-        statusCollectionJob = tourScope.launch {
-            tourRepository.observeStatus().collect {
-                _sharedStatusFlow.emit(it)
-            }
-        }
-        // Allow some time for subscription to establish and potential stale messages to flush
-        delay(1000)
 
-        // Battery check - Ported from Python (lines 238-247 in tour_bot.py)
-        // Python: battery = await self.commands.get_battery_level(timeout=3.0)
-        // Kotlin: Using Flow with timeout instead of direct async call
-        Log.i(TAG, "Checking battery level...")
+        Log.i(TAG, "↩️ Returning to home waypoint: $homeId")
+        _tourState.value = TourState.ReturningHome(homeWaypoint)
+
+        val navSuccess = navigateToWaypointWithRetry(homeId)
+        if (navSuccess) {
+            Log.i(TAG, "✓ Arrived at home waypoint.")
+            audioPlayer.speak("Arrived at start location.")
+        } else {
+            Log.e(TAG, "❌ Failed to return to home waypoint.")
+            audioPlayer.speak("Failed to return to the start location.")
+            _tourState.value = TourState.Error("Failed to return home")
+        }
+        delay(2000)
+        _tourState.value = TourState.Idle
+    }
+
+    private suspend fun runTour() {
         try {
-            withTimeout(5000) {
-                tourRepository.getBatteryLevel().take(1).collect { battery ->
-                    Log.i(TAG, "🔋 Battery level at tour start: $battery%")
-                    // Match Python's warning thresholds
-                    if (battery < 20) {
-                        Log.w(TAG, "⚠️ LOW BATTERY WARNING: $battery% - Tour may fail!")
-                        audioPlayer.speak("Warning, battery is critically low at $battery percent.")
-                    } else if (battery < 40) {
-                        Log.w(TAG, "⚠️ Battery is low: $battery% - Monitor closely")
-                    }
+            val robotUrl = settingsManager.robotUrl.first()
+            
+            Log.i(TAG, "Connecting to robot...")
+            if (!tourRepository.tryConnect(robotUrl)) {
+                 throw IOException("Failed to connect to robot at $robotUrl")
+            }
+            Log.i(TAG, "Robot connected successfully")
+            
+            Log.i(TAG, "Subscribing to robot status updates...")
+            tourRepository.subscribeStatus()
+            statusCollectionJob?.cancel()
+            statusCollectionJob = tourScope.launch {
+                tourRepository.observeStatus().collect {
+                    _sharedStatusFlow.emit(it)
                 }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "⚠️ Could not read battery level: ${e.message}")
-        }
+            delay(1000)
 
-        // 2. Play START script
-        playScriptAtLocation("start", "Playing introduction")
-
-        // 3. Iterate through waypoints (including 'end' which returns to home)
-        val waypoints = waypointIds.value
-        for (id in waypoints) {
-            _tourState.value = TourState.Navigating(createWaypoint(id)!!)
-            
-            val navSuccess = navigateToWaypointWithRetry(id)
-            
-            if (!navSuccess) {
-                Log.e(TAG, "Failed to reach $id, aborting tour")
-                audioPlayer.speak("Failed to reach $id, aborting tour.")
-                _tourState.value = TourState.Error("Failed to reach $id")
-                return // Exits runTour, cleanup happens in finally
+            Log.i(TAG, "Checking battery level...")
+            try {
+                withTimeout(5000) {
+                    tourRepository.getBatteryLevel().take(1).collect { battery ->
+                        Log.i(TAG, "🔋 Battery level at tour start: $battery%")
+                        if (battery < 20) {
+                            Log.w(TAG, "⚠️ LOW BATTERY WARNING: $battery% - Tour may fail!")
+                            audioPlayer.speak("Warning, battery is critically low at $battery percent.")
+                        } else if (battery < 40) {
+                            Log.w(TAG, "⚠️ Battery is low: $battery% - Monitor closely")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "⚠️ Could not read battery level: ${e.message}")
             }
-            
-            // Play script after arriving at waypoint
-            playScriptAtLocation(id, "At $id")
-        }
 
-        _tourState.value = TourState.Completed
-        audioPlayer.speak("Tour completed.")
-        Log.i(TAG, "✅ TOUR COMPLETED")
+            playScriptAtLocation("start", "Playing introduction")
 
-        // Disconnect after successful completion (matches Python)
-        cleanupAndDisconnect()
-        Log.i(TAG, "Disconnected from robot after tour completion")
+            val waypoints = waypointIds.value
+            for (id in waypoints) {
+                _tourState.value = TourState.Navigating(createWaypoint(id)!!)
+                
+                val navSuccess = navigateToWaypointWithRetry(id)
+                
+                if (!navSuccess) {
+                    Log.e(TAG, "Failed to reach $id, aborting tour")
+                    audioPlayer.speak("Failed to reach $id, aborting tour.")
+                    _tourState.value = TourState.Error("Failed to reach $id")
+                    return
+                }
+                
+                playScriptAtLocation(id, "At $id")
+            }
 
-        // Auto-reset to Idle after a brief display of completion status
-        delay(AUTO_RESET_DELAY_MS)
-        _tourState.value = TourState.Idle
-        Log.i(TAG, "Tour state reset to Idle")
+            _tourState.value = TourState.Completed
+            audioPlayer.speak("Tour completed.")
+            Log.i(TAG, "✅ TOUR COMPLETED")
 
-    } catch (e: CancellationException) {
-        // Tour cancelled by user - matches Python's asyncio.CancelledError handler
-        Log.w(TAG, "⛔ Tour cancelled: ${e.message}")
-        _tourState.value = TourState.Idle
-        cleanupAndDisconnect()
-        // Re-throw to allow parent coroutine to know about cancellation
-        throw e
-    } catch (e: Exception) {
-        // Unexpected error - matches Python's Exception handler
-        Log.e(TAG, "Tour failed: ${e.message}", e)
-        audioPlayer.speak("Tour failed with an error.")
-        _tourState.value = TourState.Error(e.message ?: "Unknown error")
-        cleanupAndDisconnect()
-    } finally {
-        // Always cleanup resources (matches Python's implicit cleanup)
-        Log.i(TAG, "Cleaning up tour resources...")
-        audioPlayer.stop()
-        try {
-            tourRepository.cancelNavigation()
+            cleanupAndDisconnect()
+            Log.i(TAG, "Disconnected from robot after tour completion")
+
+            delay(AUTO_RESET_DELAY_MS)
+            _tourState.value = TourState.Idle
+            Log.i(TAG, "Tour state reset to Idle")
+
+        } catch (e: CancellationException) {
+            Log.w(TAG, "⛔ Tour cancelled: ${e.message}")
+            // Don't set state here, abort() handles it
+            cleanupAndDisconnect()
+            throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Error cancelling navigation: ${e.message}")
+            Log.e(TAG, "Tour failed: ${e.message}", e)
+            audioPlayer.speak("Tour failed with an error.")
+            _tourState.value = TourState.Error(e.message ?: "Unknown error")
+            cleanupAndDisconnect()
+        } finally {
+            Log.i(TAG, "Cleaning up tour resources...")
+            audioPlayer.stop()
+            try {
+                tourRepository.cancelNavigation()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error cancelling navigation: ${e.message}")
+            }
+            statusCollectionJob?.cancel()
         }
-        statusCollectionJob?.cancel()
     }
-}
     
     private suspend fun cleanupAndDisconnect() {
         statusCollectionJob?.cancel()
@@ -244,15 +241,6 @@ class TourManager @Inject constructor(
         }
     }
     
-    /**
-     * Navigate to waypoint with automatic retry on failure
-     * Ported from Python's _navigate_to_waypoint() (lines 310-362 in tour_bot.py)
-     * 
-     * Python logic:
-     * 1. Try to navigate
-     * 2. If ConnectionError -> reconnect -> retry once
-     * 3. Return success/failure
-     */
     private suspend fun navigateToWaypointWithRetry(marker: String): Boolean {
         try {
             Log.i(TAG, "Sending navigation command to $marker...")
@@ -266,7 +254,6 @@ class TourManager @Inject constructor(
                 return true
             }
             
-            // Navigation failed - attempt recovery (matches Python's reconnection logic)
             Log.w(TAG, "⚠️ Navigation to $marker failed or timed out. Attempting recovery...")
             
             val reconnected = reconnectRobot()
@@ -274,7 +261,6 @@ class TourManager @Inject constructor(
                 return false
             }
 
-            // Retry navigation after reconnection (matches Python retry)
             Log.i(TAG, "🔄 Retrying waypoint $marker...")
             try {
                 tourRepository.goTo(marker)
@@ -290,7 +276,6 @@ class TourManager @Inject constructor(
             return false
 
         } catch (e: Exception) {
-            // Connection error during navigation - attempt reconnect (matches Python)
             Log.w(TAG, "⚠️ Exception during navigation: ${e.message}")
             
             val reconnected = reconnectRobot()
@@ -298,7 +283,6 @@ class TourManager @Inject constructor(
                 return false
             }
 
-            // Retry navigation
             Log.i(TAG, "🔄 Retrying waypoint $marker...")
             try {
                 tourRepository.goTo(marker)
@@ -314,42 +298,30 @@ class TourManager @Inject constructor(
         }
     }
     
-    /**
-     * Reconnect to robot after connection loss
-     * Ported from BaseRobotApplication.reconnect_robot() in base_api.py (lines 52-91)
-     * 
-     * Uses constants matching Python settings:
-     * - MAX_RECONNECTION_ATTEMPTS = 3 (matches MAX_RECONNECTION_ATTEMPTS)
-     * - RECONNECTION_DELAY_MS = 2000 (matches RECONNECTION_DELAY)
-     */
     private suspend fun reconnectRobot(): Boolean {
         Log.w(TAG, "🔄 Attempting to reconnect...")
         val robotUrl = settingsManager.robotUrl.first()
 
-        // Cancel existing status collection on disconnect
         statusCollectionJob?.cancel()
 
         for (attempt in 1..MAX_RECONNECTION_ATTEMPTS) {
             try {
                 Log.i(TAG, "Reconnection attempt $attempt/$MAX_RECONNECTION_ATTEMPTS")
                 
-                // Clean up old connection (matches Python's try/except cleanup)
                 try { tourRepository.disconnect() } catch (e: Exception) { /* ignore */ }
-                delay(500) // Brief pause before reconnect
+                delay(500)
                 
                 if (tourRepository.tryConnect(robotUrl)) {
                     Log.i(TAG, "✓ Reconnected successfully")
                     
-                    // Resubscribe to status (matches Python's resubscription)
                     tourRepository.subscribeStatus()
                     
-                    // Restart status collection after reconnection
                     statusCollectionJob = tourScope.launch {
                         tourRepository.observeStatus().collect {
                             _sharedStatusFlow.emit(it)
                         }
                     }
-                    delay(1000) // Wait for subscription to establish
+                    delay(1000)
                     
                     return true
                 }
@@ -371,7 +343,6 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
 
     _tourState.value = TourState.Speaking(waypoint)
 
-    // Apply pre-speak delay from settings (allows robot to settle before speaking)
     val preSpeakDelayMs = tourConfigRepository.preSpeakDelay.first()
     if (preSpeakDelayMs > 0) {
         Log.d(TAG, "Pre-speak delay: ${preSpeakDelayMs}ms")
@@ -391,99 +362,79 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
         Log.w(TAG, "⚠️ Audio playback timed out for ${waypoint.id} after ${AUDIO_PLAYBACK_TIMEOUT_MS}ms")
     }
 
-    // Delay after speech before next move
     delay(1000)
 }
     
-    /**
-     * Wait for robot to arrive at destination by monitoring status messages
-     * Ported from TiboCommands.wait_until_arrival() in tibo_commands.py (lines 194-308)
-     * 
-     * Python logic: Simple while loop calling receive_message()
-     * Kotlin adaptation: Uses Flow collection with transformWhile for same logic
-     * 
-     * Status codes (matches Python exactly):
-     * - 600/605: Idle/Standby - wait for movement
-     * - 601: Moving - navigation in progress
-     * - 602: Paused/Recalculating - continue waiting
-     * - 603: Navigation complete (success)
-     * - 604: Already at destination (success)
-     * - Other: Navigation failed
-     */
     private suspend fun waitForArrival(destinationName: String): Boolean {
         Log.d(TAG, "waitForArrival: Starting for $destinationName")
 
         return try {
-            withTimeout(300_000) { // 5 minutes timeout (matches Python's default)
+            withTimeout(300_000) {
                 var navigationStarted = false
                 var idleMessageCount = 0
                 
-                // Collect from the shared flow (single subscription)
-                // IMPORTANT: Only emit when we have a FINAL result (arrived or failed)
-                // NOT during intermediate states (moving, pausing, etc.)
                 _sharedStatusFlow
                     .mapNotNull { it.navStatus }
                     .transformWhile { nav ->
                         Log.d(TAG, "waitForArrival: Received navStatus=$nav")
                         when (nav) {
-                            601 -> { // Moving
-                                idleMessageCount = 0 // Reset counter
+                            601 -> {
+                                idleMessageCount = 0
                                 if (!navigationStarted) {
                                     navigationStarted = true
                                     Log.i(TAG, "🚶 Robot moving to $destinationName...")
                                 }
-                                // DON'T emit - just continue waiting
-                                true // Continue collecting
+                                true
                             }
-                            603, 604 -> { // Arrived or Already There
+                            603, 604 -> {
                                 if (nav == 603 && !navigationStarted) {
                                     Log.d(TAG, "waitForArrival: Ignoring stale 603 before movement started")
-                                    true // Ignore stale 603 before movement starts
+                                    true
                                 } else {
                                     Log.i(TAG, "✓ Arrived at $destinationName (status $nav)")
-                                    emit(true) // SUCCESS - emit and stop
-                                    false // Stop collecting (Success)
+                                    emit(true)
+                                    false
                                 }
                             }
-                            600, 605 -> { // Idle / Standby
+                            600, 605 -> {
                                 if (!navigationStarted) {
                                     idleMessageCount++
                                     if (idleMessageCount < MAX_IDLE_MESSAGES) {
                                         if (idleMessageCount == 1) Log.d(TAG, "Robot in idle state $nav, waiting...")
-                                        true // Continue waiting
+                                        true
                                     } else {
                                         Log.e(TAG, "❌ Navigation failed - robot stuck in idle state $nav after $idleMessageCount messages")
-                                        emit(false) // FAILURE - emit and stop
-                                        false // Stop collecting (Fail)
+                                        emit(false)
+                                        false
                                     }
                                 } else {
                                     Log.w(TAG, "Robot returned to idle state $nav after starting navigation")
-                                    true // Continue waiting
+                                    true
                                 }
                             }
-                            602 -> { // Paused
+                            602 -> {
                                 if (!navigationStarted) {
                                     idleMessageCount++
                                     if (idleMessageCount < MAX_IDLE_MESSAGES) {
                                         if (idleMessageCount == 1) Log.d(TAG, "Robot in state 602 before navigation started, waiting...")
-                                        true // Continue waiting
+                                        true
                                     } else {
                                         Log.e(TAG, "❌ Navigation failed - stuck in status $nav")
-                                        emit(false) // FAILURE - emit and stop
-                                        false // Stop collecting
+                                        emit(false)
+                                        false
                                     }
                                 } else {
                                     Log.d(TAG, "Robot paused/recalculating (status 602), continuing to wait...")
-                                    true // Continue waiting
+                                    true
                                 }
                             }
-                            else -> { // Error status
+                            else -> {
                                 Log.e(TAG, "waitForArrival: Unknown nav status: $nav for $destinationName. Emitting false.")
-                                emit(false) // FAILURE - emit and stop
-                                false // Stop collecting
+                                emit(false)
+                                false
                             }
                         }
-                    }.first() // Returns the first (and only) emitted value (true/false)
+                    }.first()
             }
         } catch (e: TimeoutCancellationException) {
             Log.e(TAG, "Navigation timed out for $destinationName")

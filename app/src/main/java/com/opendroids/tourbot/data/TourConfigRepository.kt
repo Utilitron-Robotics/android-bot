@@ -26,9 +26,11 @@ class TourConfigRepository @Inject constructor(
 ) {
     private val preSpeakDelayKey = intPreferencesKey("pre_speak_delay_ms")
     private val waypointListKey = stringPreferencesKey("waypoint_list_ordered")
+    private val homeWaypointKey = stringPreferencesKey("home_waypoint_id")
     private fun scriptKey(waypointId: String) = stringPreferencesKey("script_$waypointId")
 
     private val defaultPreSpeakDelay = 500
+    private val defaultHomeWaypoint = "end"
 
     private val defaultWaypoints = listOf(
         "empty_1",
@@ -43,6 +45,10 @@ class TourConfigRepository @Inject constructor(
 
     val preSpeakDelay: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[preSpeakDelayKey] ?: defaultPreSpeakDelay
+    }
+
+    val homeWaypointId: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[homeWaypointKey] ?: defaultHomeWaypoint
     }
 
     val waypointIds: Flow<List<String>> = context.dataStore.data.map { preferences ->
@@ -60,6 +66,12 @@ class TourConfigRepository @Inject constructor(
     suspend fun setPreSpeakDelay(delayMs: Int) {
         context.dataStore.edit { settings ->
             settings[preSpeakDelayKey] = delayMs
+        }
+    }
+
+    suspend fun setHomeWaypoint(waypointId: String) {
+        context.dataStore.edit { settings ->
+            settings[homeWaypointKey] = waypointId
         }
     }
 

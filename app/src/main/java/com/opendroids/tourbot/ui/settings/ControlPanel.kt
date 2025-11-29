@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,7 +25,10 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -55,14 +57,12 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourConfigRepository
-import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.MainViewModel
 import kotlinx.coroutines.launch
 
 @Composable
 fun ControlPanel(
     onDismiss: () -> Unit,
-    tourManager: TourManager,
     tourConfigRepository: TourConfigRepository,
     masterTourRepository: MasterTourRepository,
     mainViewModel: MainViewModel,
@@ -81,9 +81,10 @@ fun ControlPanel(
         }
     }
     val isInTestMode by masterTourRepository.isInTestMode.collectAsState()
+    val homeWaypointId by tourConfigRepository.homeWaypointId.collectAsState(initial = "end")
 
     LaunchedEffect(key1 = Unit) {
-        tourManager.waypointIds.collect {
+        tourConfigRepository.waypointIds.collect {
             if (!dragDropState.isDragging) {
                 waypointIds = it
             }
@@ -126,9 +127,8 @@ fun ControlPanel(
                         },
                         isInTestMode = isInTestMode,
                         onTestModeChange = { masterTourRepository.setTestMode(it) },
-                        onResetWaypoints = {
-                            scope.launch { tourConfigRepository.resetWaypointsToDefaults() }
-                        }
+                        homeWaypointId = homeWaypointId,
+                        onHomeWaypointSelected = { scope.launch { tourConfigRepository.setHomeWaypoint(it) } }
                     )
                     1 -> ErrorLogTab(mainViewModel = mainViewModel)
                 }
@@ -182,7 +182,8 @@ fun SettingsTab(
     onSaveWaypoints: (List<String>) -> Unit,
     isInTestMode: Boolean,
     onTestModeChange: (Boolean) -> Unit,
-    onResetWaypoints: () -> Unit
+    homeWaypointId: String,
+    onHomeWaypointSelected: (String) -> Unit
 ) {
     val listState = dragDropState.listState
 
@@ -201,6 +202,11 @@ fun SettingsTab(
             Text("Test Mode", modifier = Modifier.weight(1f))
             Switch(checked = isInTestMode, onCheckedChange = onTestModeChange)
         }
+        HomeWaypointSelector(
+            waypointIds = waypointIds,
+            selectedWaypointId = homeWaypointId,
+            onWaypointSelected = onHomeWaypointSelected
+        )
         Divider(modifier = Modifier.padding(vertical = 16.dp))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
             Text("Pre-speak delay (ms):", modifier = Modifier.weight(1f))
@@ -214,9 +220,6 @@ fun SettingsTab(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Waypoint Scripts", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.weight(1f))
-            TextButton(onClick = onResetWaypoints) {
-                Text("Reset", color = MaterialTheme.colorScheme.error)
-            }
             IconButton(onClick = onAddWaypointClick) {
                 Icon(Icons.Default.Add, contentDescription = "Add Waypoint")
             }
@@ -258,6 +261,48 @@ fun SettingsTab(
                             IconButton(onClick = { onRemoveWaypoint(waypointId) }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete Waypoint")
                             }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeWaypointSelector(
+    waypointIds: List<String>,
+    selectedWaypointId: String,
+    onWaypointSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+    ) {
+        Text("Home Waypoint", modifier = Modifier.weight(1f))
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded }
+        ) {
+            OutlinedTextField(
+                value = selectedWaypointId,
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier.menuAnchor()
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                waypointIds.forEach { waypointId ->
+                    DropdownMenuItem(
+                        text = { Text(waypointId) },
+                        onClick = {
+                            onWaypointSelected(waypointId)
+                            expanded = false
                         }
                     )
                 }
