@@ -125,7 +125,10 @@ fun ControlPanel(
                             scope.launch { tourConfigRepository.saveWaypoints(newWaypointIds) }
                         },
                         isInTestMode = isInTestMode,
-                        onTestModeChange = { masterTourRepository.setTestMode(it) }
+                        onTestModeChange = { masterTourRepository.setTestMode(it) },
+                        onResetWaypoints = {
+                            scope.launch { tourConfigRepository.resetWaypointsToDefaults() }
+                        }
                     )
                     1 -> ErrorLogTab(mainViewModel = mainViewModel)
                 }
@@ -178,7 +181,8 @@ fun SettingsTab(
     dragDropState: DragDropState,
     onSaveWaypoints: (List<String>) -> Unit,
     isInTestMode: Boolean,
-    onTestModeChange: (Boolean) -> Unit
+    onTestModeChange: (Boolean) -> Unit,
+    onResetWaypoints: () -> Unit
 ) {
     val listState = dragDropState.listState
 
@@ -210,6 +214,9 @@ fun SettingsTab(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Waypoint Scripts", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.weight(1f))
+            TextButton(onClick = onResetWaypoints) {
+                Text("Reset", color = MaterialTheme.colorScheme.error)
+            }
             IconButton(onClick = onAddWaypointClick) {
                 Icon(Icons.Default.Add, contentDescription = "Add Waypoint")
             }
