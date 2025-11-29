@@ -97,6 +97,8 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
     private var isSpeaking = false
     private var silenceTimer = 0f
     private var faceImpressionStrength = 0f
+    private var introComplete = false
+    private val introDuration = 2.5f  // seconds for face to coalesce
 
     private var noiseOffsetX = Random.nextFloat() * 1000f
     private var noiseOffsetY = Random.nextFloat() * 1000f
@@ -251,11 +253,24 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
             if (silenceTimer > 0.4f) isSpeaking = false
         }
 
-        val targetStrength = if (isSpeaking) 1f else 0f
-        val speed = if (isSpeaking) 4f else 2f
-        faceImpressionStrength += (targetStrength - faceImpressionStrength) * deltaTime * speed
+        // Face coalescing is driven by intro animation, NOT by speech
+        // The face should form over the first few seconds regardless of audio
+        if (!introComplete) {
+            // Smooth ease-out curve for natural coalescing
+            val introProgress = (timeElapsed / introDuration).coerceIn(0f, 1f)
+            val easedProgress = 1f - (1f - introProgress).pow(3)  // ease-out cubic
+            faceImpressionStrength = easedProgress
 
-        globalRotation += deltaTime * 6f
+            if (introProgress >= 1f) {
+                introComplete = true
+                faceImpressionStrength = 1f
+            }
+        }
+        // Once intro is complete, face stays formed (faceImpressionStrength = 1)
+
+        // Global rotation slows down as face forms
+        val rotationSpeed = 15f * (1f - faceImpressionStrength * 0.9f)  // Fast spin -> slow drift
+        globalRotation += deltaTime * rotationSpeed
     }
 
     private fun updateVisemes(deltaTime: Float) {
@@ -839,6 +854,6 @@ class PointCloudRenderer : GLSurfaceView.Renderer {
 
     fun skipToFace() {
         faceImpressionStrength = 1f
-        isSpeaking = true
+        introComplete = true
     }
 }
