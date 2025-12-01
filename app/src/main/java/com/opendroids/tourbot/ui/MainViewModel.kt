@@ -7,8 +7,10 @@ import com.opendroids.tourbot.data.TourRepository
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import com.opendroids.tourbot.data.settings.SettingsManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -27,6 +29,13 @@ class MainViewModel @Inject constructor(
             initialValue = ""
         )
 
+    val showNerdData: StateFlow<Boolean> = settingsManager.showNerdData
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false
+        )
+
     val robotStatus: StateFlow<RobotStatusMessage?> = tourRepository.observeStatus()
         .stateIn(
             scope = viewModelScope,
@@ -39,6 +48,12 @@ class MainViewModel @Inject constructor(
     fun setRobotUrl(url: String) {
         viewModelScope.launch {
             settingsManager.setRobotUrl(url)
+        }
+    }
+
+    fun onShowNerdDataChange(show: Boolean) {
+        viewModelScope.launch {
+            settingsManager.setShowNerdData(show)
         }
     }
 

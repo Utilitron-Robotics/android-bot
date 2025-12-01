@@ -9,851 +9,376 @@ import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.PI
-import kotlin.math.absoluteValue
 import kotlin.math.acos
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.floor
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.random.Random
 
-/**
- * Advanced point cloud renderer with real-time physics simulation
- * and text-driven phoneme lip sync for speech animation.
- *
- * Physics: Verlet integration with curl noise turbulence
- * Lip Sync: Text-to-phoneme estimation with proper articulation
- */
 class PointCloudRenderer : GLSurfaceView.Renderer {
 
-    // ========== Audio & Speech ==========
     @Volatile var amplitude: Float = 0f
-    @Volatile var currentText: String = ""
+    @Volatile var isSpeaking: Boolean = false
 
-    enum class Viseme {
-        NEUTRAL,
-        AA,         // Open jaw (ah, father)
-        EE,         // Wide stretched (ee, feet)
-        OO,         // Round pursed (oo, boot)
-        OH,         // Open round (oh, go)
-        AH,         // Neutral open (uh, but)
-        FV,         // Lower lip curls under teeth (f, v)
-        MBP,        // Lips pressed together (m, b, p)
-        TH,         // Tongue visible, lips parted
-        L,          // Tongue up, lips neutral
-        WR,         // Rounded like OO but tighter (w, r)
-        SZ,         // Slight smile, teeth together (s, z)
-        SH,         // Lips slightly protruded (sh, ch, j)
-        KG          // Back tongue, lips neutral (k, g)
-    }
-
-    private val visemeQueue = ArrayDeque<Pair<Viseme, Float>>()
-    private var currentViseme = Viseme.NEUTRAL
-    private var nextViseme = Viseme.NEUTRAL
-    private var visemeProgress = 0f
-    private var visemeDuration = 0.08f
-    private var lastProcessedText = ""
-
-    private var mouthOpenAmount = 0f
-    private var mouthWideAmount = 0f
-    private var mouthRoundAmount = 0f
-    private var lipClosureAmount = 0f
-    private var lipTuckAmount = 0f
-    private var lipProtrudeAmount = 0f
-    private var jawOpenAmount = 0f
-
-    // ========== Physics Simulation ==========
     private lateinit var positions: FloatArray
-    private lateinit var prevPositions: FloatArray
     private lateinit var velocities: FloatArray
     private lateinit var basePositions: FloatArray
+    private lateinit var energyLevels: FloatArray
     private var pointCount = 0
 
-    private val sphereRadius = 1.0f
-    private val springStiffness = 15f
-    private val damping = 0.97f
-    private val turbulenceStrength = 0.3f
-    private val noiseScale = 2.5f
+    private lateinit var lineIndices: IntArray
+    private var lineCount = 0
+    private lateinit var neighborMap: Array<IntArray>
 
-    // ========== OpenGL ==========
     private var vertexBuffer: FloatBuffer? = null
     private var colorBuffer: FloatBuffer? = null
     private var sizeBuffer: FloatBuffer? = null
-    private var shaderProgram = 0
+    private var lineVertexBuffer: FloatBuffer? = null
+    private var lineColorBuffer: FloatBuffer? = null
+
+    private var pointShaderProgram = 0
+    private var lineShaderProgram = 0
 
     private val mvpMatrix = FloatArray(16)
     private val projectionMatrix = FloatArray(16)
     private val viewMatrix = FloatArray(16)
     private val modelMatrix = FloatArray(16)
 
-    // ========== Animation State ==========
     private var timeElapsed = 0f
     private var lastFrameTime = System.nanoTime()
     private var globalRotation = 0f
-    private var isSpeaking = false
-    private var silenceTimer = 0f
-    private var faceImpressionStrength = 0f
-    private var introComplete = false
-    private val introDuration = 2.5f  // seconds for face to coalesce
-
-    private var noiseOffsetX = Random.nextFloat() * 1000f
-    private var noiseOffsetY = Random.nextFloat() * 1000f
-    private var noiseOffsetZ = Random.nextFloat() * 1000f
+    private var lastPulseTime = 0f
 
     companion object {
-        private const val COORDS_PER_VERTEX = 3
-        private const val POINT_COUNT = 4000
+        private const val POINT_COUNT = 2500
+        private const val NEIGHBOR_DISTANCE_THRESHOLD = 0.22f
+        private const val MAX_NEIGHBORS = 3
         private const val FIXED_TIMESTEP = 1f / 60f
-
-        private const val GL_POINT_SPRITE_OES = 0x8861
-        private const val GL_VERTEX_PROGRAM_POINT_SIZE = 0x8642
-
-        private const val VERTEX_SHADER = """
-            uniform mat4 uMVPMatrix;
-            attribute vec4 aPosition;
-            attribute vec4 aColor;
-            attribute float aPointSize;
-            varying vec4 vColor;
-            void main() {
-                gl_Position = uMVPMatrix * aPosition;
-                gl_PointSize = aPointSize;
-                vColor = aColor;
-            }
-        """
-
-        private const val FRAGMENT_SHADER = """
-            precision mediump float;
-            varying vec4 vColor;
-            void main() {
-                vec2 coord = gl_PointCoord - vec2(0.5);
-                float dist = length(coord);
-                float alpha = 1.0 - smoothstep(0.2, 0.5, dist);
-                float glow = exp(-dist * 3.0) * 0.6;
-                float core = exp(-dist * 8.0) * 0.4;
-                gl_FragColor = vec4(vColor.rgb * (1.0 + core), vColor.a * (alpha + glow));
-            }
-        """
     }
+
+    private val POINT_VERTEX_SHADER = """
+        uniform mat4 uMVPMatrix;
+        attribute vec4 aPosition;
+        attribute vec4 aColor;
+        attribute float aPointSize;
+        varying vec4 vColor;
+        void main() {
+            gl_Position = uMVPMatrix * aPosition;
+            gl_PointSize = aPointSize;
+            vColor = aColor;
+        }
+    """
+    private val POINT_FRAGMENT_SHADER = """
+        precision mediump float;
+        varying vec4 vColor;
+        void main() {
+            vec2 coord = gl_PointCoord - vec2(0.5);
+            float dist = length(coord);
+            float alpha = 1.0 - smoothstep(0.4, 0.5, dist);
+            gl_FragColor = vec4(vColor.rgb, vColor.a * alpha);
+        }
+    """
+    private val LINE_VERTEX_SHADER = """
+        uniform mat4 uMVPMatrix;
+        attribute vec4 aPosition;
+        attribute vec4 aColor;
+        varying vec4 vColor;
+        void main() {
+            gl_Position = uMVPMatrix * aPosition;
+            vColor = aColor;
+        }
+    """
+    private val LINE_FRAGMENT_SHADER = """
+        precision mediump float;
+        varying vec4 vColor;
+        void main() {
+            gl_FragColor = vColor;
+        }
+    """
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.01f, 0.01f, 0.03f, 1f)
+        GLES20.glClearColor(0.0f, 0.0f, 0.0f, 0.0f)
         GLES20.glEnable(GLES20.GL_BLEND)
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE)
-
-        try {
-            GLES20.glEnable(GL_POINT_SPRITE_OES)
-            GLES20.glEnable(GL_VERTEX_PROGRAM_POINT_SIZE)
-        } catch (e: Exception) {
-            android.util.Log.w("PointCloudRenderer", "Point sprite extensions not available: ${e.message}")
-        }
-
-        initializePhysics()
-        shaderProgram = createShaderProgram()
+        initializePoints()
+        pointShaderProgram = createShaderProgram(POINT_VERTEX_SHADER, POINT_FRAGMENT_SHADER)
+        lineShaderProgram = createShaderProgram(LINE_VERTEX_SHADER, LINE_FRAGMENT_SHADER)
     }
 
-    private fun initializePhysics() {
+    private fun initializePoints() {
         pointCount = POINT_COUNT
         positions = FloatArray(pointCount * 3)
-        prevPositions = FloatArray(pointCount * 3)
-        velocities = FloatArray(pointCount * 3)
         basePositions = FloatArray(pointCount * 3)
+        velocities = FloatArray(pointCount * 3)
+        energyLevels = FloatArray(pointCount)
 
+        generateBrainShape()
+
+        System.arraycopy(basePositions, 0, positions, 0, basePositions.size)
+        buildNeighborMap()
+
+        vertexBuffer = createFloatBuffer(pointCount * 3)
+        colorBuffer = createFloatBuffer(pointCount * 4)
+        sizeBuffer = createFloatBuffer(pointCount)
+        lineVertexBuffer = createFloatBuffer(lineCount * 3)
+        lineColorBuffer = createFloatBuffer(lineCount * 4)
+    }
+
+    private fun generateBrainShape() {
         val goldenRatio = (1.0 + sqrt(5.0)) / 2.0
+        for (i in 0 until POINT_COUNT) {
+            val theta = (2.0 * PI * i / goldenRatio).toFloat()
+            val phi = acos(1.0 - 2.0 * (i + 0.5) / POINT_COUNT).toFloat()
+            
+            var x = cos(theta) * sin(phi)
+            var y = sin(theta) * sin(phi)
+            var z = cos(phi)
+
+            // Deform sphere into a brain-like shape
+            x *= 1.0f  // Width (hemispheres)
+            y *= 0.8f  // Height (flatten top/bottom)
+            z *= 0.9f  // Depth (front to back)
+
+            // Central fissure
+            val fissureDepth = 0.15f
+            val fissureWidth = 0.1f
+            x -= (fissureDepth * exp(-(x * x) / (fissureWidth * fissureWidth))).toFloat()
+
+            // Add gyri/sulci details with noise
+            val noiseScale = 6f
+            val noiseStrength = 0.04f
+            val noiseX = noise(x * noiseScale, y * noiseScale, z * noiseScale, 0f) * noiseStrength
+            val noiseY = noise(x * noiseScale, y * noiseScale, z * noiseScale, 1f) * noiseStrength
+            val noiseZ = noise(x * noiseScale, y * noiseScale, z * noiseScale, 2f) * noiseStrength
+            
+            val finalScale = 1.6f
+            val offsetY = 0.1f
+            val idx = i * 3
+            basePositions[idx] = (x + noiseX) * finalScale
+            basePositions[idx + 1] = (y + noiseY + offsetY) * finalScale
+            basePositions[idx + 2] = (z + noiseZ) * finalScale
+        }
+    }
+
+    private fun buildNeighborMap() {
+        val neighborList = Array(pointCount) { mutableListOf<Int>() }
+        val lineIndexList = mutableListOf<Int>()
 
         for (i in 0 until pointCount) {
-            val theta = (2.0 * PI * i / goldenRatio).toFloat()
-            val phi = acos(1.0 - 2.0 * (i + 0.5) / pointCount).toFloat()
-
-            val sinPhi = sin(phi.toDouble()).toFloat()
-            val cosPhi = cos(phi.toDouble()).toFloat()
-            val sinTheta = sin(theta.toDouble()).toFloat()
-            val cosTheta = cos(theta.toDouble()).toFloat()
-
-            val x = sphereRadius * sinPhi * cosTheta
-            val y = sphereRadius * cosPhi
-            val z = sphereRadius * sinPhi * sinTheta
-
-            val idx = i * 3
-            positions[idx] = x
-            positions[idx + 1] = y
-            positions[idx + 2] = z
-
-            prevPositions[idx] = x
-            prevPositions[idx + 1] = y
-            prevPositions[idx + 2] = z
-
-            basePositions[idx] = x
-            basePositions[idx + 1] = y
-            basePositions[idx + 2] = z
-
-            velocities[idx] = 0f
-            velocities[idx + 1] = 0f
-            velocities[idx + 2] = 0f
+            val neighbors = mutableListOf<Pair<Int, Float>>()
+            for (j in (i + 1) until pointCount) {
+                val dx = basePositions[i * 3] - basePositions[j * 3]
+                val dy = basePositions[i * 3 + 1] - basePositions[j * 3 + 1]
+                val dz = basePositions[i * 3 + 2] - basePositions[j * 3 + 2]
+                val distSq = dx * dx + dy * dy + dz * dz
+                if (distSq < NEIGHBOR_DISTANCE_THRESHOLD * NEIGHBOR_DISTANCE_THRESHOLD) {
+                    neighbors.add(j to distSq)
+                }
+            }
+            neighbors.sortBy { it.second }
+            for (k in 0 until minOf(MAX_NEIGHBORS, neighbors.size)) {
+                val neighborIndex = neighbors[k].first
+                neighborList[i].add(neighborIndex)
+                neighborList[neighborIndex].add(i)
+                lineIndexList.add(i)
+                lineIndexList.add(neighborIndex)
+            }
         }
-
-        vertexBuffer = ByteBuffer.allocateDirect(pointCount * COORDS_PER_VERTEX * 4)
-            .order(ByteOrder.nativeOrder()).asFloatBuffer()
-        colorBuffer = ByteBuffer.allocateDirect(pointCount * 4 * 4)
-            .order(ByteOrder.nativeOrder()).asFloatBuffer()
-        sizeBuffer = ByteBuffer.allocateDirect(pointCount * 4)
-            .order(ByteOrder.nativeOrder()).asFloatBuffer()
+        neighborMap = Array(pointCount) { i -> neighborList[i].distinct().toIntArray() }
+        lineIndices = lineIndexList.distinct().toIntArray()
+        lineCount = lineIndices.size
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         GLES20.glViewport(0, 0, width, height)
         val ratio = width.toFloat() / height.toFloat()
-        Matrix.frustumM(projectionMatrix, 0, -ratio, ratio, -1f, 1f, 2f, 10f)
-        Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, 3.2f, 0f, 0f, 0f, 0f, 1f, 0f)
+        Matrix.frustumM(projectionMatrix, 0, -ratio, ratio, -1f, 1f, 1f, 20f)
+        Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, 3.5f, 0f, 0f, 0f, 0f, 1f, 0f)
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        val currentTime = System.nanoTime()
-        val deltaTime = ((currentTime - lastFrameTime) / 1_000_000_000f).coerceAtMost(0.1f)
-        lastFrameTime = currentTime
+        val deltaTime = ((System.nanoTime() - lastFrameTime) / 1_000_000_000f).coerceAtMost(0.1f)
+        lastFrameTime = System.nanoTime()
         timeElapsed += deltaTime
 
-        updateSpeechDetection(deltaTime)
-        updateVisemes(deltaTime)
-        updatePhysics(deltaTime)
+        updatePhysicsAndEnergy()
 
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-
-        updateBuffers()
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
         Matrix.setIdentityM(modelMatrix, 0)
-        Matrix.rotateM(modelMatrix, 0, globalRotation, 0f, 1f, 0f)
-        Matrix.rotateM(modelMatrix, 0, sinF(timeElapsed * 0.2f) * 3f, 1f, 0f, 0f)
-
+        if (!isSpeaking) {
+            globalRotation += deltaTime * 12f
+        }
+        Matrix.rotateM(modelMatrix, 0, globalRotation, 0.2f, 1f, 0.3f)
         Matrix.multiplyMM(mvpMatrix, 0, viewMatrix, 0, modelMatrix, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvpMatrix, 0)
 
-        renderPoints()
+        drawLines()
+        drawPoints()
     }
 
-    // ========== Float Math Helpers ==========
-    private fun sinF(x: Float): Float = sin(x.toDouble()).toFloat()
-    private fun cosF(x: Float): Float = cos(x.toDouble()).toFloat()
-    private fun sqrtF(x: Float): Float = sqrt(x.toDouble()).toFloat()
-    private fun expF(x: Float): Float = exp(x.toDouble()).toFloat()
-
-    // ========== Speech & Viseme System ==========
-
-    private fun updateSpeechDetection(deltaTime: Float) {
-        val currentlySpeaking = amplitude > 0.02f
-
-        if (currentlySpeaking) {
-            isSpeaking = true
-            silenceTimer = 0f
-        } else if (isSpeaking) {
-            silenceTimer += deltaTime
-            if (silenceTimer > 0.4f) isSpeaking = false
-        }
-
-        // Face coalescing is driven by intro animation, NOT by speech
-        // The face should form over the first few seconds regardless of audio
-        if (!introComplete) {
-            // Smooth ease-out curve for natural coalescing
-            val introProgress = (timeElapsed / introDuration).coerceIn(0f, 1f)
-            val easedProgress = 1f - (1f - introProgress).pow(3)  // ease-out cubic
-            faceImpressionStrength = easedProgress
-
-            if (introProgress >= 1f) {
-                introComplete = true
-                faceImpressionStrength = 1f
+    private fun updatePhysicsAndEnergy() {
+        if (isSpeaking && (timeElapsed - lastPulseTime > 0.05f)) {
+            val pulseCount = (amplitude * 40).toInt() + 3
+            for (i in 0 until pulseCount) {
+                val pointIndex = Random.nextInt(pointCount)
+                energyLevels[pointIndex] = max(energyLevels[pointIndex], Random.nextFloat() * 0.7f + 0.3f)
             }
-        }
-        // Once intro is complete, face stays formed (faceImpressionStrength = 1)
-
-        // Global rotation slows down as face forms
-        val rotationSpeed = 15f * (1f - faceImpressionStrength * 0.9f)  // Fast spin -> slow drift
-        globalRotation += deltaTime * rotationSpeed
-    }
-
-    private fun updateVisemes(deltaTime: Float) {
-        if (currentText != lastProcessedText && currentText.isNotEmpty()) {
-            processTextToVisemes(currentText)
-            lastProcessedText = currentText
+            lastPulseTime = timeElapsed
         }
 
-        if (isSpeaking && visemeQueue.isNotEmpty()) {
-            visemeProgress += deltaTime / visemeDuration
-
-            if (visemeProgress >= 1f) {
-                visemeProgress = 0f
-                currentViseme = if (visemeQueue.isNotEmpty()) {
-                    val (viseme, duration) = visemeQueue.removeFirst()
-                    visemeDuration = duration
-                    viseme
-                } else {
-                    Viseme.NEUTRAL
-                }
-                nextViseme = visemeQueue.firstOrNull()?.first ?: Viseme.NEUTRAL
-            }
-        } else if (!isSpeaking) {
-            currentViseme = Viseme.NEUTRAL
-            nextViseme = Viseme.NEUTRAL
-            visemeQueue.clear()
-        }
-
-        val coarticulationBlend = if (visemeProgress > 0.7f) {
-            (visemeProgress - 0.7f) / 0.3f
-        } else 0f
-
-        val currentParams = getVisemeParams(currentViseme)
-        val nextParams = getVisemeParams(nextViseme)
-
-        val targetOpen = lerp(currentParams.open, nextParams.open, coarticulationBlend)
-        val targetWide = lerp(currentParams.wide, nextParams.wide, coarticulationBlend)
-        val targetRound = lerp(currentParams.round, nextParams.round, coarticulationBlend)
-        val targetClosure = lerp(currentParams.closure, nextParams.closure, coarticulationBlend)
-        val targetTuck = lerp(currentParams.tuck, nextParams.tuck, coarticulationBlend)
-        val targetProtrude = lerp(currentParams.protrude, nextParams.protrude, coarticulationBlend)
-        val targetJaw = lerp(currentParams.jaw, nextParams.jaw, coarticulationBlend)
-
-        val blendSpeed = 25f
-        val closureSpeed = 40f
-        mouthOpenAmount += (targetOpen - mouthOpenAmount) * deltaTime * blendSpeed
-        mouthWideAmount += (targetWide - mouthWideAmount) * deltaTime * blendSpeed
-        mouthRoundAmount += (targetRound - mouthRoundAmount) * deltaTime * blendSpeed
-        lipClosureAmount += (targetClosure - lipClosureAmount) * deltaTime * closureSpeed
-        lipTuckAmount += (targetTuck - lipTuckAmount) * deltaTime * closureSpeed
-        lipProtrudeAmount += (targetProtrude - lipProtrudeAmount) * deltaTime * blendSpeed
-        jawOpenAmount += (targetJaw - jawOpenAmount) * deltaTime * blendSpeed
-    }
-
-    private data class VisemeParams(
-        val open: Float = 0f,
-        val wide: Float = 0f,
-        val round: Float = 0f,
-        val closure: Float = 0f,
-        val tuck: Float = 0f,
-        val protrude: Float = 0f,
-        val jaw: Float = 0f
-    )
-
-    private fun getVisemeParams(viseme: Viseme): VisemeParams = when (viseme) {
-        Viseme.NEUTRAL -> VisemeParams()
-        Viseme.AA -> VisemeParams(open = 1.0f, wide = 0.3f, jaw = 1.0f)
-        Viseme.EE -> VisemeParams(open = 0.2f, wide = 1.0f, jaw = 0.3f)
-        Viseme.OO -> VisemeParams(open = 0.3f, round = 1.0f, protrude = 0.7f, jaw = 0.4f)
-        Viseme.OH -> VisemeParams(open = 0.7f, round = 0.6f, jaw = 0.7f)
-        Viseme.AH -> VisemeParams(open = 0.5f, jaw = 0.5f)
-        Viseme.FV -> VisemeParams(open = 0.1f, tuck = 1.0f, jaw = 0.2f)
-        Viseme.MBP -> VisemeParams(closure = 1.0f)
-        Viseme.TH -> VisemeParams(open = 0.25f, jaw = 0.2f)
-        Viseme.L -> VisemeParams(open = 0.3f, jaw = 0.35f)
-        Viseme.WR -> VisemeParams(open = 0.2f, round = 0.8f, protrude = 0.9f)
-        Viseme.SZ -> VisemeParams(open = 0.05f, wide = 0.4f)
-        Viseme.SH -> VisemeParams(open = 0.15f, round = 0.3f, protrude = 0.5f)
-        Viseme.KG -> VisemeParams(open = 0.4f, jaw = 0.4f)
-    }
-
-    private fun processTextToVisemes(text: String) {
-        visemeQueue.clear()
-        val lowerText = text.lowercase()
-
-        var i = 0
-        while (i < lowerText.length) {
-            val (viseme, consumed) = mapCharToViseme(lowerText, i)
-            if (viseme != null) {
-                val duration = when (viseme) {
-                    Viseme.MBP -> 0.06f
-                    Viseme.FV, Viseme.SZ, Viseme.TH -> 0.08f
-                    Viseme.AA, Viseme.OH -> 0.12f
-                    else -> 0.09f
-                }
-                visemeQueue.addLast(viseme to duration)
-            }
-            i += consumed
-        }
-
-        if (visemeQueue.isNotEmpty() && currentViseme == Viseme.NEUTRAL) {
-            val (viseme, duration) = visemeQueue.removeFirst()
-            currentViseme = viseme
-            visemeDuration = duration
-            nextViseme = visemeQueue.firstOrNull()?.first ?: Viseme.NEUTRAL
-            visemeProgress = 0f
-        }
-    }
-
-    private fun mapCharToViseme(text: String, pos: Int): Pair<Viseme?, Int> {
-        val c: Char = text[pos]
-        val next: Char? = text.getOrNull(pos + 1)
-        val prev: Char? = text.getOrNull(pos - 1)
-
-        if (next != null) {
-            val digraph = "$c$next"
-            when (digraph) {
-                "th" -> return Viseme.TH to 2
-                "sh", "ch" -> return Viseme.SH to 2
-                "wh" -> return Viseme.WR to 2
-                "ph" -> return Viseme.FV to 2
-                "oo", "ou" -> return Viseme.OO to 2
-                "ee", "ea", "ie" -> return Viseme.EE to 2
-                "oa", "ow" -> return Viseme.OH to 2
-                "ai", "ay", "ei", "ey" -> return Viseme.EE to 2
-                "oi", "oy" -> return Viseme.OH to 2
-                "au", "aw" -> return Viseme.OH to 2
-                "ng" -> return Viseme.KG to 2
-                "qu" -> return Viseme.WR to 2
-            }
-        }
-
-        return when (c) {
-            'a' -> (if (next == 'l' || next == 'r' || next == 'w') Viseme.OH else Viseme.AA) to 1
-            'e' -> (if (next == null || next == ' ') null else Viseme.EE) to 1
-            'i', 'y' -> Viseme.EE to 1
-            'o' -> (if (next == 'n' || next == 'm') Viseme.AH else Viseme.OH) to 1
-            'u' -> (if (prev == 'q') null else Viseme.OO) to 1
-            'm', 'b', 'p' -> Viseme.MBP to 1
-            'f', 'v' -> Viseme.FV to 1
-            's', 'z' -> Viseme.SZ to 1
-            'w', 'r' -> Viseme.WR to 1
-            't', 'd', 'n' -> Viseme.L to 1
-            'k', 'g', 'c' -> (if (c == 'c' && (next == 'e' || next == 'i' || next == 'y')) Viseme.SZ else Viseme.KG) to 1
-            'l' -> Viseme.L to 1
-            'j' -> Viseme.SH to 1
-            'h' -> Viseme.AH to 1
-            'x' -> Viseme.KG to 1
-            ' ', ',', '.', '!', '?', '-', '\'' -> null to 1
-            else -> null to 1
-        }
-    }
-
-    // ========== Physics Simulation ==========
-
-    private fun updatePhysics(deltaTime: Float) {
-        var accumulator = deltaTime
-        while (accumulator >= FIXED_TIMESTEP) {
-            integrateVerlet(FIXED_TIMESTEP)
-            accumulator -= FIXED_TIMESTEP
-        }
-    }
-
-    private fun integrateVerlet(dt: Float) {
-        val dt2 = dt * dt
+        val nextEnergyLevels = FloatArray(pointCount)
+        val energyPropagationFactor = 0.4f
+        val energyDecayFactor = 1.0f - 2.8f * FIXED_TIMESTEP
 
         for (i in 0 until pointCount) {
-            val idx = i * 3
-
-            val x = positions[idx]
-            val y = positions[idx + 1]
-            val z = positions[idx + 2]
-
-            val px = prevPositions[idx]
-            val py = prevPositions[idx + 1]
-            val pz = prevPositions[idx + 2]
-
-            val bx = basePositions[idx]
-            val by = basePositions[idx + 1]
-            val bz = basePositions[idx + 2]
-
-            var fx = 0f
-            var fy = 0f
-            var fz = 0f
-
-            val turbulence = curlNoise(
-                x * noiseScale + noiseOffsetX + timeElapsed * 0.3f,
-                y * noiseScale + noiseOffsetY,
-                z * noiseScale + noiseOffsetZ + timeElapsed * 0.2f
-            )
-            val turbMult = turbulenceStrength * (1f - faceImpressionStrength * 0.7f)
-            fx += turbulence[0] * turbMult
-            fy += turbulence[1] * turbMult
-            fz += turbulence[2] * turbMult
-
-            val currentLen = sqrtF(x * x + y * y + z * z)
-            val targetRadius = sphereRadius + calculateFaceDisplacement(bx, by, bz) * faceImpressionStrength * 0.35f
-            val springForce = (targetRadius - currentLen) * springStiffness
-            if (currentLen > 0.001f) {
-                fx += (x / currentLen) * springForce
-                fy += (y / currentLen) * springForce
-                fz += (z / currentLen) * springForce
-            }
-
-            val latitudeFlow = (1f - faceImpressionStrength * 0.5f) * 0.5f
-            val tangentX = -z * latitudeFlow
-            val tangentZ = x * latitudeFlow
-            fx += tangentX
-            fz += tangentZ
-
-            val newX = x + (x - px) * damping + fx * dt2
-            val newY = y + (y - py) * damping + fy * dt2
-            val newZ = z + (z - pz) * damping + fz * dt2
-
-            prevPositions[idx] = x
-            prevPositions[idx + 1] = y
-            prevPositions[idx + 2] = z
-
-            positions[idx] = newX
-            positions[idx + 1] = newY
-            positions[idx + 2] = newZ
-        }
-    }
-
-    private fun curlNoise(x: Float, y: Float, z: Float): FloatArray {
-        val eps = 0.0001f
-
-        val n1 = noise3D(x, y + eps, z) - noise3D(x, y - eps, z)
-        val n2 = noise3D(x, y, z + eps) - noise3D(x, y, z - eps)
-        val n3 = noise3D(x + eps, y, z) - noise3D(x - eps, y, z)
-        val n4 = noise3D(x, y + eps, z) - noise3D(x, y - eps, z)
-        val n5 = noise3D(x, y, z + eps) - noise3D(x, y, z - eps)
-        val n6 = noise3D(x + eps, y, z) - noise3D(x - eps, y, z)
-
-        val curlX = (n2 - n4) / (2f * eps)
-        val curlY = (n3 - n5) / (2f * eps)
-        val curlZ = (n1 - n6) / (2f * eps)
-
-        return floatArrayOf(curlX, curlY, curlZ)
-    }
-
-    private fun noise3D(x: Float, y: Float, z: Float): Float {
-        val xi = floor(x.toDouble()).toInt()
-        val yi = floor(y.toDouble()).toInt()
-        val zi = floor(z.toDouble()).toInt()
-
-        val xf = x - xi
-        val yf = y - yi
-        val zf = z - zi
-
-        val u = smootherstep(xf)
-        val v = smootherstep(yf)
-        val w = smootherstep(zf)
-
-        val n000 = hash3D(xi, yi, zi)
-        val n001 = hash3D(xi, yi, zi + 1)
-        val n010 = hash3D(xi, yi + 1, zi)
-        val n011 = hash3D(xi, yi + 1, zi + 1)
-        val n100 = hash3D(xi + 1, yi, zi)
-        val n101 = hash3D(xi + 1, yi, zi + 1)
-        val n110 = hash3D(xi + 1, yi + 1, zi)
-        val n111 = hash3D(xi + 1, yi + 1, zi + 1)
-
-        val nx00 = lerp(n000, n100, u)
-        val nx01 = lerp(n001, n101, u)
-        val nx10 = lerp(n010, n110, u)
-        val nx11 = lerp(n011, n111, u)
-
-        val nxy0 = lerp(nx00, nx10, v)
-        val nxy1 = lerp(nx01, nx11, v)
-
-        return lerp(nxy0, nxy1, w)
-    }
-
-    private fun hash3D(x: Int, y: Int, z: Int): Float {
-        var h = x * 374761393 + y * 668265263 + z * 1274126177
-        h = (h xor (h shr 13)) * 1274126177
-        return (h and 0x7fffffff) / Int.MAX_VALUE.toFloat()
-    }
-
-    private fun smootherstep(t: Float): Float = t * t * t * (t * (t * 6f - 15f) + 10f)
-    private fun lerp(a: Float, b: Float, t: Float): Float = a + (b - a) * t
-
-    // ========== Face Displacement ==========
-
-    private fun calculateFaceDisplacement(x: Float, y: Float, z: Float): Float {
-        if (z < 0.1f) return 0f
-
-        val faceX = x / (z + 0.3f)
-        val faceY = y / (z + 0.3f)
-
-        val faceWidth = 0.55f
-        val faceHeight = faceWidth * 1.618f
-
-        if (faceX.absoluteValue > faceWidth || faceY.absoluteValue > faceHeight / 2) return 0f
-
-        var displacement = 0f
-        val zFactor = z.coerceIn(0.3f, 1f)
-
-        val faceOvalX = faceX / faceWidth
-        val faceOvalY = faceY / (faceHeight / 2)
-        val inFace = faceOvalX * faceOvalX + faceOvalY * faceOvalY < 1f
-        if (inFace) {
-            val centerFalloff = 1f - sqrtF(faceOvalX * faceOvalX + faceOvalY * faceOvalY)
-            displacement = 0.15f * centerFalloff * zFactor
-        }
-
-        if (faceY > 0.25f && faceX.absoluteValue < 0.4f) {
-            val foreheadFactor = ((faceY - 0.25f) / 0.35f).coerceIn(0f, 1f)
-            val foreheadCurve = cosF(faceX / 0.4f * PI.toFloat() / 2).pow(2)
-            displacement = max(displacement, 0.25f * foreheadFactor * foreheadCurve * zFactor)
-        }
-
-        val browY = faceY - 0.22f
-        if (browY.absoluteValue < 0.08f && faceX.absoluteValue < 0.42f) {
-            val browCurve = cosF(faceX / 0.42f * PI.toFloat() / 2).pow(1.5f)
-            val browPeak = 1f - (browY.absoluteValue / 0.08f)
-            displacement = max(displacement, 0.4f * browCurve * browPeak * zFactor)
-        }
-
-        val cheekCenterX = 0.38f
-        val cheekCenterY = 0.0f
-        val leftCheekDist = sqrtF((faceX + cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
-        val rightCheekDist = sqrtF((faceX - cheekCenterX).pow(2) + (faceY - cheekCenterY).pow(2))
-        val cheekDist = min(leftCheekDist, rightCheekDist)
-        if (cheekDist < 0.18f) {
-            val cheekFactor = (1f - cheekDist / 0.18f).pow(1.5f)
-            displacement = max(displacement, 0.55f * cheekFactor * zFactor)
-        }
-
-        val noseWidth = 0.06f
-        val noseBridgeTop = 0.15f
-        val noseTip = -0.18f
-        if (faceX.absoluteValue < noseWidth && faceY < noseBridgeTop && faceY > noseTip) {
-            val noseLength = noseBridgeTop - noseTip
-            val noseProgress = (noseBridgeTop - faceY) / noseLength
-            val noseProfile = 0.5f + 0.5f * sinF(noseProgress * PI.toFloat() / 2)
-            val noseCenterFalloff = 1f - (faceX.absoluteValue / noseWidth)
-            displacement = max(displacement, 0.7f * noseProfile * noseCenterFalloff * zFactor)
-        }
-        val noseTipDist = sqrtF(faceX.pow(2) + (faceY - noseTip).pow(2))
-        if (noseTipDist < 0.07f) {
-            displacement = max(displacement, 0.75f * (1f - noseTipDist / 0.07f) * zFactor)
-        }
-
-        val eyeY = 0.12f
-        val eyeSpacing = 0.22f
-        val eyeWidth = 0.1f
-        val eyeHeight = 0.045f
-
-        for (eyeX in listOf(-eyeSpacing, eyeSpacing)) {
-            val relX = (faceX - eyeX) / eyeWidth
-            val relY = (faceY - eyeY) / eyeHeight
-            val eyeEllipse = relX.pow(2) + relY.pow(2)
-            if (eyeEllipse < 1f) {
-                val eyeDepth = (1f - eyeEllipse).pow(0.7f)
-                displacement -= 0.25f * eyeDepth * zFactor
+            var propagatedEnergy = 0f
+            if (neighborMap[i].isNotEmpty()) {
+                for (neighborIndex in neighborMap[i]) {
+                    propagatedEnergy += energyLevels[neighborIndex]
+                }
+                nextEnergyLevels[i] = max(
+                    energyLevels[i] * energyDecayFactor,
+                    propagatedEnergy * energyPropagationFactor / neighborMap[i].size.toFloat()
+                )
+            } else {
+                nextEnergyLevels[i] = energyLevels[i] * energyDecayFactor
             }
         }
+        System.arraycopy(nextEnergyLevels, 0, energyLevels, 0, pointCount)
 
-        val lipCenterY = -0.35f
-        val lipWidth = 0.22f
-        val upperLipHeight = 0.035f
-        val lowerLipHeight = 0.055f
-
-        val lipY = faceY - lipCenterY
-        val lipXNorm = faceX.absoluteValue / lipWidth
-
-        if (lipXNorm < 1.2f) {
-            val jawDrop = jawOpenAmount * 0.08f
-            val lipOpen = mouthOpenAmount * 0.12f
-            val wideStretch = 1f + mouthWideAmount * 0.35f
-            val roundCompress = 1f - mouthRoundAmount * 0.3f
-            val protrudeZ = lipProtrudeAmount * 0.15f
-            val closurePress = lipClosureAmount * 0.12f
-
-            val effectiveLipWidth = lipWidth * wideStretch * roundCompress
-            val effectiveLipXNorm = faceX.absoluteValue / effectiveLipWidth
-
-            if (effectiveLipXNorm < 1f) {
-                val upperLipOffset = if (lipClosureAmount > 0.5f) {
-                    -closurePress
-                } else {
-                    lipOpen + jawDrop * 0.3f
-                }
-
-                val upperLipYPos = lipY + upperLipOffset
-                val upperLipThickness = upperLipHeight * (1.2f + lipOpen * 2f)
-
-                if (upperLipYPos > -closurePress && upperLipYPos < upperLipThickness) {
-                    val cupidsBow = if (effectiveLipXNorm < 0.3f) {
-                        0.7f + 0.3f * cosF(effectiveLipXNorm / 0.3f * PI.toFloat())
-                    } else {
-                        0.7f * (1f - (effectiveLipXNorm - 0.3f) / 0.7f).coerceAtLeast(0f)
-                    }
-                    val upperProfile = cupidsBow * (1f - effectiveLipXNorm.pow(2))
-
-                    var upperDisp = 0.5f * upperProfile * zFactor + protrudeZ
-
-                    if (lipClosureAmount > 0.5f) {
-                        upperDisp += 0.1f * lipClosureAmount * (1f - effectiveLipXNorm)
-                    }
-
-                    displacement = max(displacement, upperDisp)
-                }
-
-                val lowerLipOffset = when {
-                    lipClosureAmount > 0.5f -> closurePress
-                    lipTuckAmount > 0.3f -> lipTuckAmount * 0.06f
-                    else -> -(lipOpen * 1.3f + jawDrop)
-                }
-
-                val lowerLipYPos = lipY + lowerLipOffset
-                val lowerLipThickness = lowerLipHeight * (1.5f + lipOpen * 3f)
-
-                if (lowerLipYPos < closurePress && lowerLipYPos > -lowerLipThickness) {
-                    val lowerProfile = cosF(effectiveLipXNorm * PI.toFloat() / 2).pow(1.3f)
-                    val lowerFullness = (1f - (lowerLipYPos / (-lowerLipThickness)).pow(2)).coerceIn(0f, 1f)
-
-                    var lowerDisp = 0.6f * lowerProfile * lowerFullness * zFactor + protrudeZ
-
-                    if (lipTuckAmount > 0.3f) {
-                        lowerDisp *= (1f - lipTuckAmount * 0.7f)
-                        lowerDisp -= lipTuckAmount * 0.08f * lowerProfile
-                    }
-
-                    if (lipClosureAmount > 0.5f) {
-                        lowerDisp += 0.12f * lipClosureAmount * (1f - effectiveLipXNorm)
-                    }
-
-                    displacement = max(displacement, lowerDisp)
-                }
-
-                if (lipClosureAmount > 0.7f) {
-                    val seamY = lipY.absoluteValue
-                    if (seamY < 0.02f) {
-                        val seamFactor = (1f - seamY / 0.02f) * lipClosureAmount
-                        val seamProfile = (1f - effectiveLipXNorm.pow(2))
-                        displacement = max(displacement, 0.55f * seamFactor * seamProfile * zFactor)
-                    }
-                }
-            }
-        }
-
-        val jawY = -0.42f
-        val jawWidth = 0.45f
-        if (faceY < jawY && faceY > -0.55f) {
-            val jawProgress = (jawY - faceY) / 0.13f
-            val jawAngle = faceX.absoluteValue / (jawWidth * (1f - jawProgress * 0.4f))
-            if (jawAngle < 1f) {
-                val jawSharpness = (1f - jawAngle).pow(2f) * (1f - jawProgress)
-                displacement = max(displacement, 0.35f * jawSharpness * zFactor)
-            }
-        }
-
-        val chinY = -0.52f
-        val chinDist = sqrtF(faceX.pow(2) + (faceY - chinY).pow(2))
-        if (chinDist < 0.1f) {
-            val chinFactor = (1f - chinDist / 0.1f).pow(1.5f)
-            displacement = max(displacement, 0.4f * chinFactor * zFactor)
-        }
-
-        return displacement.coerceIn(-0.3f, 1f)
-    }
-
-    // ========== Rendering ==========
-
-    private fun updateBuffers() {
-        vertexBuffer?.clear()
-        colorBuffer?.clear()
-        sizeBuffer?.clear()
-
+        val breathing = sin(timeElapsed * 1.8f) * 0.015f
         for (i in 0 until pointCount) {
             val idx = i * 3
-            val x = positions[idx]
-            val y = positions[idx + 1]
-            val z = positions[idx + 2]
+            val targetX = basePositions[idx] * (1.0f + breathing)
+            val targetY = basePositions[idx + 1] * (1.0f + breathing)
+            val targetZ = basePositions[idx + 2] * (1.0f + breathing)
 
-            vertexBuffer?.put(x)
-            vertexBuffer?.put(y)
-            vertexBuffer?.put(z)
+            val fx = (targetX - positions[idx]) * 18.0f
+            val fy = (targetY - positions[idx + 1]) * 18.0f
+            val fz = (targetZ - positions[idx + 2]) * 18.0f
 
-            val displacement = calculateFaceDisplacement(
-                basePositions[idx], basePositions[idx + 1], basePositions[idx + 2]
-            )
+            velocities[idx] += fx * FIXED_TIMESTEP
+            velocities[idx + 1] += fy * FIXED_TIMESTEP
+            velocities[idx + 2] += fz * FIXED_TIMESTEP
 
-            val color = calculatePointColor(x, y, displacement)
-            colorBuffer?.put(color[0])
-            colorBuffer?.put(color[1])
-            colorBuffer?.put(color[2])
-            colorBuffer?.put(color[3])
+            val noise = curlNoise(positions[idx] * 0.6f, positions[idx + 1] * 0.6f, positions[idx + 2] * 0.6f, timeElapsed)
+            velocities[idx] += noise[0] * 0.6f
+            velocities[idx + 1] += noise[1] * 0.6f
+            velocities[idx + 2] += noise[2] * 0.6f
 
-            sizeBuffer?.put(calculatePointSize(displacement))
-        }
+            velocities[idx] *= 0.85f
+            velocities[idx + 1] *= 0.85f
+            velocities[idx + 2] *= 0.85f
 
-        vertexBuffer?.position(0)
-        colorBuffer?.position(0)
-        sizeBuffer?.position(0)
-    }
-
-    private fun calculatePointColor(x: Float, y: Float, displacement: Float): FloatArray {
-        val hue = (timeElapsed * 0.08f + y * 0.3f) % 1f
-
-        var r = 0.05f + hue * 0.15f
-        var g = 0.65f + displacement * 0.35f
-        var b = 0.95f
-        var a = 0.5f + displacement * 0.5f + faceImpressionStrength * 0.2f
-
-        if (displacement > 0.3f && faceImpressionStrength > 0.5f) {
-            val speechGlow = mouthOpenAmount * 0.3f
-            r += 0.3f * displacement + speechGlow
-            g = min(1f, g + 0.15f)
-        }
-
-        if (displacement < 0) {
-            r = 0.1f
-            g = 1f
-            b = 1f
-            a = 0.9f
-        }
-
-        val shimmer = sinF(timeElapsed * 4f + x * 8f + y * 8f) * 0.08f
-        g += shimmer
-
-        return floatArrayOf(
-            r.coerceIn(0f, 1f), g.coerceIn(0f, 1f),
-            b.coerceIn(0f, 1f), a.coerceIn(0f, 1f)
-        )
-    }
-
-    private fun calculatePointSize(displacement: Float): Float {
-        var size = 3.5f + displacement * 5f
-        size *= 1f + sinF(timeElapsed * 2.5f) * 0.08f
-        size *= 0.6f + faceImpressionStrength * 0.4f
-        if (displacement > 0.3f && mouthOpenAmount > 0.2f) {
-            size *= 1f + mouthOpenAmount * 0.3f
-        }
-        return size.coerceIn(2f, 14f)
-    }
-
-    private fun renderPoints() {
-        GLES20.glUseProgram(shaderProgram)
-
-        val posHandle = GLES20.glGetAttribLocation(shaderProgram, "aPosition")
-        val colorHandle = GLES20.glGetAttribLocation(shaderProgram, "aColor")
-        val sizeHandle = GLES20.glGetAttribLocation(shaderProgram, "aPointSize")
-        val mvpHandle = GLES20.glGetUniformLocation(shaderProgram, "uMVPMatrix")
-
-        GLES20.glUniformMatrix4fv(mvpHandle, 1, false, mvpMatrix, 0)
-
-        GLES20.glEnableVertexAttribArray(posHandle)
-        GLES20.glEnableVertexAttribArray(colorHandle)
-        GLES20.glEnableVertexAttribArray(sizeHandle)
-
-        GLES20.glVertexAttribPointer(posHandle, 3, GLES20.GL_FLOAT, false, 12, vertexBuffer)
-        GLES20.glVertexAttribPointer(colorHandle, 4, GLES20.GL_FLOAT, false, 16, colorBuffer)
-        GLES20.glVertexAttribPointer(sizeHandle, 1, GLES20.GL_FLOAT, false, 4, sizeBuffer)
-
-        GLES20.glDrawArrays(GLES20.GL_POINTS, 0, pointCount)
-
-        GLES20.glDisableVertexAttribArray(posHandle)
-        GLES20.glDisableVertexAttribArray(colorHandle)
-        GLES20.glDisableVertexAttribArray(sizeHandle)
-    }
-
-    private fun createShaderProgram(): Int {
-        val vs = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER).also {
-            GLES20.glShaderSource(it, VERTEX_SHADER)
-            GLES20.glCompileShader(it)
-        }
-        val fs = GLES20.glCreateShader(GLES20.GL_FRAGMENT_SHADER).also {
-            GLES20.glShaderSource(it, FRAGMENT_SHADER)
-            GLES20.glCompileShader(it)
-        }
-        return GLES20.glCreateProgram().also {
-            GLES20.glAttachShader(it, vs)
-            GLES20.glAttachShader(it, fs)
-            GLES20.glLinkProgram(it)
+            positions[idx] += velocities[idx] * FIXED_TIMESTEP
+            positions[idx + 1] += velocities[idx + 1] * FIXED_TIMESTEP
+            positions[idx + 2] += velocities[idx + 2] * FIXED_TIMESTEP
         }
     }
 
-    fun skipToFace() {
-        faceImpressionStrength = 1f
-        introComplete = true
+    private fun drawPoints() {
+        GLES20.glUseProgram(pointShaderProgram)
+        vertexBuffer?.clear(); colorBuffer?.clear(); sizeBuffer?.clear()
+        for (i in 0 until pointCount) {
+            val idx = i * 3
+            vertexBuffer?.put(positions, idx, 3)
+            val energy = energyLevels[i]
+            val r = lerp(0.2f, 0.9f, energy)
+            val g = lerp(0.5f, 1.0f, energy)
+            val b = 1.0f
+            val a = (0.5f + energy * 0.5f).coerceIn(0.2f, 1f)
+            colorBuffer?.put(r)?.put(g)?.put(b)?.put(a)
+            sizeBuffer?.put((1.0f + energy * 5.5f).coerceIn(0.5f, 6.5f))
+        }
+        setupAndDraw(pointShaderProgram, GLES20.GL_POINTS, pointCount, vertexBuffer, colorBuffer, sizeBuffer)
     }
+
+    private fun drawLines() {
+        GLES20.glUseProgram(lineShaderProgram)
+        lineVertexBuffer?.clear(); lineColorBuffer?.clear()
+        for (i in 0 until lineCount step 2) {
+            val p1Index = lineIndices[i]
+            val p2Index = lineIndices[i + 1]
+            val energy = max(energyLevels[p1Index], energyLevels[p2Index])
+            val alpha = (energy * 0.35f).coerceIn(0.0f, 0.2f)
+            
+            lineVertexBuffer?.put(positions, p1Index * 3, 3)
+            lineColorBuffer?.put(0.4f)?.put(0.8f)?.put(1.0f)?.put(alpha)
+            lineVertexBuffer?.put(positions, p2Index * 3, 3)
+            lineColorBuffer?.put(0.4f)?.put(0.8f)?.put(1.0f)?.put(alpha)
+        }
+        GLES20.glLineWidth(1.2f)
+        setupAndDraw(lineShaderProgram, GLES20.GL_LINES, lineCount, lineVertexBuffer, lineColorBuffer)
+    }
+
+    private fun setupAndDraw(program: Int, mode: Int, count: Int, vtxBuf: FloatBuffer?, colBuf: FloatBuffer?, sizeBuf: FloatBuffer? = null) {
+        vtxBuf?.position(0); colBuf?.position(0); sizeBuf?.position(0)
+        val pos = GLES20.glGetAttribLocation(program, "aPosition")
+        val col = GLES20.glGetAttribLocation(program, "aColor")
+        GLES20.glEnableVertexAttribArray(pos); GLES20.glEnableVertexAttribArray(col)
+        GLES20.glVertexAttribPointer(pos, 3, GLES20.GL_FLOAT, false, 12, vtxBuf)
+        GLES20.glVertexAttribPointer(col, 4, GLES20.GL_FLOAT, false, 16, colBuf)
+        
+        val size = GLES20.glGetAttribLocation(program, "aPointSize")
+        if (size != -1 && sizeBuf != null) {
+            GLES20.glEnableVertexAttribArray(size)
+            GLES20.glVertexAttribPointer(size, 1, GLES20.GL_FLOAT, false, 4, sizeBuf)
+        }
+
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(program, "uMVPMatrix"), 1, false, mvpMatrix, 0)
+        GLES20.glDrawArrays(mode, 0, count)
+
+        GLES20.glDisableVertexAttribArray(pos); GLES20.glDisableVertexAttribArray(col)
+        if (size != -1) GLES20.glDisableVertexAttribArray(size)
+    }
+
+    private fun createShaderProgram(vtx: String, frag: String): Int {
+        val vs = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER).also { GLES20.glShaderSource(it, vtx); GLES20.glCompileShader(it) }
+        val fs = GLES20.glCreateShader(GLES20.GL_FRAGMENT_SHADER).also { GLES20.glShaderSource(it, frag); GLES20.glCompileShader(it) }
+        return GLES20.glCreateProgram().also { GLES20.glAttachShader(it, vs); GLES20.glAttachShader(it, fs); GLES20.glLinkProgram(it) }
+    }
+    
+    private fun curlNoise(x: Float, y: Float, z: Float, t: Float): FloatArray {
+        val eps = 0.01f
+        val n1x = noise(x, y + eps, z, t); val n1y = noise(x, y - eps, z, t)
+        val n2x = noise(x, y, z + eps, t); val n2y = noise(x, y, z - eps, t)
+        val n3x = noise(x + eps, y, z, t); val n3y = noise(x - eps, y, z, t)
+        
+        val dx = (n2x - n2y) - (n1x - n1y)
+        val dy = (n3x - n3y) - (n2x - n2y)
+        val dz = (n1x - n1y) - (n3x - n3y)
+        
+        return floatArrayOf(dx, dy, dz)
+    }
+
+    private fun noise(x: Float, y: Float, z: Float, w: Float): Float {
+        val i = floor(x); val j = floor(y); val k = floor(z); val l = floor(w)
+        val f = x - i; val g = y - j; val h = z - k; val m = w - l
+        val u = f*f*f*(f*(f*6-15)+10); val v = g*g*g*(g*(g*6-15)+10)
+        val r = h*h*h*(h*(h*6-15)+10)
+        return lerp(
+            lerp(
+                lerp(grad(hash(i,j,k,l),f,g,h,m), grad(hash(i+1,j,k,l),f-1,g,h,m), u),
+                lerp(grad(hash(i,j+1,k,l),f,g-1,h,m), grad(hash(i+1,j+1,k,l),f-1,g-1,h,m), u), v),
+            lerp(
+                lerp(grad(hash(i,j,k+1,l),f,g,h-1,m), grad(hash(i+1,j,k+1,l),f-1,g,h-1,m), u),
+                lerp(grad(hash(i,j+1,k+1,l),f,g-1,h-1,m), grad(hash(i+1,j+1,k+1,l),f-1,g-1,h-1,m), u), v), r)
+    }
+    private fun lerp(a: Float, b: Float, t: Float) = a + t * (b - a)
+    private fun grad(hash: Int, x: Float, y: Float, z: Float, w: Float) = (if((hash and 8)!=0) x else -x) + (if((hash and 4)!=0) y else -y) + (if((hash and 2)!=0) z else -z) + (if((hash and 1)!=0) w else -w)
+    private fun hash(x: Float, y: Float, z: Float, w: Float): Int {
+        val p1 = 73856093 * x; val p2 = 19349663 * y; val p3 = 83492791 * z; val p4 = 47188699 * w
+        return (p1 + p2 + p3 + p4).toInt()
+    }
+
+    private fun createFloatBuffer(capacity: Int): FloatBuffer {
+        return ByteBuffer.allocateDirect(capacity * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    }
+
+    fun skipToFace() { /* No longer used */ }
 }
