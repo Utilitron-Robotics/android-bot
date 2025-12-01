@@ -193,6 +193,8 @@ class AudioPlayer @Inject constructor(
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     Log.d(TAG, "TTS Start: $utteranceId")
+                    // For TTS, we don't have a media player audio session ID directly.
+                    // We'll rely on the simulated amplitude for TTS for now.
                     startAmplitudePolling(isTts = true)
                 }
 
@@ -286,7 +288,7 @@ class AudioPlayer @Inject constructor(
                                 for (byte in data) {
                                     // Convert unsigned byte to signed (-128 to 127) then to absolute
                                     val sample = (byte.toInt() and 0xFF) - 128
-                                    sum += sample * sample
+                                    sum += sample * sample // Corrected line
                                 }
                                 val rms = kotlin.math.sqrt(sum.toDouble() / data.size)
                                 // Scale to 0-15000 range for compatibility with existing code

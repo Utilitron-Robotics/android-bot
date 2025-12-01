@@ -4,9 +4,11 @@ import android.util.Log
 import com.opendroids.tourbot.logic.tasks.DelayTask
 import kotlinx.coroutines.delay
 import javax.inject.Inject
+import javax.inject.Singleton
 
 private const val TAG = "DelayExecutor"
 
+@Singleton
 class DelayExecutor @Inject constructor() : TaskExecutor<DelayTask> {
 
     override suspend fun execute(task: DelayTask): Boolean {
