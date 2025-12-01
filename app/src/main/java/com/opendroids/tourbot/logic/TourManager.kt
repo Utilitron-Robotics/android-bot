@@ -8,6 +8,7 @@ import com.opendroids.tourbot.data.model.TourState
 import com.opendroids.tourbot.data.model.Waypoint
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import com.opendroids.tourbot.data.settings.SettingsManager
+import com.opendroids.tourbot.ui.MainViewModel
 import com.opendroids.tourbot.ui.audio.AudioPlayer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
@@ -31,7 +32,6 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -49,7 +49,8 @@ class TourManager @Inject constructor(
     private val tourRepository: TourRepository,
     private val audioPlayer: AudioPlayer,
     private val settingsManager: SettingsManager,
-    private val tourConfigRepository: TourConfigRepository
+    private val tourConfigRepository: TourConfigRepository,
+    private val mainViewModel: MainViewModel
 ) {
 
     private val _tourState = MutableStateFlow<TourState>(TourState.Idle)
@@ -57,9 +58,6 @@ class TourManager @Inject constructor(
 
     private var tourJob: Job? = null
     private val tourScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
-    private val isStartingTour = AtomicBoolean(false)
-    private val isAborting = AtomicBoolean(false)
 
     private var statusCollectionJob: Job? = null
     private val _sharedStatusFlow = MutableSharedFlow<RobotStatusMessage>(
@@ -72,17 +70,11 @@ class TourManager @Inject constructor(
         .stateIn(tourScope, SharingStarted.Eagerly, emptyList())
 
     fun startTour() {
-        if (!isStartingTour.compareAndSet(false, true)) {
-            Log.w(TAG, "⚠️ startTour() called while already starting - ignoring duplicate call")
-            return
-        }
-
         val currentState = _tourState.value
         if (currentState !is TourState.Idle &&
             currentState !is TourState.Completed &&
             currentState !is TourState.Error) {
             Log.w(TAG, "⚠️ Tour already in progress (state: $currentState) - ignoring start request")
-            isStartingTour.set(false)
             return
         }
 
@@ -91,33 +83,28 @@ class TourManager @Inject constructor(
         _tourState.value = TourState.Idle
 
         tourJob = tourScope.launch {
-            try {
-                runTour()
-            } finally {
-                isStartingTour.set(false)
-            }
+            runTour()
         }
     }
 
     fun abort() {
-        if (tourState.value is TourState.Idle || tourState.value is TourState.ReturningHome || isAborting.get()) return
+        if (tourState.value is TourState.Idle || tourState.value is TourState.ReturningHome) {
+            return
+        }
 
-        if (isAborting.compareAndSet(false, true)) {
-            Log.i(TAG, "⛔ Tour abort sequence initiated")
-            tourJob?.cancel(CancellationException(USER_ABORT_MESSAGE))
+        Log.i(TAG, "⛔ Tour abort sequence initiated")
+        tourJob?.cancel(CancellationException(USER_ABORT_MESSAGE))
 
-            tourScope.launch {
-                try {
-                    _tourState.value = TourState.Aborted
-                    audioPlayer.speak("Tour aborted. Returning to start.")
-                    delay(1000)
-                    returnHome()
-                } finally {
-                    Log.i(TAG, "Return-to-home sequence finished, performing final cleanup.")
-                    cleanupAndDisconnect()
-                    _tourState.value = TourState.Idle
-                    isAborting.set(false)
-                }
+        tourScope.launch {
+            try {
+                _tourState.value = TourState.Aborted
+                audioPlayer.speak("Tour aborted. Returning to start.")
+                delay(1000)
+                returnHome()
+            } finally {
+                Log.i(TAG, "Return-to-home sequence finished, performing final cleanup.")
+                cleanupAndDisconnect()
+                _tourState.value = TourState.Idle
             }
         }
     }
@@ -126,8 +113,10 @@ class TourManager @Inject constructor(
         val homeId = tourConfigRepository.homeWaypointId.first()
         val homeWaypoint = createWaypoint(homeId)
         if (homeWaypoint == null) {
-            Log.e(TAG, "Cannot return home, home waypoint '$homeId' not found.")
-            _tourState.value = TourState.Error("Home waypoint not found")
+            val errorMessage = "Cannot return home, home waypoint '$homeId' not found."
+            Log.e(TAG, errorMessage)
+            mainViewModel.logError(errorMessage)
+            _tourState.value = TourState.Error(errorMessage)
             return
         }
 
@@ -139,9 +128,10 @@ class TourManager @Inject constructor(
             Log.i(TAG, "✓ Arrived at home waypoint.")
             audioPlayer.speak("Arrived at start location.")
         } else {
-            Log.e(TAG, "❌ Failed to return to home waypoint.")
-            audioPlayer.speak("Failed to return to the start location.")
-            _tourState.value = TourState.Error("Failed to return home")
+            val errorMessage = "Failed to return to home waypoint."
+            Log.e(TAG, errorMessage)
+            mainViewModel.logError(errorMessage)
+            _tourState.value = TourState.Error(errorMessage)
         }
         delay(2000)
     }
@@ -180,21 +170,33 @@ class TourManager @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "⚠️ Could not read battery level: ${e.message}")
+                val errorMessage = "Could not read battery level: ${e.message}"
+                Log.w(TAG, "⚠️ $errorMessage")
+                mainViewModel.logError(errorMessage, e)
             }
 
             playScriptAtLocation("start", "Playing introduction")
 
             val waypoints = waypointIds.value
             for (id in waypoints) {
-                _tourState.value = TourState.Navigating(createWaypoint(id)!!)
+                val waypoint = createWaypoint(id)
+                if (waypoint == null) {
+                    val errorMessage = "Failed to create waypoint for id: $id"
+                    Log.e(TAG, errorMessage)
+                    mainViewModel.logError(errorMessage)
+                    _tourState.value = TourState.Error(errorMessage)
+                    return
+                }
+                _tourState.value = TourState.Navigating(waypoint)
                 
                 val navSuccess = navigateToWaypointWithRetry(id)
                 
                 if (!navSuccess) {
-                    Log.e(TAG, "Failed to reach $id, aborting tour")
-                    audioPlayer.speak("Failed to reach $id, aborting tour.")
-                    _tourState.value = TourState.Error("Failed to reach $id")
+                    val errorMessage = "Failed to reach $id, aborting tour"
+                    Log.e(TAG, errorMessage)
+                    mainViewModel.logError(errorMessage)
+                    audioPlayer.speak(errorMessage)
+                    _tourState.value = TourState.Error(errorMessage)
                     return
                 }
                 
@@ -215,26 +217,17 @@ class TourManager @Inject constructor(
         } catch (e: CancellationException) {
             Log.w(TAG, "⛔ Tour cancelled: ${e.message}")
             if (e.message != USER_ABORT_MESSAGE) {
+                mainViewModel.logError("Tour cancelled unexpectedly", e)
                 cleanupAndDisconnect()
+                _tourState.value = TourState.Idle
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Tour failed: ${e.message}", e)
+            val errorMessage = "Tour failed: ${e.message}"
+            Log.e(TAG, errorMessage, e)
+            mainViewModel.logError(errorMessage, e)
             audioPlayer.speak("Tour failed with an error.")
             _tourState.value = TourState.Error(e.message ?: "Unknown error")
             cleanupAndDisconnect()
-        } finally {
-            if (!isAborting.get()) {
-                Log.i(TAG, "Cleaning up tour resources on normal exit...")
-                audioPlayer.stop()
-                try {
-                    tourRepository.cancelNavigation()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error cancelling navigation: ${e.message}")
-                }
-                statusCollectionJob?.cancel()
-            } else {
-                Log.i(TAG, "Skipping cleanup in runTour finally block because an abort is in progress.")
-            }
         }
     }
     
@@ -245,11 +238,13 @@ class TourManager @Inject constructor(
             tourRepository.unsubscribeStatus()
         } catch (e: Exception) {
             Log.w(TAG, "Error unsubscribing: ${e.message}")
+            mainViewModel.logError("Error unsubscribing from robot status", e)
         }
         try {
             tourRepository.disconnect()
         } catch (e: Exception) {
             Log.w(TAG, "Error disconnecting: ${e.message}")
+            mainViewModel.logError("Error disconnecting from robot", e)
         }
         audioPlayer.stop()
     }
@@ -267,10 +262,13 @@ class TourManager @Inject constructor(
                 return true
             }
             
-            Log.w(TAG, "⚠️ Navigation to $marker failed or timed out. Attempting recovery...")
+            val errorMessage = "Navigation to $marker failed or timed out. Attempting recovery..."
+            Log.w(TAG, "⚠️ $errorMessage")
+            mainViewModel.logError(errorMessage)
             
             val reconnected = reconnectRobot()
             if (!reconnected) {
+                mainViewModel.logError("Failed to reconnect to robot after navigation failure.")
                 return false
             }
 
@@ -283,16 +281,21 @@ class TourManager @Inject constructor(
                     return true
                 }
             } catch (retryError: Exception) {
-                Log.e(TAG, "❌ Retry failed: ${retryError.message}")
+                val retryErrorMessage = "Retry failed for waypoint $marker: ${retryError.message}"
+                Log.e(TAG, "❌ $retryErrorMessage")
+                mainViewModel.logError(retryErrorMessage, retryError)
             }
             
             return false
 
         } catch (e: Exception) {
-            Log.w(TAG, "⚠️ Exception during navigation: ${e.message}")
+            val errorMessage = "Exception during navigation to $marker: ${e.message}"
+            Log.w(TAG, "⚠️ $errorMessage")
+            mainViewModel.logError(errorMessage, e)
             
             val reconnected = reconnectRobot()
             if (!reconnected) {
+                mainViewModel.logError("Failed to reconnect to robot after navigation exception.")
                 return false
             }
 
@@ -305,7 +308,9 @@ class TourManager @Inject constructor(
                     return true
                 }
             } catch (retryError: Exception) {
-                Log.e(TAG, "❌ Retry failed: ${retryError.message}")
+                val retryErrorMessage = "Retry failed after exception for waypoint $marker: ${retryError.message}"
+                Log.e(TAG, "❌ $retryErrorMessage")
+                mainViewModel.logError(retryErrorMessage, retryError)
             }
             return false
         }
@@ -339,7 +344,9 @@ class TourManager @Inject constructor(
                     return true
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Reconnection attempt $attempt failed: ${e.message}")
+                val errorMessage = "Reconnection attempt $attempt failed: ${e.message}"
+                Log.e(TAG, "❌ $errorMessage")
+                mainViewModel.logError(errorMessage, e)
             }
             if (attempt < MAX_RECONNECTION_ATTEMPTS) {
                 delay(RECONNECTION_DELAY_MS)
@@ -347,6 +354,7 @@ class TourManager @Inject constructor(
         }
         
         Log.e(TAG, "❌ All reconnection attempts exhausted")
+        mainViewModel.logError("All reconnection attempts to robot failed.")
         return false
     }
 
@@ -372,7 +380,9 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
         }
         Log.i(TAG, "✓ Audio playback complete for ${waypoint.id}")
     } catch (e: TimeoutCancellationException) {
-        Log.w(TAG, "⚠️ Audio playback timed out for ${waypoint.id} after ${AUDIO_PLAYBACK_TIMEOUT_MS}ms")
+        val errorMessage = "Audio playback timed out for ${waypoint.id} after ${AUDIO_PLAYBACK_TIMEOUT_MS}ms"
+        Log.w(TAG, "⚠️ $errorMessage")
+        mainViewModel.logError(errorMessage, e)
     }
 
     delay(1000)
@@ -416,7 +426,9 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
                                         if (idleMessageCount == 1) Log.d(TAG, "Robot in idle state $nav, waiting...")
                                         true
                                     } else {
-                                        Log.e(TAG, "❌ Navigation failed - robot stuck in idle state $nav after $idleMessageCount messages")
+                                        val errorMessage = "Navigation failed - robot stuck in idle state $nav after $idleMessageCount messages"
+                                        Log.e(TAG, "❌ $errorMessage")
+                                        mainViewModel.logError(errorMessage)
                                         emit(false)
                                         false
                                     }
@@ -432,7 +444,9 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
                                         if (idleMessageCount == 1) Log.d(TAG, "Robot in state 602 before navigation started, waiting...")
                                         true
                                     } else {
-                                        Log.e(TAG, "❌ Navigation failed - stuck in status $nav")
+                                        val errorMessage = "Navigation failed - stuck in status $nav"
+                                        Log.e(TAG, "❌ $errorMessage")
+                                        mainViewModel.logError(errorMessage)
                                         emit(false)
                                         false
                                     }
@@ -442,7 +456,9 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
                                 }
                             }
                             else -> {
-                                Log.e(TAG, "waitForArrival: Unknown nav status: $nav for $destinationName. Emitting false.")
+                                val errorMessage = "waitForArrival: Unknown nav status: $nav for $destinationName. Emitting false."
+                                Log.e(TAG, errorMessage)
+                                mainViewModel.logError(errorMessage)
                                 emit(false)
                                 false
                             }
@@ -450,7 +466,9 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
                     }.first()
             }
         } catch (e: TimeoutCancellationException) {
-            Log.e(TAG, "Navigation timed out for $destinationName")
+            val errorMessage = "Navigation timed out for $destinationName"
+            Log.e(TAG, errorMessage)
+            mainViewModel.logError(errorMessage, e)
             false
         }
     }
@@ -473,7 +491,9 @@ private suspend fun playScriptAtLocation(waypointId: String, description: String
 
             Waypoint(id, script.trim(), resId)
         } catch (e: IOException) {
-            Log.e(TAG, "❌ Error loading assets for waypoint $id", e)
+            val errorMessage = "Error loading assets for waypoint $id"
+            Log.e(TAG, "❌ $errorMessage", e)
+            mainViewModel.logError(errorMessage, e)
             null
         }
     }

@@ -17,6 +17,7 @@ import com.opendroids.tourbot.data.model.TourState
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.audio.AudioPlayer
+import com.opendroids.tourbot.ui.components.WaypointCarousel
 import com.opendroids.tourbot.ui.components.pointcloud.PointCloudFace
 import com.opendroids.tourbot.ui.settings.ControlPanel
 
@@ -31,6 +32,15 @@ fun MainScreen(
 ) {
     val tourState by tourManager.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
+    val waypointIds by tourManager.waypointIds.collectAsState()
+    
+    val currentWaypointId = when (val state = tourState) {
+        is TourState.Navigating -> state.targetWaypoint.id
+        is TourState.Speaking -> state.currentWaypoint.id
+        is TourState.ReturningHome -> state.homeWaypoint.id
+        else -> waypointIds.firstOrNull() ?: ""
+    }
+
     var showControlPanel by remember { mutableStateOf(false) }
     val showNerdData by viewModel.showNerdData.collectAsState()
     val robotStatus by viewModel.robotStatus.collectAsState()
@@ -45,61 +55,77 @@ fun MainScreen(
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                verticalArrangement = Arrangement.SpaceBetween // Changed for new layout
             ) {
-                Text(
-                    text = when (val state = tourState) {
-                        is TourState.Idle -> "Ready for Tour"
-                        is TourState.Navigating -> "Navigating to ${state.targetWaypoint.id}..."
-                        is TourState.Speaking -> "Speaking at ${state.currentWaypoint.id}"
-                        is TourState.Completed -> "Tour Completed"
-                        is TourState.Aborted -> "Tour Aborted"
-                        is TourState.ReturningHome -> "Returning to ${state.homeWaypoint.id}..."
-                        is TourState.Error -> "Error: ${state.message}"
-                    },
-                    color = Color.White,
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(16.dp)
-                )
+                // --- Top Section ---
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = when (val state = tourState) {
+                            is TourState.Idle -> "Ready for Tour"
+                            is TourState.Navigating -> "Navigating..."
+                            is TourState.Speaking -> "Speaking at..."
+                            is TourState.Completed -> "Tour Completed"
+                            is TourState.Aborted -> "Tour Aborted"
+                            is TourState.ReturningHome -> "Returning to Start..."
+                            is TourState.Error -> "Error: ${state.message}"
+                        },
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.padding(top = 32.dp)
+                    )
 
+                    WaypointCarousel(
+                        waypointIds = waypointIds,
+                        currentWaypointId = currentWaypointId,
+                        modifier = Modifier.height(80.dp)
+                    )
+                }
+
+                // --- Center Section (Future Media Box) ---
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(32.dp)
+                        .padding(horizontal = 32.dp, vertical = 16.dp),
+                    contentAlignment = Alignment.Center
                 ) {
+                    // This is where the image/video/website will go.
+                    // For now, the point cloud is here.
                     PointCloudFace(
                         amplitude = amplitude,
                         isSpeaking = tourState is TourState.Speaking
                     )
                 }
 
-                val captionText by audioPlayer.captionText.collectAsState()
-                Text(
-                    text = captionText,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp, vertical = 16.dp)
-                        .heightIn(min = 72.dp)
-                )
+                // --- Bottom Section ---
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    val captionText by audioPlayer.captionText.collectAsState()
+                    Text(
+                        text = captionText,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 32.dp)
+                            .heightIn(min = 72.dp)
+                    )
 
-                if (tourState is TourState.Idle || tourState is TourState.Completed || tourState is TourState.Error) {
-                    Button(
-                        onClick = { tourManager.startTour() },
-                        modifier = Modifier.padding(bottom = 48.dp)
-                    ) {
-                        Text("Start Tour")
-                    }
-                } else {
-                    Button(
-                        onClick = { tourManager.abort() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
-                        modifier = Modifier.padding(bottom = 48.dp)
-                    ) {
-                        Text("Abort Tour")
+                    if (tourState is TourState.Idle || tourState is TourState.Completed || tourState is TourState.Error) {
+                        Button(
+                            onClick = { tourManager.startTour() },
+                            modifier = Modifier.padding(bottom = 48.dp)
+                        ) {
+                            Text("Start Tour")
+                        }
+                    } else {
+                        Button(
+                            onClick = { tourManager.abort() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                            modifier = Modifier.padding(bottom = 48.dp)
+                        ) {
+                            Text("Abort Tour")
+                        }
                     }
                 }
             }
