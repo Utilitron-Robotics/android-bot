@@ -14,26 +14,31 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
-import com.google.accompanist.permissions.rememberPermissionState
 import com.opendroids.tourbot.data.ConnectionStatus
 import com.opendroids.tourbot.data.model.TourState
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
+import com.opendroids.tourbot.robot.Robot
 import com.opendroids.tourbot.ui.audio.AudioPlayer
 import com.opendroids.tourbot.ui.components.WaypointCarousel
 import com.opendroids.tourbot.ui.components.pointcloud.PointCloudFace
+import com.opendroids.tourbot.ui.connection.ConnectionViewModel
 import com.opendroids.tourbot.ui.settings.ControlPanel
+import com.opendroids.tourbot.ui.settings.SettingsViewModel
+import com.opendroids.tourbot.ui.tour.TourViewModel
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun MainScreen(
     audioPlayer: AudioPlayer,
-    viewModel: MainViewModel = hiltViewModel()
+    robot: Robot,
+    tourViewModel: TourViewModel = hiltViewModel(),
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
+    connectionViewModel: ConnectionViewModel = hiltViewModel()
 ) {
-    val tourState by viewModel.tourState.collectAsState()
+    val tourState by tourViewModel.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
-    val waypointIds by viewModel.waypointIds.collectAsState()
-    val connectionStatus by viewModel.connectionStatus.collectAsState()
-    val showTestModeDialog by viewModel.showTestModeDialog.collectAsState()
+    val waypointIds by tourViewModel.waypointIds.collectAsState()
+    val connectionStatus by connectionViewModel.connectionStatus.collectAsState()
 
     val currentWaypointId = when (val state = tourState) {
         is TourState.Navigating -> state.targetWaypoint.id
@@ -43,16 +48,12 @@ fun MainScreen(
     }
 
     var showControlPanel by remember { mutableStateOf(false) }
-    val showNerdData by viewModel.showNerdData.collectAsState()
-    val robotStatus by viewModel.robotStatus.collectAsState()
-    val isInTestMode by viewModel.isInTestMode.collectAsState()
-    val robotUrl by viewModel.robotUrl.collectAsState()
+    val showNerdData by settingsViewModel.showNerdData.collectAsState()
+    val robotStatus by robot.getStatus().collectAsState(initial = null)
+    val robotUrl by settingsViewModel.robotUrl.collectAsState()
 
-    // Request RECORD_AUDIO permission
-    val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
     LaunchedEffect(Unit) {
-        recordAudioPermissionState.launchPermissionRequest()
-        viewModel.connect()
+        connectionViewModel.connect(robotUrl)
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -90,19 +91,6 @@ fun MainScreen(
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp, vertical = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    PointCloudFace(
-                        amplitude = amplitude,
-                        isSpeaking = tourState is TourState.Speaking
-                    )
-                }
-
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     val captionText by audioPlayer.captionText.collectAsState()
                     Text(
@@ -118,14 +106,14 @@ fun MainScreen(
 
                     if (tourState is TourState.Idle || tourState is TourState.Completed || tourState is TourState.Error) {
                         Button(
-                            onClick = { viewModel.startTour() },
+                            onClick = { tourViewModel.startTour() },
                             modifier = Modifier.padding(bottom = 48.dp)
                         ) {
                             Text("Start Tour")
                         }
                     } else {
                         Button(
-                            onClick = { viewModel.abortTour() },
+                            onClick = { tourViewModel.abortTour() },
                             colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                             modifier = Modifier.padding(bottom = 48.dp)
                         ) {
@@ -137,17 +125,27 @@ fun MainScreen(
 
             if (showControlPanel) {
                 ControlPanel(
-                    onDismiss = { showControlPanel = false },
-                    mainViewModel = viewModel
+                    onDismiss = { showControlPanel = false }
                 )
             }
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 8.dp, end = 8.dp)
+                .size(100.dp)
+        ) {
+            PointCloudFace(
+                amplitude = amplitude,
+                isSpeaking = tourState is TourState.Speaking
+            )
         }
 
         if (showNerdData) {
             NerdStatsOverlay(
                 robotStatus = robotStatus,
                 tourState = tourState,
-                isInTestMode = isInTestMode,
                 robotUrl = robotUrl,
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -158,31 +156,13 @@ fun MainScreen(
         IconButton(
             onClick = { showControlPanel = true },
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 8.dp, end = 8.dp)
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 8.dp, end = 8.dp)
         ) {
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Settings",
                 tint = Color.White
-            )
-        }
-
-        if (showTestModeDialog) {
-            AlertDialog(
-                onDismissRequest = { viewModel.dismissTestModeDialog() },
-                title = { Text("Base Not Found") },
-                text = { Text("Could not connect to the robot base. Do you want to enter test mode?") },
-                confirmButton = {
-                    Button(onClick = { viewModel.setTestMode(true) }) {
-                        Text("Enter Test Mode")
-                    }
-                },
-                dismissButton = {
-                    Button(onClick = { viewModel.dismissTestModeDialog() }) {
-                        Text("Cancel")
-                    }
-                }
             )
         }
     }
@@ -228,7 +208,6 @@ fun ConnectionStatusIndicator(connectionStatus: ConnectionStatus) {
 private fun NerdStatsOverlay(
     robotStatus: RobotStatusMessage?,
     tourState: TourState,
-    isInTestMode: Boolean,
     robotUrl: String,
     modifier: Modifier = Modifier
 ) {
@@ -240,7 +219,6 @@ private fun NerdStatsOverlay(
             Text("NERD STATS", style = MaterialTheme.typography.titleMedium, color = Color.White)
             Spacer(modifier = Modifier.height(4.dp))
             
-            Text("Mode: ${if (isInTestMode) "TEST" else "PRODUCTION"}", color = if (isInTestMode) Color.Yellow else Color.Green)
             Text("Tour State: ${tourState::class.java.simpleName}", color = Color.White)
             Text("Robot URL: $robotUrl", color = Color.White)
             

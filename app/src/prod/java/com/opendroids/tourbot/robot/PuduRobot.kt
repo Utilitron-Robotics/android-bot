@@ -59,18 +59,16 @@ class PuduRobot @Inject constructor(
     }
 
     override fun pause() {
-        // Pudu robots do not have a pause API.
-        // This is a no-op.
+        // No-op
     }
 
     override fun resume() {
-        // Pudu robots do not have a resume API.
-        // This is a no-op.
+        // No-op
     }
 
     override fun getWaypoints(): Flow<List<Waypoint>> = flow {
         // This should be implemented by calling a service on the robot
         // that returns the list of waypoints.
-        emit(emptyList<Waypoint>())
+        emit(emptyList()) // Fixed emptyList reference
     }
 }

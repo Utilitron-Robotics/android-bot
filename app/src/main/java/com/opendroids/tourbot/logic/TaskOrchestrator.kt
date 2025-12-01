@@ -167,7 +167,7 @@ class TaskOrchestrator @Inject constructor(
                 Log.w(TAG, "   Expected file: app/src/main/assets/tour_scripts/$id.txt")
             }
 
-            Waypoint(id, script.trim(), resId)
+            Waypoint(id, id, script.trim(), resId) // Updated constructor call
         } catch (e: IOException) {
             val errorMessage = "Error loading assets for waypoint $id"
             Log.e(TAG, "❌ $errorMessage", e)

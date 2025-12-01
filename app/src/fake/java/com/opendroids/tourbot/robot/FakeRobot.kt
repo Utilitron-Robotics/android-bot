@@ -25,9 +25,9 @@ class FakeRobot @Inject constructor() : Robot {
         while (true) {
             emit(
                 RobotStatusMessage(
-                    navStatus = "Idle",
+                    navStatus = 0, // Changed from "Idle" (String) to 0 (Int?)
                     battery = 0.8f,
-                    velocity = 0.0f,
+                    velocity = listOf(0.0f, 0.0f, 0.0f), // Changed from 0.0f (Float) to List<Float>?
                     currentPoi = "start"
                 )
             )

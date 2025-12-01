@@ -1,5 +1,6 @@
 package com.opendroids.tourbot.ui.components.pointcloud
 
+import android.Manifest
 import android.opengl.GLSurfaceView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
@@ -9,6 +10,8 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberPermissionState
 
 /**
  * Jetpack Compose wrapper for the 3D point cloud face animation.
@@ -21,6 +24,7 @@ import androidx.lifecycle.LifecycleEventObserver
  * @param modifier Compose modifier for layout
  * @param skipIntro If true, skips the swirling intro and shows face immediately
  */
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun PointCloudFace(
     amplitude: Int,
@@ -30,6 +34,12 @@ fun PointCloudFace(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+
+    LaunchedEffect(Unit) {
+        recordAudioPermissionState.launchPermissionRequest()
+    }
 
     // Create renderer instance
     val renderer = remember { PointCloudRenderer() }
@@ -70,23 +80,25 @@ fun PointCloudFace(
         }
     }
 
-    AndroidView(
-        modifier = modifier.fillMaxSize(),
-        factory = { ctx ->
-            GLSurfaceView(ctx).apply {
-                setEGLContextClientVersion(2)
-                setEGLConfigChooser(8, 8, 8, 8, 16, 0)
-                holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
-                setZOrderOnTop(false)
-                setRenderer(renderer)
-                renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
-                glSurfaceView = this
+    if (recordAudioPermissionState.hasPermission) {
+        AndroidView(
+            modifier = modifier.fillMaxSize(),
+            factory = { ctx ->
+                GLSurfaceView(ctx).apply {
+                    setEGLContextClientVersion(2)
+                    setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+                    holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
+                    setZOrderOnTop(false)
+                    setRenderer(renderer)
+                    renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+                    glSurfaceView = this
+                }
+            },
+            update = { view ->
+                // View updates happen via LaunchedEffects
             }
-        },
-        update = { view ->
-            // View updates happen via LaunchedEffects
-        }
-    )
+        )
+    }
 }
 
 /**

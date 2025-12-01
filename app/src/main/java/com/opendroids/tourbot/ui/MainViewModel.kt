@@ -2,18 +2,15 @@ package com.opendroids.tourbot.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.opendroids.tourbot.data.ConnectionStatus
 import com.opendroids.tourbot.data.ErrorLogger
-import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourConfigRepository
-import com.opendroids.tourbot.data.TourRepository
 import com.opendroids.tourbot.data.model.TourState
+import com.opendroids.tourbot.robot.Robot
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import com.opendroids.tourbot.data.settings.SettingsManager
 import com.opendroids.tourbot.logic.TaskOrchestrator
 import com.opendroids.tourbot.logic.TourManager
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,28 +24,16 @@ class MainViewModel @Inject constructor(
     private val tourManager: TourManager,
     private val taskOrchestrator: TaskOrchestrator,
     private val tourConfigRepository: TourConfigRepository,
-    private val tourRepository: TourRepository,
-    private val masterTourRepository: MasterTourRepository,
+    private val robot: Robot, // Injected Robot interface directly
     val errorLogger: ErrorLogger
 ) : ViewModel() {
 
     val tourState: StateFlow<TourState> = taskOrchestrator.tourState
     val waypointIds: StateFlow<List<String>> = tourConfigRepository.waypointIds.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val robotStatus: StateFlow<RobotStatusMessage?> = tourRepository.observeStatus().stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val isInTestMode: StateFlow<Boolean> = masterTourRepository.isInTestMode
+    val robotStatus: StateFlow<RobotStatusMessage?> = robot.getStatus().stateIn(viewModelScope, SharingStarted.Eagerly, null) // Using Robot directly
     val homeWaypointId: StateFlow<String> = tourConfigRepository.homeWaypointId.stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    val connectionStatus: StateFlow<ConnectionStatus> = masterTourRepository.connectionStatus
 
-    private val _showTestModeDialog = MutableStateFlow(false)
-    val showTestModeDialog: StateFlow<Boolean> = _showTestModeDialog.asStateFlow()
-
-    init {
-        viewModelScope.launch {
-            masterTourRepository.promptForTestMode.collect {
-                _showTestModeDialog.value = true
-            }
-        }
-    }
+    // Removed _showTestModeDialog and related logic as it's handled by build flavors now
 
     val robotUrl: StateFlow<String> = settingsManager.robotUrl
         .stateIn(
@@ -102,24 +87,5 @@ class MainViewModel @Inject constructor(
         errorLogger.clearErrors()
     }
 
-    fun connect() {
-        viewModelScope.launch {
-            masterTourRepository.tryConnect(robotUrl.value)
-        }
-    }
-
-    fun setTestMode(isTest: Boolean) {
-        viewModelScope.launch {
-            masterTourRepository.setTestMode(isTest)
-            if (isTest) {
-                // If switching to test mode, try to connect with the fake repository
-                masterTourRepository.tryConnect(robotUrl.value)
-            }
-            _showTestModeDialog.value = false // Dismiss dialog after selection
-        }
-    }
-
-    fun dismissTestModeDialog() {
-        _showTestModeDialog.value = false
-    }
+    // Removed connect and setTestMode functions as they are now in ConnectionViewModel
 }

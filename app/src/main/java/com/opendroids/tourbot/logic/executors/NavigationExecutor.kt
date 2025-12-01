@@ -2,21 +2,21 @@ package com.opendroids.tourbot.logic.executors
 
 import android.util.Log
 import com.opendroids.tourbot.data.ErrorLogger
-import com.opendroids.tourbot.data.TourRepository
+import com.opendroids.tourbot.data.model.NavigationStatus
+import com.opendroids.tourbot.robot.Robot
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "NavigationExecutor"
-private const val MAX_IDLE_MESSAGES = 50
+private const val MAX_IDLE_MESSAGES = 50 // This might need adjustment or removal if Robot.getStatus() is used differently
 
 @Singleton
 class NavigationExecutor @Inject constructor(
-    private val tourRepository: TourRepository,
+    private val robot: Robot, // Changed from TourRepository to Robot
     private val errorLogger: ErrorLogger
 ) {
 
@@ -25,82 +25,56 @@ class NavigationExecutor @Inject constructor(
         return navigateToWaypointWithRetry(waypointId)
     }
 
-    private suspend fun navigateToWaypointWithRetry(marker: String): Boolean {
+    private suspend fun navigateToWaypointWithRetry(waypointId: String): Boolean {
         try {
-            tourRepository.goTo(marker)
-            Log.i(TAG, "Waiting for arrival at $marker...")
-            val success = waitForArrival(marker)
+            Log.i(TAG, "Initiating navigation to $waypointId...")
+            val success = waitForNavigationCompletion(waypointId)
 
             if (success) {
-                Log.i(TAG, "✓ Reached $marker")
+                Log.i(TAG, "✓ Reached $waypointId")
                 return true
             }
             
-            val errorMessage = "Navigation to $marker failed or timed out."
+            val errorMessage = "Navigation to $waypointId failed or timed out."
             Log.w(TAG, "⚠️ $errorMessage")
             errorLogger.logError(errorMessage)
             return false
 
         } catch (e: Exception) {
-            val errorMessage = "Exception during navigation to $marker: ${e.message}"
+            val errorMessage = "Exception during navigation to $waypointId: ${e.message}"
             Log.w(TAG, "⚠️ $errorMessage")
             errorLogger.logError(errorMessage, e)
             return false
         }
     }
 
-    private suspend fun waitForArrival(destinationName: String): Boolean {
-        Log.d(TAG, "waitForArrival: Starting for $destinationName")
+    private suspend fun waitForNavigationCompletion(destinationName: String): Boolean {
+        Log.d(TAG, "waitForNavigationCompletion: Starting for $destinationName")
 
         return try {
             withTimeout(300_000) { // 5 minutes timeout
-                var navigationStarted = false
-                var idleMessageCount = 0
-                
-                tourRepository.observeStatus()
-                    .mapNotNull { it.navStatus }
-                    .transformWhile { nav ->
-                        when (nav) {
-                            601 -> { // Moving
-                                idleMessageCount = 0
-                                if (!navigationStarted) {
-                                    navigationStarted = true
-                                    Log.i(TAG, "🚶 Robot moving to $destinationName...")
-                                }
+                robot.navigateTo(destinationName)
+                    .transformWhile { status ->
+                        when (status) {
+                            NavigationStatus.NAVIGATING -> {
+                                Log.i(TAG, "🚶 Robot moving to $destinationName...")
+                                emit(false) // Continue waiting, but don't consider it a final success yet
                                 true // Continue collecting
                             }
-                            603, 604 -> { // Arrived or Already There
-                                Log.i(TAG, "✓ Arrived at $destinationName (status $nav)")
+                            NavigationStatus.SUCCEEDED -> {
+                                Log.i(TAG, "✓ Arrived at $destinationName")
                                 emit(true)
                                 false // Stop collecting (Success)
                             }
-                            600, 605 -> { // Idle / Standby
-                                if (!navigationStarted) {
-                                    idleMessageCount++
-                                    if (idleMessageCount < MAX_IDLE_MESSAGES) {
-                                        if (idleMessageCount == 1) Log.d(TAG, "Robot in idle state $nav, waiting...")
-                                        true // Continue waiting
-                                    } else {
-                                        val errorMessage = "Navigation failed - robot stuck in idle state $nav after $idleMessageCount messages"
-                                        Log.e(TAG, "❌ $errorMessage")
-                                        errorLogger.logError(errorMessage)
-                                        emit(false)
-                                        false // Stop collecting (Fail)
-                                    }
-                                } else {
-                                    Log.w(TAG, "Robot returned to idle state $nav after starting navigation")
-                                    true // Continue waiting
-                                }
-                            }
-                            else -> { // Error status
-                                val errorMessage = "waitForArrival: Unknown or failure nav status: $nav for $destinationName."
-                                Log.e(TAG, errorMessage)
+                            NavigationStatus.FAILED -> {
+                                val errorMessage = "Navigation to $destinationName failed."
+                                Log.e(TAG, "❌ $errorMessage")
                                 errorLogger.logError(errorMessage)
                                 emit(false)
-                                false // Stop collecting
+                                false // Stop collecting (Fail)
                             }
                         }
-                    }.first()
+                    }.first() // Get the first emitted value (true for success, false for failure)
             }
         } catch (e: TimeoutCancellationException) {
             val errorMessage = "Navigation timed out for $destinationName"

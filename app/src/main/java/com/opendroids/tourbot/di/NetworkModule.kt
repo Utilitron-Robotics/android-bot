@@ -22,9 +22,7 @@ object NetworkModule {
             .readTimeout(0, TimeUnit.MILLISECONDS) // No timeout for WebSocket reads
             .pingInterval(20, TimeUnit.SECONDS) // Keep-alive for WebSocket
             // Logging for debugging
-            .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BASIC
-            })
+            .addInterceptor(HttpLoggingInterceptor().setLevel(HttpLoggingInterceptor.Level.BASIC)) // Fixed apply and level
             .build()
     }
 
