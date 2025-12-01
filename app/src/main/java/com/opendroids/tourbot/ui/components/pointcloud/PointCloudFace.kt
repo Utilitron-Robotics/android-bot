@@ -17,14 +17,14 @@ import androidx.lifecycle.LifecycleEventObserver
  * with text-driven phoneme lip sync for realistic speech animation.
  *
  * @param amplitude Audio amplitude value (0-15000 range from AudioPlayer)
- * @param captionText Current word/phrase being spoken for phoneme estimation
+ * @param isSpeaking Whether the robot is currently speaking
  * @param modifier Compose modifier for layout
  * @param skipIntro If true, skips the swirling intro and shows face immediately
  */
 @Composable
 fun PointCloudFace(
     amplitude: Int,
-    captionText: String = "",
+    isSpeaking: Boolean,
     modifier: Modifier = Modifier,
     skipIntro: Boolean = false
 ) {
@@ -34,17 +34,15 @@ fun PointCloudFace(
     // Create renderer instance
     val renderer = remember { PointCloudRenderer() }
 
-    // Update amplitude on renderer directly - no dead zone here, let renderer handle it
-    // TTS produces 500-2000 amplitude, MediaPlayer around 1000
-    // Normalize to 0-1 with lower max for better sensitivity
+    // Update amplitude on renderer directly
     LaunchedEffect(amplitude) {
         val normalized = (amplitude / 5000f).coerceIn(0f, 1f)
         renderer.amplitude = normalized
     }
 
-    // Pass current text to renderer for phoneme-based lip sync
-    LaunchedEffect(captionText) {
-        renderer.currentText = captionText
+    // Pass speaking state to renderer
+    LaunchedEffect(isSpeaking) {
+        renderer.isSpeaking = isSpeaking
     }
 
     // Skip intro if requested
@@ -76,25 +74,17 @@ fun PointCloudFace(
         modifier = modifier.fillMaxSize(),
         factory = { ctx ->
             GLSurfaceView(ctx).apply {
-                // Use OpenGL ES 2.0
                 setEGLContextClientVersion(2)
-
-                // Enable alpha for transparent background
                 setEGLConfigChooser(8, 8, 8, 8, 16, 0)
                 holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
                 setZOrderOnTop(false)
-
-                // Set renderer
                 setRenderer(renderer)
-
-                // Continuous rendering for smooth animation
                 renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
-
                 glSurfaceView = this
             }
         },
         update = { view ->
-            // View updates happen through renderer.amplitude
+            // View updates happen via LaunchedEffects
         }
     )
 }

@@ -29,8 +29,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -43,6 +41,7 @@ private const val RECONNECTION_DELAY_MS = 2000L
 private const val AUDIO_PLAYBACK_TIMEOUT_MS = 120_000L // 2 minutes
 private const val MAX_IDLE_MESSAGES = 50
 private const val AUTO_RESET_DELAY_MS = 5000L // Reset to Idle 5 seconds after completion
+private const val USER_ABORT_MESSAGE = "User aborted tour"
 
 @Singleton
 class TourManager @Inject constructor(
@@ -60,7 +59,7 @@ class TourManager @Inject constructor(
     private val tourScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val isStartingTour = AtomicBoolean(false)
-    private val tourMutex = Mutex()
+    private val isAborting = AtomicBoolean(false)
 
     private var statusCollectionJob: Job? = null
     private val _sharedStatusFlow = MutableSharedFlow<RobotStatusMessage>(
@@ -101,16 +100,25 @@ class TourManager @Inject constructor(
     }
 
     fun abort() {
-        if (tourState.value is TourState.Idle || tourState.value is TourState.ReturningHome) return
+        if (tourState.value is TourState.Idle || tourState.value is TourState.ReturningHome || isAborting.get()) return
 
-        Log.i(TAG, "⛔ Tour abort requested")
-        tourJob?.cancel(CancellationException("User aborted tour"))
+        if (isAborting.compareAndSet(false, true)) {
+            Log.i(TAG, "⛔ Tour abort sequence initiated")
+            tourJob?.cancel(CancellationException(USER_ABORT_MESSAGE))
 
-        tourScope.launch {
-            _tourState.value = TourState.Aborted
-            audioPlayer.speak("Tour aborted. Returning to start.")
-            delay(1000) // Give a moment for the message to be seen
-            returnHome()
+            tourScope.launch {
+                try {
+                    _tourState.value = TourState.Aborted
+                    audioPlayer.speak("Tour aborted. Returning to start.")
+                    delay(1000)
+                    returnHome()
+                } finally {
+                    Log.i(TAG, "Return-to-home sequence finished, performing final cleanup.")
+                    cleanupAndDisconnect()
+                    _tourState.value = TourState.Idle
+                    isAborting.set(false)
+                }
+            }
         }
     }
 
@@ -136,7 +144,6 @@ class TourManager @Inject constructor(
             _tourState.value = TourState.Error("Failed to return home")
         }
         delay(2000)
-        _tourState.value = TourState.Idle
     }
 
     private suspend fun runTour() {
@@ -207,27 +214,32 @@ class TourManager @Inject constructor(
 
         } catch (e: CancellationException) {
             Log.w(TAG, "⛔ Tour cancelled: ${e.message}")
-            // Don't set state here, abort() handles it
-            cleanupAndDisconnect()
-            throw e
+            if (e.message != USER_ABORT_MESSAGE) {
+                cleanupAndDisconnect()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Tour failed: ${e.message}", e)
             audioPlayer.speak("Tour failed with an error.")
             _tourState.value = TourState.Error(e.message ?: "Unknown error")
             cleanupAndDisconnect()
         } finally {
-            Log.i(TAG, "Cleaning up tour resources...")
-            audioPlayer.stop()
-            try {
-                tourRepository.cancelNavigation()
-            } catch (e: Exception) {
-                Log.w(TAG, "Error cancelling navigation: ${e.message}")
+            if (!isAborting.get()) {
+                Log.i(TAG, "Cleaning up tour resources on normal exit...")
+                audioPlayer.stop()
+                try {
+                    tourRepository.cancelNavigation()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error cancelling navigation: ${e.message}")
+                }
+                statusCollectionJob?.cancel()
+            } else {
+                Log.i(TAG, "Skipping cleanup in runTour finally block because an abort is in progress.")
             }
-            statusCollectionJob?.cancel()
         }
     }
     
     private suspend fun cleanupAndDisconnect() {
+        Log.i(TAG, "Performing full cleanup and disconnect.")
         statusCollectionJob?.cancel()
         try {
             tourRepository.unsubscribeStatus()
@@ -239,6 +251,7 @@ class TourManager @Inject constructor(
         } catch (e: Exception) {
             Log.w(TAG, "Error disconnecting: ${e.message}")
         }
+        audioPlayer.stop()
     }
     
     private suspend fun navigateToWaypointWithRetry(marker: String): Boolean {

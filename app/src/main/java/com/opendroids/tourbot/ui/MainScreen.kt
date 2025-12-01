@@ -1,6 +1,5 @@
 package com.opendroids.tourbot.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -15,6 +14,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.opendroids.tourbot.data.MasterTourRepository
 import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.data.model.TourState
+import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
 import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.audio.AudioPlayer
 import com.opendroids.tourbot.ui.components.pointcloud.PointCloudFace
@@ -31,8 +31,11 @@ fun MainScreen(
 ) {
     val tourState by tourManager.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
-    val captionText by audioPlayer.captionText.collectAsState()
     var showControlPanel by remember { mutableStateOf(false) }
+    val showNerdData by viewModel.showNerdData.collectAsState()
+    val robotStatus by viewModel.robotStatus.collectAsState()
+    val isInTestMode by masterTourRepository.isInTestMode.collectAsState()
+    val robotUrl by viewModel.robotUrl.collectAsState()
 
     Box(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -67,10 +70,11 @@ fun MainScreen(
                 ) {
                     PointCloudFace(
                         amplitude = amplitude,
-                        captionText = captionText
+                        isSpeaking = tourState is TourState.Speaking
                     )
                 }
 
+                val captionText by audioPlayer.captionText.collectAsState()
                 Text(
                     text = captionText,
                     color = Color.White,
@@ -110,6 +114,18 @@ fun MainScreen(
             }
         }
 
+        if (showNerdData) {
+            NerdStatsOverlay(
+                robotStatus = robotStatus,
+                tourState = tourState,
+                isInTestMode = isInTestMode,
+                robotUrl = robotUrl,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+            )
+        }
+
         IconButton(
             onClick = { showControlPanel = true },
             modifier = Modifier
@@ -121,6 +137,40 @@ fun MainScreen(
                 contentDescription = "Settings",
                 tint = Color.White
             )
+        }
+    }
+}
+
+@Composable
+private fun NerdStatsOverlay(
+    robotStatus: RobotStatusMessage?,
+    tourState: TourState,
+    isInTestMode: Boolean,
+    robotUrl: String,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.6f)),
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text("NERD STATS", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            Spacer(modifier = Modifier.height(4.dp))
+            
+            Text("Mode: ${if (isInTestMode) "TEST" else "PRODUCTION"}", color = if (isInTestMode) Color.Yellow else Color.Green)
+            Text("Tour State: ${tourState::class.java.simpleName}", color = Color.White)
+            Text("Robot URL: $robotUrl", color = Color.White)
+            
+            Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+            if (robotStatus == null) {
+                Text("No status received yet.", color = Color.White)
+            } else {
+                Text("Nav Status: ${robotStatus.navStatus}", color = Color.White)
+                Text("Battery: ${robotStatus.battery}", color = Color.White)
+                Text("Velocity: ${robotStatus.velocity}", color = Color.White)
+                Text("Current POI: ${robotStatus.currentPoi}", color = Color.White)
+            }
         }
     }
 }

@@ -3,6 +3,7 @@ package com.opendroids.tourbot.data.settings
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -24,13 +25,25 @@ class SettingsManager @Inject constructor(@ApplicationContext appContext: Contex
             preferences[KEY_ROBOT_URL] ?: "ws://10.42.0.1:9090"
         }
 
+    val showNerdData: Flow<Boolean> = settingsDataStore.data
+        .map { preferences ->
+            preferences[KEY_SHOW_NERD_DATA] ?: false
+        }
+
     suspend fun setRobotUrl(url: String) {
         settingsDataStore.edit { settings ->
             settings[KEY_ROBOT_URL] = url
         }
     }
 
+    suspend fun setShowNerdData(show: Boolean) {
+        settingsDataStore.edit { settings ->
+            settings[KEY_SHOW_NERD_DATA] = show
+        }
+    }
+
     companion object {
         private val KEY_ROBOT_URL = stringPreferencesKey("robot_url")
+        private val KEY_SHOW_NERD_DATA = booleanPreferencesKey("show_nerd_data")
     }
 }
