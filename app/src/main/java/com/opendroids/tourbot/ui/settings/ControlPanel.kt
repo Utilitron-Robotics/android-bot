@@ -22,23 +22,21 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.opendroids.tourbot.ui.MainViewModel
+import com.opendroids.tourbot.ui.tour.TourViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ControlPanel(
     onDismiss: () -> Unit,
-    mainViewModel: MainViewModel,
+    tourViewModel: TourViewModel = hiltViewModel(),
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
     val scope = rememberCoroutineScope()
-    val waypointIds by mainViewModel.waypointIds.collectAsState()
-    val homeWaypointId by mainViewModel.homeWaypointId.collectAsState()
-    val isInTestMode by mainViewModel.isInTestMode.collectAsState()
-    val preSpeakDelay by settingsViewModel.preSpeakDelay.collectAsState()
-    val robotUrl by mainViewModel.robotUrl.collectAsState()
-    val showNerdData by mainViewModel.showNerdData.collectAsState()
+    val waypointIds by tourViewModel.waypointIds.collectAsState()
+    val homeWaypointId by tourViewModel.homeWaypointId.collectAsState()
+    val robotUrl by settingsViewModel.robotUrl.collectAsState()
+    val showNerdData by settingsViewModel.showNerdData.collectAsState()
 
     var showScriptEditor by remember { mutableStateOf<String?>(null) }
     var showAddWaypointDialog by remember { mutableStateOf(false) }
@@ -70,28 +68,24 @@ fun ControlPanel(
 
             when (selectedTabIndex) {
                 0 -> SettingsTab(
-                    preSpeakDelay = preSpeakDelay,
-                    onPreSpeakDelayChange = { settingsViewModel.setPreSpeakDelay(it) },
                     robotUrl = robotUrl,
-                    onRobotUrlChange = { mainViewModel.setRobotUrl(it) },
+                    onRobotUrlChange = { settingsViewModel.setRobotUrl(it) },
                     waypointIds = waypointIds,
                     onWaypointClick = { showScriptEditor = it },
                     onRemoveWaypoint = { id ->
-                        // mainViewModel.removeWaypoint(id)
+                        // tourViewModel.removeWaypoint(id)
                     },
                     onAddWaypointClick = { showAddWaypointDialog = true },
                     dragDropState = dragDropState,
                     onSaveWaypoints = { newWaypointIds ->
-                        // mainViewModel.saveWaypoints(newWaypointIds)
+                        // tourViewModel.saveWaypoints(newWaypointIds)
                     },
-                    isInTestMode = isInTestMode,
-                    onTestModeChange = { mainViewModel.setTestMode(it) },
                     homeWaypointId = homeWaypointId,
-                    onHomeWaypointSelected = { mainViewModel.setHomeWaypoint(it) },
+                    onHomeWaypointSelected = { tourViewModel.setHomeWaypoint(it) },
                     showNerdData = showNerdData,
-                    onShowNerdDataChange = { mainViewModel.onShowNerdDataChange(it) }
+                    onShowNerdDataChange = { settingsViewModel.onShowNerdDataChange(it) }
                 )
-                1 -> ErrorLogTab(mainViewModel = mainViewModel)
+                1 -> ErrorLogTab(tourViewModel = tourViewModel)
             }
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -102,7 +96,7 @@ fun ControlPanel(
             waypointId = waypointId,
             onDismiss = { showScriptEditor = null },
             onSave = { script ->
-                // mainViewModel.saveScript(waypointId, script)
+                // tourViewModel.saveScript(waypointId, script)
             }
         )
     }
@@ -111,7 +105,7 @@ fun ControlPanel(
         AddWaypointDialog(
             onDismiss = { showAddWaypointDialog = false },
             onAdd = { newId ->
-                // mainViewModel.addWaypoint(newId)
+                // tourViewModel.addWaypoint(newId)
                 showAddWaypointDialog = false
                 showScriptEditor = newId
             }
@@ -121,8 +115,6 @@ fun ControlPanel(
 
 @Composable
 fun SettingsTab(
-    preSpeakDelay: Int,
-    onPreSpeakDelayChange: (Int) -> Unit,
     robotUrl: String,
     onRobotUrlChange: (String) -> Unit,
     waypointIds: List<String>,
@@ -131,8 +123,6 @@ fun SettingsTab(
     onAddWaypointClick: () -> Unit,
     dragDropState: DragDropState,
     onSaveWaypoints: (List<String>) -> Unit,
-    isInTestMode: Boolean,
-    onTestModeChange: (Boolean) -> Unit,
     homeWaypointId: String,
     onHomeWaypointSelected: (String) -> Unit,
     showNerdData: Boolean,
@@ -146,13 +136,6 @@ fun SettingsTab(
             label = { Text("Robot WebSocket URL") },
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
         )
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-        ) {
-            Text("Test Mode", modifier = Modifier.weight(1f))
-            Switch(checked = isInTestMode, onCheckedChange = onTestModeChange)
-        }
         HomeWaypointSelector(
             waypointIds = waypointIds,
             selectedWaypointId = homeWaypointId,
@@ -162,15 +145,6 @@ fun SettingsTab(
             checked = showNerdData,
             onCheckedChange = onShowNerdDataChange
         )
-        Divider(modifier = Modifier.padding(vertical = 16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-            Text("Pre-speak delay (ms):", modifier = Modifier.weight(1f))
-            OutlinedTextField(
-                value = preSpeakDelay.toString(),
-                onValueChange = { onPreSpeakDelayChange(it.toIntOrNull() ?: 0) },
-                modifier = Modifier.width(100.dp)
-            )
-        }
         Divider(modifier = Modifier.padding(vertical = 16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Waypoint Scripts", style = MaterialTheme.typography.titleMedium)
@@ -297,8 +271,8 @@ fun HomeWaypointSelector(
 }
 
 @Composable
-fun ErrorLogTab(mainViewModel: MainViewModel) {
-    val errors by mainViewModel.errors.collectAsState()
+fun ErrorLogTab(tourViewModel: TourViewModel) {
+    val errors by tourViewModel.errors.collectAsState()
     val listState = rememberLazyListState()
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -308,7 +282,7 @@ fun ErrorLogTab(mainViewModel: MainViewModel) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Error Log", style = MaterialTheme.typography.titleMedium)
-            Button(onClick = { mainViewModel.clearErrors() }) {
+            Button(onClick = { tourViewModel.clearErrors() }) {
                 Text("Clear Log")
             }
         }
@@ -402,7 +376,7 @@ fun ScriptEditorDialog(
 
     // In a real app, you'd fetch the script content here
     // LaunchedEffect(waypointId) {
-    //     script = mainViewModel.getScript(waypointId)
+    //     script = tourViewModel.getScript(waypointId)
     // }
 
     AlertDialog(

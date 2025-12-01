@@ -30,6 +30,11 @@ class SettingsManager @Inject constructor(@ApplicationContext appContext: Contex
             preferences[KEY_SHOW_NERD_DATA] ?: false
         }
 
+    val carouselAtTop: Flow<Boolean> = settingsDataStore.data
+        .map { preferences ->
+            preferences[KEY_CAROUSEL_AT_TOP] ?: false
+        }
+
     suspend fun setRobotUrl(url: String) {
         settingsDataStore.edit { settings ->
             settings[KEY_ROBOT_URL] = url
@@ -42,8 +47,15 @@ class SettingsManager @Inject constructor(@ApplicationContext appContext: Contex
         }
     }
 
+    suspend fun setCarouselAtTop(atTop: Boolean) {
+        settingsDataStore.edit { settings ->
+            settings[KEY_CAROUSEL_AT_TOP] = atTop
+        }
+    }
+
     companion object {
         private val KEY_ROBOT_URL = stringPreferencesKey("robot_url")
         private val KEY_SHOW_NERD_DATA = booleanPreferencesKey("show_nerd_data")
+        private val KEY_CAROUSEL_AT_TOP = booleanPreferencesKey("carousel_at_top")
     }
 }

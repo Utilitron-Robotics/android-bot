@@ -1,6 +1,7 @@
 package com.opendroids.tourbot.data.remote
 
 import android.util.Log
+import com.opendroids.tourbot.data.ConnectionStatus
 import com.opendroids.tourbot.data.remote.model.RobotCommand
 import com.opendroids.tourbot.data.remote.model.RobotMessage
 import kotlinx.coroutines.CompletableDeferred
@@ -42,8 +43,8 @@ class RobotClient @Inject constructor(
     private val _messages = MutableSharedFlow<RobotMessage>()
     val messages: Flow<RobotMessage> = _messages.asSharedFlow()
 
-    private val _isConnected = MutableStateFlow(false)
-    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
+    private val _connectionStatus = MutableStateFlow(ConnectionStatus.DISCONNECTED)
+    val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()
 
     // Mutex to prevent concurrent connection attempts
     private val connectionMutex = Mutex()
@@ -53,7 +54,7 @@ class RobotClient @Inject constructor(
         // Use mutex to ensure only one connection attempt at a time
         return connectionMutex.withLock {
             // Already connected
-            if (isConnected.value) {
+            if (connectionStatus.value == ConnectionStatus.CONNECTED) {
                 Log.d(TAG, "Already connected, returning true")
                 return@withLock true
             }
@@ -73,16 +74,18 @@ class RobotClient @Inject constructor(
                 Log.w(TAG, "Connection timed out after ${CONNECTION_TIMEOUT_MS}ms")
                 webSocket?.cancel()
                 webSocket = null
+                _connectionStatus.value = ConnectionStatus.DISCONNECTED
                 false
             }
         }
     }
 
     fun connect(url: String) {
-        if (isConnected.value) {
+        if (connectionStatus.value == ConnectionStatus.CONNECTED) {
             Log.d(TAG, "Already connected, skipping connect()")
             return
         }
+        _connectionStatus.value = ConnectionStatus.CONNECTING
         Log.d(TAG, "Initiating connection to $url")
         val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, createListener())
@@ -92,7 +95,7 @@ class RobotClient @Inject constructor(
         Log.d(TAG, "Disconnecting...")
         webSocket?.close(1000, "Disconnect requested")
         webSocket = null
-        _isConnected.value = false
+        _connectionStatus.value = ConnectionStatus.DISCONNECTED
         connectionResult = null
     }
 
@@ -110,7 +113,7 @@ class RobotClient @Inject constructor(
         return object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "✓ Connected to robot")
-                _isConnected.value = true
+                _connectionStatus.value = ConnectionStatus.CONNECTED
                 connectionResult?.complete(true)
             }
 
@@ -142,20 +145,20 @@ class RobotClient @Inject constructor(
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Connection failure", t)
                 this@RobotClient.webSocket = null
-                _isConnected.value = false
+                _connectionStatus.value = ConnectionStatus.ERROR_NO_BASE // Assuming connection failure means no base
                 connectionResult?.complete(false)
             }
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Robot connection closing: $code / $reason")
                 this@RobotClient.webSocket = null
-                _isConnected.value = false
+                _connectionStatus.value = ConnectionStatus.DISCONNECTED
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Robot connection closed: $code / $reason")
                 this@RobotClient.webSocket = null
-                _isConnected.value = false
+                _connectionStatus.value = ConnectionStatus.DISCONNECTED
             }
         }
     }

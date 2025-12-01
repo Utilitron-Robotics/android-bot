@@ -2,12 +2,14 @@ package com.opendroids.tourbot.logic
 
 import android.content.Context
 import com.opendroids.tourbot.data.TourConfigRepository
+import com.opendroids.tourbot.data.model.TourState
 import com.opendroids.tourbot.logic.tasks.Task
 import com.opendroids.tourbot.logic.tasks.WaypointTask
 import com.opendroids.tourbot.ui.audio.AudioPlayer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -21,6 +23,8 @@ class TourManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     private val tourManagerScope = CoroutineScope(Dispatchers.Main)
+
+    val tourState: StateFlow<TourState> = taskOrchestrator.tourState
 
     suspend fun startTour() {
         // Play intro message
