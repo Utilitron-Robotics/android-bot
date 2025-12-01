@@ -47,44 +47,25 @@ object AppModule {
     @Singleton
     fun provideTourConfigRepository(@ApplicationContext context: Context): TourConfigRepository = TourConfigRepository(context)
 
-    // Executors
-    @Provides
-    @Singleton
-    fun provideNavigationExecutor(tourRepository: TourRepository, errorLogger: ErrorLogger): NavigationExecutor = NavigationExecutor(tourRepository, errorLogger)
-
-    @Provides
-    @Singleton
-    fun provideSpeechExecutor(audioPlayer: AudioPlayer): SpeechExecutor = SpeechExecutor(audioPlayer)
-
-    @Provides
-    @Singleton
-    fun provideDelayExecutor(): DelayExecutor = DelayExecutor()
-
-    @Provides
-    @Singleton
-    fun provideWaypointTaskExecutor(
-        navigationExecutor: NavigationExecutor,
-        speechExecutor: SpeechExecutor
-    ): WaypointTaskExecutor = WaypointTaskExecutor(navigationExecutor, speechExecutor)
-
     // Orchestrator & Manager
     @Provides
     @Singleton
     fun provideTaskOrchestrator(
         @ApplicationContext context: Context,
         waypointTaskExecutor: WaypointTaskExecutor,
-        speechExecutor: SpeechExecutor,
         delayExecutor: DelayExecutor,
         errorLogger: ErrorLogger,
         tourConfigRepository: TourConfigRepository
-    ): TaskOrchestrator = TaskOrchestrator(context, waypointTaskExecutor, speechExecutor, delayExecutor, errorLogger, tourConfigRepository)
+    ): TaskOrchestrator = TaskOrchestrator(context, waypointTaskExecutor, delayExecutor, errorLogger, tourConfigRepository)
 
     @Provides
     @Singleton
     fun provideTourManager(
         tourConfigRepository: TourConfigRepository,
-        taskOrchestrator: TaskOrchestrator
-    ): TourManager = TourManager(tourConfigRepository, taskOrchestrator)
+        taskOrchestrator: TaskOrchestrator,
+        audioPlayer: AudioPlayer,
+        @ApplicationContext context: Context
+    ): TourManager = TourManager(tourConfigRepository, taskOrchestrator, audioPlayer, context)
 
     // Utilities
     @Provides

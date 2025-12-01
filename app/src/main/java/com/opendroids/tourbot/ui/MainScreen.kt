@@ -1,5 +1,7 @@
 package com.opendroids.tourbot.ui
 
+import android.Manifest
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -11,29 +13,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.opendroids.tourbot.data.MasterTourRepository
-import com.opendroids.tourbot.data.TourConfigRepository
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberPermissionState
+import com.opendroids.tourbot.data.ConnectionStatus
 import com.opendroids.tourbot.data.model.TourState
 import com.opendroids.tourbot.data.remote.model.RobotStatusMessage
-import com.opendroids.tourbot.logic.TourManager
 import com.opendroids.tourbot.ui.audio.AudioPlayer
 import com.opendroids.tourbot.ui.components.WaypointCarousel
 import com.opendroids.tourbot.ui.components.pointcloud.PointCloudFace
 import com.opendroids.tourbot.ui.settings.ControlPanel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun MainScreen(
-    tourManager: TourManager,
     audioPlayer: AudioPlayer,
-    tourConfigRepository: TourConfigRepository,
-    masterTourRepository: MasterTourRepository,
     viewModel: MainViewModel = hiltViewModel()
 ) {
-    val tourState by tourManager.tourState.collectAsState()
+    val tourState by viewModel.tourState.collectAsState()
     val amplitude by audioPlayer.amplitude.collectAsState()
-    val waypointIds by tourManager.waypointIds.collectAsState()
-    
+    val waypointIds by viewModel.waypointIds.collectAsState()
+    val connectionStatus by viewModel.connectionStatus.collectAsState()
+    val showTestModeDialog by viewModel.showTestModeDialog.collectAsState()
+
     val currentWaypointId = when (val state = tourState) {
         is TourState.Navigating -> state.targetWaypoint.id
         is TourState.Speaking -> state.currentWaypoint.id
@@ -44,8 +45,15 @@ fun MainScreen(
     var showControlPanel by remember { mutableStateOf(false) }
     val showNerdData by viewModel.showNerdData.collectAsState()
     val robotStatus by viewModel.robotStatus.collectAsState()
-    val isInTestMode by masterTourRepository.isInTestMode.collectAsState()
+    val isInTestMode by viewModel.isInTestMode.collectAsState()
     val robotUrl by viewModel.robotUrl.collectAsState()
+
+    // Request RECORD_AUDIO permission
+    val recordAudioPermissionState = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+    LaunchedEffect(Unit) {
+        recordAudioPermissionState.launchPermissionRequest()
+        viewModel.connect()
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Surface(
@@ -55,9 +63,8 @@ fun MainScreen(
             Column(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween // Changed for new layout
+                verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // --- Top Section ---
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = when (val state = tourState) {
@@ -74,6 +81,8 @@ fun MainScreen(
                         modifier = Modifier.padding(top = 32.dp)
                     )
 
+                    ConnectionStatusIndicator(connectionStatus = connectionStatus)
+
                     WaypointCarousel(
                         waypointIds = waypointIds,
                         currentWaypointId = currentWaypointId,
@@ -81,7 +90,6 @@ fun MainScreen(
                     )
                 }
 
-                // --- Center Section (Future Media Box) ---
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -89,15 +97,12 @@ fun MainScreen(
                         .padding(horizontal = 32.dp, vertical = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // This is where the image/video/website will go.
-                    // For now, the point cloud is here.
                     PointCloudFace(
                         amplitude = amplitude,
                         isSpeaking = tourState is TourState.Speaking
                     )
                 }
 
-                // --- Bottom Section ---
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     val captionText by audioPlayer.captionText.collectAsState()
                     Text(
@@ -113,14 +118,14 @@ fun MainScreen(
 
                     if (tourState is TourState.Idle || tourState is TourState.Completed || tourState is TourState.Error) {
                         Button(
-                            onClick = { tourManager.startTour() },
+                            onClick = { viewModel.startTour() },
                             modifier = Modifier.padding(bottom = 48.dp)
                         ) {
                             Text("Start Tour")
                         }
                     } else {
                         Button(
-                            onClick = { tourManager.abort() },
+                            onClick = { viewModel.abortTour() },
                             colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                             modifier = Modifier.padding(bottom = 48.dp)
                         ) {
@@ -133,8 +138,6 @@ fun MainScreen(
             if (showControlPanel) {
                 ControlPanel(
                     onDismiss = { showControlPanel = false },
-                    tourConfigRepository = tourConfigRepository,
-                    masterTourRepository = masterTourRepository,
                     mainViewModel = viewModel
                 )
             }
@@ -164,6 +167,60 @@ fun MainScreen(
                 tint = Color.White
             )
         }
+
+        if (showTestModeDialog) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissTestModeDialog() },
+                title = { Text("Base Not Found") },
+                text = { Text("Could not connect to the robot base. Do you want to enter test mode?") },
+                confirmButton = {
+                    Button(onClick = { viewModel.setTestMode(true) }) {
+                        Text("Enter Test Mode")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = { viewModel.dismissTestModeDialog() }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun ConnectionStatusIndicator(connectionStatus: ConnectionStatus) {
+    val color = when (connectionStatus) {
+        ConnectionStatus.CONNECTED -> Color.Green
+        ConnectionStatus.CONNECTING -> Color.Yellow
+        ConnectionStatus.DISCONNECTED -> Color.Red
+        ConnectionStatus.ERROR_NO_BASE -> Color.Red
+    }
+    val text = when (connectionStatus) {
+        ConnectionStatus.CONNECTED -> "Connected"
+        ConnectionStatus.CONNECTING -> "Connecting..."
+        ConnectionStatus.DISCONNECTED -> "Disconnected"
+        ConnectionStatus.ERROR_NO_BASE -> "Error: No Base"
+    }
+
+    Row(
+        modifier = Modifier
+            .padding(8.dp)
+            .background(Color.DarkGray.copy(alpha = 0.5f), MaterialTheme.shapes.small)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .background(color, MaterialTheme.shapes.small)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = text,
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall
+        )
     }
 }
 

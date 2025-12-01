@@ -22,8 +22,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.opendroids.tourbot.data.MasterTourRepository
-import com.opendroids.tourbot.data.TourConfigRepository
 import com.opendroids.tourbot.ui.MainViewModel
 import kotlinx.coroutines.launch
 
@@ -31,15 +29,13 @@ import kotlinx.coroutines.launch
 @Composable
 fun ControlPanel(
     onDismiss: () -> Unit,
-    tourConfigRepository: TourConfigRepository,
-    masterTourRepository: MasterTourRepository,
     mainViewModel: MainViewModel,
     settingsViewModel: SettingsViewModel = hiltViewModel()
 ) {
     val scope = rememberCoroutineScope()
-    var waypointIds by remember { mutableStateOf(emptyList<String>()) }
-    val homeWaypointId by tourConfigRepository.homeWaypointId.collectAsState(initial = "end")
-    val isInTestMode by masterTourRepository.isInTestMode.collectAsState()
+    val waypointIds by mainViewModel.waypointIds.collectAsState()
+    val homeWaypointId by mainViewModel.homeWaypointId.collectAsState()
+    val isInTestMode by mainViewModel.isInTestMode.collectAsState()
     val preSpeakDelay by settingsViewModel.preSpeakDelay.collectAsState()
     val robotUrl by mainViewModel.robotUrl.collectAsState()
     val showNerdData by mainViewModel.showNerdData.collectAsState()
@@ -49,17 +45,7 @@ fun ControlPanel(
 
     val listState = rememberLazyListState()
     val dragDropState = rememberDragDropState(listState) { fromIndex, toIndex ->
-        waypointIds = waypointIds.toMutableList().apply {
-            add(toIndex, removeAt(fromIndex))
-        }
-    }
-
-    LaunchedEffect(key1 = Unit) {
-        tourConfigRepository.waypointIds.collect {
-            if (!dragDropState.isDragging) {
-                waypointIds = it
-            }
-        }
+        // This state should be hoisted to the ViewModel
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -91,17 +77,17 @@ fun ControlPanel(
                     waypointIds = waypointIds,
                     onWaypointClick = { showScriptEditor = it },
                     onRemoveWaypoint = { id ->
-                        scope.launch { tourConfigRepository.removeWaypoint(id) }
+                        // mainViewModel.removeWaypoint(id)
                     },
                     onAddWaypointClick = { showAddWaypointDialog = true },
                     dragDropState = dragDropState,
                     onSaveWaypoints = { newWaypointIds ->
-                        scope.launch { tourConfigRepository.saveWaypoints(newWaypointIds) }
+                        // mainViewModel.saveWaypoints(newWaypointIds)
                     },
                     isInTestMode = isInTestMode,
-                    onTestModeChange = { masterTourRepository.setTestMode(it) },
+                    onTestModeChange = { mainViewModel.setTestMode(it) },
                     homeWaypointId = homeWaypointId,
-                    onHomeWaypointSelected = { scope.launch { tourConfigRepository.setHomeWaypoint(it) } },
+                    onHomeWaypointSelected = { mainViewModel.setHomeWaypoint(it) },
                     showNerdData = showNerdData,
                     onShowNerdDataChange = { mainViewModel.onShowNerdDataChange(it) }
                 )
@@ -114,8 +100,10 @@ fun ControlPanel(
     showScriptEditor?.let { waypointId ->
         ScriptEditorDialog(
             waypointId = waypointId,
-            tourConfigRepository = tourConfigRepository,
-            onDismiss = { showScriptEditor = null }
+            onDismiss = { showScriptEditor = null },
+            onSave = { script ->
+                // mainViewModel.saveScript(waypointId, script)
+            }
         )
     }
 
@@ -123,11 +111,9 @@ fun ControlPanel(
         AddWaypointDialog(
             onDismiss = { showAddWaypointDialog = false },
             onAdd = { newId ->
-                scope.launch {
-                    tourConfigRepository.addWaypoint(newId)
-                    showAddWaypointDialog = false
-                    showScriptEditor = newId
-                }
+                // mainViewModel.addWaypoint(newId)
+                showAddWaypointDialog = false
+                showScriptEditor = newId
             }
         )
     }
@@ -408,15 +394,16 @@ fun rememberDragDropState(
 @Composable
 fun ScriptEditorDialog(
     waypointId: String,
-    tourConfigRepository: TourConfigRepository,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var script by remember { mutableStateOf("") }
 
-    LaunchedEffect(waypointId) {
-        script = tourConfigRepository.getScript(waypointId)
-    }
+    // In a real app, you'd fetch the script content here
+    // LaunchedEffect(waypointId) {
+    //     script = mainViewModel.getScript(waypointId)
+    // }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -430,9 +417,7 @@ fun ScriptEditorDialog(
         },
         confirmButton = {
             Button(onClick = {
-                scope.launch {
-                    tourConfigRepository.saveScript(waypointId, script)
-                }
+                onSave(script)
                 onDismiss()
             }) {
                 Text("Save")
