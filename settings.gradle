@@ -4,13 +4,6 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
-    plugins {
-        id 'com.android.application' version '8.13.1'
-        id 'org.jetbrains.kotlin.android' version '1.9.22'
-        id 'org.jetbrains.kotlin.plugin.compose' version '1.5.8'
-        id 'com.google.dagger.hilt.android' version '2.57.2'
-        id 'org.jetbrains.kotlin.plugin.serialization' version '1.9.22'
-    }
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
@@ -20,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TourBot"
+rootProject.name = "WaypointCaller"
 include ':app'
