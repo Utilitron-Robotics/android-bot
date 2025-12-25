@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
 import '../widgets/widget_factory.dart';
+import '../widgets/fleet_picker.dart';
+import '../widgets/message_log.dart';
 
 /// Main screen - dynamically generates UI based on robot capabilities
 class HomeScreen extends StatefulWidget {
@@ -61,8 +63,12 @@ class _HomeScreenState extends State<HomeScreen> {
               SliverToBoxAdapter(
                 child: _buildConnectionBar(robot),
               ),
+              // Message log (always visible, collapsible)
+              const SliverToBoxAdapter(
+                child: MessageLog(),
+              ),
               // Dynamic content based on connection state
-              if (robot.state == ConnectionState.connecting)
+              if (robot.state == RobotConnectionState.connecting)
                 const SliverFillRemaining(
                   child: Center(
                     child: Column(
@@ -75,11 +81,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 )
-              else if (robot.state == ConnectionState.error)
+              else if (robot.state == RobotConnectionState.error)
                 SliverFillRemaining(
                   child: _buildErrorState(robot),
                 )
-              else if (robot.state == ConnectionState.connected &&
+              else if (robot.state == RobotConnectionState.connected &&
                   robot.capabilities != null)
                 SliverPadding(
                   padding: const EdgeInsets.all(16),
@@ -120,11 +126,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   isDense: true,
                   prefixIcon: Icon(Icons.link),
                 ),
-                enabled: robot.state != ConnectionState.connecting,
+                enabled: robot.state != RobotConnectionState.connecting,
                 onSubmitted: (_) => _connect(robot),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 8),
+            // Fleet picker button
+            const FleetConnectButton(),
+            const SizedBox(width: 8),
             if (robot.isConnected)
               FilledButton.tonalIcon(
                 onPressed: robot.disconnect,
@@ -133,7 +142,7 @@ class _HomeScreenState extends State<HomeScreen> {
               )
             else
               FilledButton.icon(
-                onPressed: robot.state == ConnectionState.connecting
+                onPressed: robot.state == RobotConnectionState.connecting
                     ? null
                     : () => _connect(robot),
                 icon: const Icon(Icons.link),
@@ -185,17 +194,17 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _ConnectionIndicator extends StatelessWidget {
-  final ConnectionState state;
+  final RobotConnectionState state;
 
   const _ConnectionIndicator({required this.state});
 
   @override
   Widget build(BuildContext context) {
     final (color, icon, label) = switch (state) {
-      ConnectionState.disconnected => (Colors.grey, Icons.link_off, 'Disconnected'),
-      ConnectionState.connecting => (Colors.orange, Icons.sync, 'Connecting'),
-      ConnectionState.connected => (Colors.green, Icons.check_circle, 'Connected'),
-      ConnectionState.error => (Colors.red, Icons.error, 'Error'),
+      RobotConnectionState.disconnected => (Colors.grey, Icons.link_off, 'Disconnected'),
+      RobotConnectionState.connecting => (Colors.orange, Icons.sync, 'Connecting'),
+      RobotConnectionState.connected => (Colors.green, Icons.check_circle, 'Connected'),
+      RobotConnectionState.error => (Colors.red, Icons.error, 'Error'),
     };
 
     return Padding(
@@ -203,7 +212,7 @@ class _ConnectionIndicator extends StatelessWidget {
       child: Chip(
         avatar: Icon(icon, size: 18, color: color),
         label: Text(label),
-        backgroundColor: color.withOpacity(0.2),
+        backgroundColor: color.withValues(alpha: 0.2),
       ),
     );
   }

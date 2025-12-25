@@ -4,15 +4,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'rosbridge_client.dart';
 import '../services/robot_introspection.dart';
 
-/// Connection state
-enum ConnectionState { disconnected, connecting, connected, error }
+/// Robot connection state (renamed to avoid conflict with Flutter's ConnectionState)
+enum RobotConnectionState { disconnected, connecting, connected, error }
 
 /// Manages robot connection and discovered capabilities
 class RobotConnection extends ChangeNotifier {
   final RosbridgeClient _client = RosbridgeClient();
   RobotIntrospection? _introspection;
 
-  ConnectionState _state = ConnectionState.disconnected;
+  RobotConnectionState _state = RobotConnectionState.disconnected;
   String _robotUrl = '';
   String? _errorMessage;
   RobotCapabilities? _capabilities;
@@ -22,13 +22,13 @@ class RobotConnection extends ChangeNotifier {
   RobotStatus _status = RobotStatus();
 
   // Getters
-  ConnectionState get state => _state;
+  RobotConnectionState get state => _state;
   String get robotUrl => _robotUrl;
   String? get errorMessage => _errorMessage;
   RobotCapabilities? get capabilities => _capabilities;
   RobotStatus get status => _status;
   RosbridgeClient get client => _client;
-  bool get isConnected => _state == ConnectionState.connected;
+  bool get isConnected => _state == RobotConnectionState.connected;
 
   RobotConnection() {
     _loadSavedUrl();
@@ -47,9 +47,9 @@ class RobotConnection extends ChangeNotifier {
 
   /// Connect to robot and discover capabilities
   Future<void> connect(String url) async {
-    if (_state == ConnectionState.connecting) return;
+    if (_state == RobotConnectionState.connecting) return;
 
-    _state = ConnectionState.connecting;
+    _state = RobotConnectionState.connecting;
     _errorMessage = null;
     _robotUrl = url;
     notifyListeners();
@@ -65,10 +65,10 @@ class RobotConnection extends ChangeNotifier {
       // Subscribe to status updates if available
       _subscribeToStatus();
 
-      _state = ConnectionState.connected;
+      _state = RobotConnectionState.connected;
       notifyListeners();
     } catch (e) {
-      _state = ConnectionState.error;
+      _state = RobotConnectionState.error;
       _errorMessage = e.toString();
       notifyListeners();
     }
@@ -146,7 +146,7 @@ class RobotConnection extends ChangeNotifier {
   void disconnect() {
     _statusSubscription?.cancel();
     _client.disconnect();
-    _state = ConnectionState.disconnected;
+    _state = RobotConnectionState.disconnected;
     _capabilities = null;
     _status = RobotStatus();
     notifyListeners();
