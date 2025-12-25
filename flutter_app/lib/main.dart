@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/robot_connection.dart';
+import 'core/fleet_discovery.dart';
 import 'screens/home_screen.dart';
 
 void main() {
@@ -12,8 +13,11 @@ class DroidControllerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => RobotConnection(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => RobotConnection()),
+        ChangeNotifierProvider(create: (_) => FleetDiscovery()),
+      ],
       child: MaterialApp(
         title: 'Droid Controller',
         debugShowCheckedModeBanner: false,
@@ -29,3 +33,4 @@ class DroidControllerApp extends StatelessWidget {
     );
   }
 }
+

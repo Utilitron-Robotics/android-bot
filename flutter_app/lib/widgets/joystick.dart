@@ -102,7 +102,7 @@ class _JoystickControlState extends State<JoystickControl> {
   }
 
   void _onPanUpdate(DragUpdateDetails details) {
-    final center = Offset(joystickSize / 2, joystickSize / 2);
+    const center = Offset(joystickSize / 2, joystickSize / 2);
     final position = details.localPosition - center;
 
     // Calculate velocities from joystick position

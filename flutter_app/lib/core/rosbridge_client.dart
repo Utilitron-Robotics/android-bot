@@ -2,16 +2,48 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+/// Message direction for logging
+enum MessageDirection { sent, received }
+
+/// A logged rosbridge message with metadata
+class RosbridgeMessage {
+  final MessageDirection direction;
+  final Map<String, dynamic> data;
+  final DateTime timestamp;
+
+  RosbridgeMessage({
+    required this.direction,
+    required this.data,
+    DateTime? timestamp,
+  }) : timestamp = timestamp ?? DateTime.now();
+
+  String get op => data['op'] as String? ?? 'unknown';
+  String? get topic => data['topic'] as String?;
+  String? get service => data['service'] as String?;
+
+  @override
+  String toString() {
+    final arrow = direction == MessageDirection.sent ? '→' : '←';
+    return '$arrow $op ${topic ?? service ?? ''}';
+  }
+}
+
 /// Low-level rosbridge WebSocket client
 /// Handles connection, message sending/receiving, and protocol details
 class RosbridgeClient {
   WebSocketChannel? _channel;
   final _messageController = StreamController<Map<String, dynamic>>.broadcast();
+  final _logController = StreamController<RosbridgeMessage>.broadcast();
   final Map<String, Completer<Map<String, dynamic>>> _pendingCalls = {};
   int _callId = 0;
   bool _isConnected = false;
 
+  /// Stream of all incoming messages (for subscriptions)
   Stream<Map<String, dynamic>> get messages => _messageController.stream;
+
+  /// Stream of all messages (sent & received) for logging/debugging
+  Stream<RosbridgeMessage> get messageLog => _logController.stream;
+
   bool get isConnected => _isConnected;
 
   /// Connect to rosbridge server
@@ -43,6 +75,12 @@ class RosbridgeClient {
   }
 
   void _handleMessage(Map<String, dynamic> msg) {
+    // Log received message
+    _logController.add(RosbridgeMessage(
+      direction: MessageDirection.received,
+      data: msg,
+    ));
+
     // Check if this is a service response
     final id = msg['id'] as String?;
     if (id != null && _pendingCalls.containsKey(id)) {
@@ -64,6 +102,11 @@ class RosbridgeClient {
   /// Send raw message
   void send(Map<String, dynamic> message) {
     if (_channel != null) {
+      // Log sent message
+      _logController.add(RosbridgeMessage(
+        direction: MessageDirection.sent,
+        data: message,
+      ));
       _channel!.sink.add(jsonEncode(message));
     }
   }
@@ -149,5 +192,6 @@ class RosbridgeClient {
   void dispose() {
     disconnect();
     _messageController.close();
+    _logController.close();
   }
 }
