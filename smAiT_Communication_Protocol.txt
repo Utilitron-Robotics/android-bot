@@ -1,0 +1,701 @@
+# smAiT Upper Computer Communication Protocol
+## API Development Documentation Protocol
+## smAiT Inc. - 08/2025
+
+---
+
+# Protocol Overview
+
+This protocol is primarily used for data interaction with the algorithm layer of the general chassis, enabling users to display data and issue commands. Network communication is implemented via WebSocket, with data exchanged in JSON string format.
+
+WebSocket belongs to the server-side push technology, which is essentially an application layer protocol that can realize full-duplex two-way communication of persistent connections.
+
+Advantages:
+1. Do not send HTTP requests frequently, only need to send an HTTP request for websocket handshake
+2. The full-duplex channel breaks through the limitation that only the client can request the server
+3. It can be passed while generating data, without waiting for data generation to be completed
+4. WebSocket data transmission is based on data frames and can be transmitted in fragments
+
+---
+
+# Common Communication Format
+
+The computer communication program mainly has the following operations:
+- Publish information registration
+- Publish specific data
+- Log out of the publication information
+- Subscribe to topic data
+- Data return
+- Unsubscribe from topic data
+- Call the service interface
+
+---
+
+# Publish Information Registration
+
+Before the client publishes data to the server, it needs to register the publication information.
+
+```json
+{
+  "op": "advertise",
+  "id": "<string>",        // optional
+  "topic": "<string>",
+  "type": "<string>"
+}
+```
+
+---
+
+# Publish Specific Data
+
+Publishing is valid only after registration.
+
+```json
+{
+  "op": "publish",
+  "id": "<string>",        // optional
+  "topic": "<string>",
+  "msg": <json>
+}
+```
+
+---
+
+# Unregistering Publication Messages
+
+```json
+{
+  "op": "unadvertise",
+  "id": "<string>",        // optional
+  "topic": "<string>"
+}
+```
+
+---
+
+# Subscribe to Topic Data
+
+```json
+{
+  "op": "subscribe",
+  "id": "<string>",                  // optional
+  "topic": "<string>",
+  "type": "<string>",
+  "throttle_rate": <int>,            // optional, milliseconds (default 0)
+  "fragment_size": <int>,            // optional, split threshold
+  "compression": "<string>"          // optional, "png" for map compression
+}
+```
+
+---
+
+# Complete Package Data Reception
+
+```json
+{
+  "op": "publish",
+  "msg": "<string>",
+  "topic": "<string>"
+}
+```
+
+---
+
+# Fragmented Data Reception
+
+```json
+{
+  "op": "fragment",
+  "id": "<string>",
+  "topic": "<string>",
+  "data": "<string>",
+  "num": <int>,
+  "total": <int>
+}
+```
+
+---
+
+# Unsubscribe from Topic Data
+
+```json
+{
+  "op": "unsubscribe",
+  "id": "<string>",        // optional
+  "topic": "<string>"
+}
+```
+
+---
+
+# Service Request Interface
+
+```json
+{
+  "op": "call_service",
+  "id": "<string>",                  // optional
+  "service": "<string>",
+  "args": <list<json>>               // optional
+}
+```
+
+---
+
+# Service Response Data
+
+```json
+{
+  "op": "service_response",
+  "id": "<string>",                  // optional
+  "service": "<string>",
+  "values": <list<json>>,            // optional
+  "result": <boolean>
+}
+```
+
+---
+
+# SPECIFIC DATA PROTOCOLS
+
+## Subscription Category (client gets data from server)
+
+---
+
+## Obtain Robot Coordinates (Timing Trigger)
+
+Subscribe:
+```json
+{
+  "op": "subscribe",
+  "id": "get_pose",
+  "topic": "/robot_pose",
+  "type": "geometry_msgs/Pose2D"
+}
+```
+
+Response:
+```json
+{
+  "topic": "/robot_pose",
+  "msg": {
+    "x": 0.009,
+    "y": -0.047,
+    "theta": 0.0114
+  },
+  "op": "publish"
+}
+```
+- x: Global X-axis position (meters)
+- y: Global Y-axis position (meters)
+- theta: Direction in radians
+
+Unsubscribe:
+```json
+{
+  "op": "unsubscribe",
+  "id": "get_pose",
+  "topic": "/robot_pose"
+}
+```
+
+---
+
+## Acquisition of Radar Point Cloud Data (timing trigger)
+
+Subscribe:
+```json
+{
+  "op": "subscribe",
+  "id": "get_laser",
+  "topic": "/laser_data",
+  "type": "yutong_assistance/point_array"
+}
+```
+
+Response:
+```json
+{
+  "topic": "/laser_data",
+  "msg": {
+    "px": [-0.276, 0.399, 1.634, ...],
+    "py": [-1.197, -1.205, -1.213, ...],
+    "pt": [0, 0, 0]
+  },
+  "op": "publish"
+}
+```
+
+---
+
+## Obtain Navigation Planning Paths (Fixed When Valid)
+
+Subscribe:
+```json
+{
+  "op": "subscribe",
+  "id": "get_path",
+  "topic": "/global_path",
+  "type": "yutong_assistance/point_array"
+}
+```
+
+---
+
+## Obtain Map (Fixed When Valid)
+
+Subscribe:
+```json
+{
+  "op": "subscribe",
+  "id": "get_map",
+  "topic": "/map",
+  "type": "nav_msgs/OccupancyGrid",
+  "fragment_size": 6000,
+  "compression": "png"
+}
+```
+
+Response (complete):
+```json
+{
+  "topic": "/map",
+  "msg": {
+    "info": {
+      "origin": {
+        "position": { "x": -9.6, "y": -9.6 },
+        "orientation": { "x": 0, "y": 0, "z": 0, "w": 1 }
+      },
+      "width": 384,
+      "height": 384,
+      "resolution": 0.05
+    },
+    "data": "<base64 encoded PNG>"
+  },
+  "op": "png"
+}
+```
+
+---
+
+## Robot Global State
+
+Subscribe:
+```json
+{
+  "op": "subscribe",
+  "id": "get_robot_status",
+  "topic": "/robot_status",
+  "type": "yutong_assistance/RobotStatus"
+}
+```
+
+Response:
+```json
+{
+  "topic": "/robot_status",
+  "msg": {
+    "current_building_name": "tefa",
+    "current_floor_name": "3",
+    "soft_estop": false,
+    "hard_estop": false,
+    "battery": 97,
+    "charger": 0,
+    "nav_status": 0,
+    "patrol_status": 0,
+    "velocity": [0.0, 0.0],
+    "control_state": 30,
+    "current_goal_name": "",
+    "current_goal_coordinate": {
+      "x": 0.0,
+      "y": 0.0,
+      "theta": 0.0
+    }
+  },
+  "op": "publish"
+}
+```
+
+Fields:
+- battery (int): Battery charge percentage
+- charger (int): 0=Not connected, 1=Charging, 2=Recharge in progress, -1=Failed
+- nav_status (int): 600=Waiting, 601=Running, 602=Cancelled, 603=Success, 604=Failed
+- control_state (int): 20=Mapping, 30=Navigation, 99=Error
+- velocity (list): [linear_velocity (m/s), angular_velocity (rad/s)]
+
+---
+
+## Navigation State (on state transition)
+
+Subscribe:
+```json
+{
+  "op": "subscribe",
+  "id": "get_navi_status",
+  "topic": "/navi_status",
+  "type": "actionlib_msgs/GoalStatus"
+}
+```
+
+Response:
+```json
+{
+  "topic": "/navi_status",
+  "msg": {
+    "status": 3,
+    "text": "Current goal is success",
+    "goal_id": { ... }
+  },
+  "op": "publish"
+}
+```
+
+Status values:
+- 0: Power-on initialization wait
+- 1: Target point in running
+- 2: Target point cancelled by user
+- 3: Target point reached successfully
+- 4: Target point navigation failed
+
+---
+
+## Chassis Sensor Data
+
+Subscribe:
+```json
+{
+  "op": "subscribe",
+  "id": "get_sensors_core",
+  "topic": "/mobile_base/sensors/core",
+  "type": "kobuki_msgs/SensorState"
+}
+```
+
+Response includes:
+- battery (int): Battery charge percentage
+- charger (int): 0=not on pile, 1=on pile
+- over_current (int): 0=not charging, 1=charging
+- buttons (int): 0=e-stop not triggered, 1=triggered
+- analog_input (array): Ultrasound data in mm
+
+---
+
+# Release Class (Client → Server)
+
+## Speed Control Command
+
+Advertise:
+```json
+{
+  "op": "advertise",
+  "id": "velocity_control",
+  "topic": "/cmd_vel_mux/input/teleop",
+  "type": "geometry_msgs/Twist"
+}
+```
+
+Publish:
+```json
+{
+  "op": "publish",
+  "id": "velocity_control",
+  "topic": "/cmd_vel_mux/input/teleop",
+  "msg": {
+    "linear": { "x": 0.2 },
+    "angular": { "z": 0 }
+  }
+}
+```
+
+Speed control:
+- linear.x positive = forward (m/s)
+- linear.x negative = backward
+- angular.z positive = clockwise rotation (rad/s)
+- angular.z negative = counterclockwise
+- Both 0 = stop
+
+A single release speed lasts for 0.6 seconds. Do not always publish zero speed.
+
+---
+
+## Cancel Target Point Navigation
+
+Advertise:
+```json
+{
+  "op": "advertise",
+  "id": "cancel_goal",
+  "topic": "/move_base/cancel",
+  "type": "actionlib_msgs/GoalID"
+}
+```
+
+Publish:
+```json
+{
+  "op": "publish",
+  "id": "cancel_goal",
+  "topic": "/move_base/cancel",
+  "msg": { "stamp": "", "id": "" }
+}
+```
+
+---
+
+## Soft Emergency Stop
+
+Advertise:
+```json
+{
+  "op": "advertise",
+  "id": "set_estop",
+  "topic": "/soft_stop",
+  "type": "std_msgs/Bool"
+}
+```
+
+Publish:
+```json
+{
+  "op": "publish",
+  "id": "set_estop",
+  "topic": "/soft_stop",
+  "msg": { "data": true }
+}
+```
+
+---
+
+# Service Class
+
+## Program Control Framework
+
+Request:
+```json
+{
+  "op": "call_service",
+  "id": "service_node_manager_control",
+  "service": "/node_manager_control",
+  "args": {
+    "building_name": "csst",
+    "floor_num": "2",
+    "cmd": 0,
+    "args": 0
+  }
+}
+```
+
+cmd values:
+- 0: Open mapping (available in positioning/navigation mode)
+- 1: Continue mapping (reserved)
+- 2: Restart mapping (reserved)
+- 3: Save map and corresponding information
+- 4: Turn on location navigation (available in mapping mode)
+- 7: Switch map (available in positioning/navigation mode)
+
+---
+
+## Publish Navigation Point Information (poi name mode)
+
+Request:
+```json
+{
+  "op": "call_service",
+  "id": "service_poi",
+  "service": "/poi",
+  "args": { "poi": "P1" }
+}
+```
+
+Response:
+```json
+{
+  "op": "service_response",
+  "id": "service_poi",
+  "service": "/poi",
+  "result": true,
+  "values": {
+    "success": true,
+    "avaliable_list": ["P0", "P1", "P2", "P3"]
+  }
+}
+```
+
+---
+
+## Get Current Running Map Information
+
+Request:
+```json
+{
+  "op": "call_service",
+  "id": "service_get_map_info",
+  "service": "/get_map_info",
+  "args": { "cmd": 0 }
+}
+```
+
+Response:
+```json
+{
+  "op": "service_response",
+  "id": "service_get_map_info",
+  "service": "/get_map_info",
+  "result": true,
+  "values": {
+    "origin_x": -9.6,
+    "origin_y": -9.6,
+    "width": 352,
+    "height": 256,
+    "resolution": 0.05,
+    "building_name": "tefa",
+    "floor_name": "1",
+    "free_space": 200.0,
+    "occ_space": 15.5,
+    "unknown_space": 10.28
+  }
+}
+```
+
+---
+
+## Navigation Speed Modification
+
+Request:
+```json
+{
+  "op": "call_service",
+  "id": "service_velocity_control",
+  "service": "/velocity_control",
+  "args": { "cmd": 3, "str": "" }
+}
+```
+
+Speed modes (cmd):
+- 0: safety low speed
+- 1: safety medium speed
+- 2: safety high speed
+- 3: balance low speed
+- 4: balance medium speed
+- 5: balance high speed
+- 6: efficiency low speed
+- 7: efficiency medium speed
+- 8: efficiency high speed
+- -1: default mode
+- 60: smooth mode (food delivery)
+- 61: turn off smooth mode
+- 99: get current speed mode
+
+---
+
+## Robot Version Information
+
+Request:
+```json
+{
+  "op": "call_service",
+  "id": "service_robot_info",
+  "service": "/robot_info",
+  "args": { "cmd": 0 }
+}
+```
+
+Response:
+```json
+{
+  "op": "service_response",
+  "id": "service_robot_info",
+  "service": "/robot_info",
+  "result": true,
+  "values": {
+    "robot_id": "TY1251C003_0036",
+    "robot_type": "TONG",
+    "software_version": "4.1.0-alpha",
+    "firmware_version": "1.0.2",
+    "hardware_version": "2.0.0"
+  }
+}
+```
+
+---
+
+# Status Code Table
+
+## General Standard Output Status
+- 0: Instruction executed successfully
+- 10: Instruction is being processed
+- 20: Mapping in progress
+- 30: Localization and navigation in progress
+- 99: Unknown input instruction
+
+## Program Control Framework
+- 101: Error closing program
+- 102: Invalid startup request, program already running
+- 104: No corresponding map available
+- 105: No permission
+- 106: System fatal error
+- 107: Missing building or floor information
+- 108: Map file corrupted
+- 109: Instruction not supported in current mode
+- 110: Failed to save map
+
+## Navigation
+- 600: Initialization pending
+- 601: Running
+- 602: Navigation cancelled
+- 603: Navigation successful
+- 604: Navigation failed
+- 605: Navigation refused
+- 620: Configuration failed
+- 621: Emergency stop button triggered
+
+## Infrared Recharge
+- 901: Recharge successful
+- 902: Infrared signal not detected
+- 903: Charging station not found
+- 904: Recharge timeout
+- 905: Recharge in progress
+- 906: Recharge cancelled
+
+---
+
+# Coordinate System
+
+## 3D Cartesian Coordinate System (XYZ System)
+- Right-hand coordinate system
+- Middle finger → x-axis
+- Index finger → z-axis
+- Thumb → y-axis
+- X-axis is defined as pointing forward
+
+## Euler Angles
+- Roll → rotation around x-axis
+- Pitch → rotation around y-axis
+- Yaw → rotation around z-axis
+- Rotation is positive in counterclockwise direction
+
+## Transforming Radar Point Cloud to Global Coordinate System
+
+```
+for (int i=0; i<x_laser.size(); i++) {
+  xw[i] = xRP + (x_laser[i] * cos(heading)) - (y_laser[i] * sin(heading));
+  yw[i] = yRP + (x_laser[i] * sin(heading)) + (y_laser[i] * cos(heading));
+}
+```
+
+Where:
+- xRP, yRP: Robot's coordinates in global system
+- heading: Robot's current orientation (radians)
+- x_laser, y_laser: Radar point cloud in robot coordinate system
+- xw, yw: Transformed coordinates in global system
+
+## Pixel Coordinates to World Coordinates
+```
+wx = origin_x + px × resolution
+wy = origin_y + py × resolution
+```
+
+## World Coordinates to Pixel Coordinates
+```
+px = (wx − origin_x) ÷ resolution
+py = (wy − origin_y) ÷ resolution
+```
