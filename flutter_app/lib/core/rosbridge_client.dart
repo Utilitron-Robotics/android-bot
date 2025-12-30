@@ -32,8 +32,10 @@ class RosbridgeMessage {
 /// Handles connection, message sending/receiving, and protocol details
 class RosbridgeClient {
   WebSocketChannel? _channel;
-  final _messageController = StreamController<Map<String, dynamic>>.broadcast();
-  final _logController = StreamController<RosbridgeMessage>.broadcast();
+  StreamController<Map<String, dynamic>> _messageController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  StreamController<RosbridgeMessage> _logController =
+      StreamController<RosbridgeMessage>.broadcast();
   final Map<String, Completer<Map<String, dynamic>>> _pendingCalls = {};
   int _callId = 0;
   bool _isConnected = false;
@@ -111,6 +113,13 @@ class RosbridgeClient {
       }
     }
     _pendingCalls.clear();
+
+    // CRITICAL: Close and recreate stream controllers to clear old listeners
+    // This prevents stale callbacks from firing on reconnect
+    _messageController.close();
+    _logController.close();
+    _messageController = StreamController<Map<String, dynamic>>.broadcast();
+    _logController = StreamController<RosbridgeMessage>.broadcast();
   }
 
   /// Send raw message

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import okhttp3.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import kotlin.math.min
+import javax.net.SocketFactory
 
 // Following the excellent logic from the Flutter app
 enum class SafetyZone {
@@ -21,12 +21,14 @@ enum class SafetyZone {
 }
 
 /**
- * WebSocket client for connecting to the robot base
- * Default robot IP: 10.42.0.1:9090 (direct WiFi)
+ * WebSocket client for connecting to the robot base via USB/wired connection.
+ * Uses a specific SocketFactory to bind to the wired network interface,
+ * allowing WiFi to remain connected for internet access.
  */
 class RobotWebSocketClient(
-    private val robotIp: String = "10.42.0.1",
-    private val robotPort: Int = 9090
+    private val robotIp: String = "192.168.20.22",  // Wired IP, not WiFi hotspot
+    private val robotPort: Int = 9090,
+    private val socketFactory: SocketFactory? = null
 ) {
     companion object {
         private const val TAG = "RobotWSClient"
@@ -55,11 +57,19 @@ class RobotWebSocketClient(
 
     private val safetyZone = AtomicReference(SafetyZone.CLEAR)
 
+    // Build OkHttpClient with optional SocketFactory for network binding
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.SECONDS) // No timeout for WebSocket
         .writeTimeout(10, TimeUnit.SECONDS)
         .pingInterval(30, TimeUnit.SECONDS)
+        .apply {
+            // Use specific SocketFactory to bind to USB/wired network interface
+            socketFactory?.let { sf ->
+                Log.i(TAG, "Using custom SocketFactory for USB/wired network binding")
+                socketFactory(sf)
+            }
+        }
         .build()
 
     private val listener = object : WebSocketListener() {
@@ -93,7 +103,9 @@ class RobotWebSocketClient(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.e(TAG, "Connection failed: ${t.message}")
+            Log.e(TAG, "Connection failed to $robotIp:$robotPort")
+            Log.e(TAG, "Error: ${t.message}", t)
+            response?.let { Log.e(TAG, "Response: ${it.code} ${it.message}") }
             _connectionState.value = ConnectionState.ERROR
             isConnecting = false
             scheduleReconnect()
@@ -105,7 +117,7 @@ class RobotWebSocketClient(
         isConnecting = true
         _connectionState.value = ConnectionState.CONNECTING
         val url = "ws://$robotIp:$robotPort"
-        Log.i(TAG, "Connecting to $url")
+        Log.i(TAG, "Connecting to $url (socketFactory=${if (socketFactory != null) "custom" else "default"})")
         val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, listener)
     }

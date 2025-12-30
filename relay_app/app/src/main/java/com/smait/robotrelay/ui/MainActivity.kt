@@ -6,6 +6,7 @@ import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.IBinder
 import android.text.format.Formatter
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.InputMethodManager
@@ -32,6 +33,13 @@ import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        private const val TAG = "MainActivity"
+        // Robot base IP via USB wired connection (NOT the WiFi hotspot IP!)
+        // WiFi hotspot: 10.42.0.1 | Wired/USB: 192.168.20.22
+        private const val ROBOT_WIRED_IP = "192.168.20.22"
+    }
+
     private lateinit var binding: ActivityMainBinding
     private var service: RelayService? = null
     private var bound = false
@@ -55,10 +63,13 @@ class MainActivity : AppCompatActivity() {
     private val displayReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val url = intent?.getStringExtra(RelayService.EXTRA_URL)
+            Log.i(TAG, ">>> displayReceiver.onReceive: url='${url?.take(100) ?: "null"}...'")
             if (url.isNullOrEmpty()) {
+                Log.i(TAG, "Hiding WebView, showing main layout")
                 binding.webView.visibility = View.GONE
                 binding.mainLayout.visibility = View.VISIBLE
             } else {
+                Log.i(TAG, "Showing WebView, loading URL")
                 binding.mainLayout.visibility = View.GONE
                 binding.webView.visibility = View.VISIBLE
                 binding.webView.loadUrl(url)
@@ -120,7 +131,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun getRobotIp(): String {
         val prefs = getSharedPreferences("relay_prefs", Context.MODE_PRIVATE)
-        return prefs.getString("robot_ip", "10.42.0.1") ?: "10.42.0.1"
+        // Default to wired connection IP (robot base via USB/ethernet)
+        return prefs.getString("robot_ip", ROBOT_WIRED_IP) ?: ROBOT_WIRED_IP
     }
 
     private fun saveRobotIp(ip: String) {

@@ -57,16 +57,38 @@ class AudioAnnouncer {
 
   /// Speak an announcement
   Future<void> speak(String text) async {
-    if (!_enabled || _tts == null) return;
-    debugPrint('Announcing: $text');
+    if (!_enabled) return;
 
-    // Forward to tablet if connected
-    if (_robotConnection != null && _robotConnection!.isConnected) {
-      _robotConnection!.client.tabletSpeak(text);
+    // Reinitialize TTS if needed
+    if (_tts == null) {
+      try {
+        await init();
+      } catch (e) {
+        debugPrint('AudioAnnouncer: Failed to reinit TTS: $e');
+        return;
+      }
     }
 
-    await _tts!.stop(); // Stop any current speech before starting new
-    await _tts!.speak(text);
+    debugPrint('Announcing: $text');
+
+    // Forward to tablet if connected (check before async operations)
+    final robot = _robotConnection;
+    if (robot != null && robot.isConnected) {
+      try {
+        robot.client.tabletSpeak(text);
+      } catch (e) {
+        debugPrint('AudioAnnouncer: Failed to forward to tablet: $e');
+      }
+    }
+
+    try {
+      await _tts!.stop(); // Stop any current speech before starting new
+      await _tts!.speak(text);
+    } catch (e) {
+      debugPrint('AudioAnnouncer: TTS error: $e');
+      // Mark TTS as needing reinit on next call
+      _tts = null;
+    }
   }
 
   /// Stop current speech
