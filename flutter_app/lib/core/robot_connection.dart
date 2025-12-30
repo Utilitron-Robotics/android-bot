@@ -60,6 +60,10 @@ class RobotConnection extends ChangeNotifier {
     _robotUrl = url;
     notifyListeners();
 
+    // Set up reconnect callbacks
+    _client.onDisconnect = _onClientDisconnect;
+    _client.onReconnect = _onClientReconnect;
+
     try {
       await _client.connect(url);
       await _saveUrl(url);
@@ -81,6 +85,27 @@ class RobotConnection extends ChangeNotifier {
       _errorMessage = e.toString();
       notifyListeners();
     }
+  }
+
+  /// Called when the WebSocket connection is lost
+  void _onClientDisconnect() {
+    debugPrint('RobotConnection: Connection lost, will auto-reconnect');
+    _state = RobotConnectionState.error;
+    _errorMessage = 'Connection lost - reconnecting...';
+    notifyListeners();
+  }
+
+  /// Called when the WebSocket reconnects successfully
+  void _onClientReconnect() {
+    debugPrint('RobotConnection: Reconnected! Re-subscribing to topics...');
+    _state = RobotConnectionState.connected;
+    _errorMessage = null;
+
+    // Re-subscribe to robot status
+    _statusSubscription?.cancel();
+    _subscribeToStatus();
+
+    notifyListeners();
   }
 
   void _subscribeToStatus() {

@@ -1,9 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Message direction for logging
 enum MessageDirection { sent, received }
+
+/// Connection state for the WebSocket
+enum WsConnectionState { disconnected, connecting, connected, reconnecting }
 
 /// A logged rosbridge message with metadata
 class RosbridgeMessage {
@@ -40,6 +44,27 @@ class RosbridgeClient {
   int _callId = 0;
   bool _isConnected = false;
 
+  // Keepalive and reconnect
+  Timer? _pingTimer;
+  Timer? _reconnectTimer;
+  DateTime? _lastMessageTime;
+  String? _lastUrl;
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 10;
+  static const Duration _pingInterval = Duration(seconds: 15);
+  static const Duration _connectionTimeout = Duration(seconds: 30);
+
+  // Connection state
+  WsConnectionState _connectionState = WsConnectionState.disconnected;
+  final StreamController<WsConnectionState> _stateController =
+      StreamController<WsConnectionState>.broadcast();
+
+  /// Stream of connection state changes
+  Stream<WsConnectionState> get connectionState => _stateController.stream;
+
+  /// Current connection state
+  WsConnectionState get state => _connectionState;
+
   /// Stream of all incoming messages (for subscriptions)
   Stream<Map<String, dynamic>> get messages => _messageController.stream;
 
@@ -50,10 +75,28 @@ class RosbridgeClient {
 
   StreamSubscription? _streamSubscription;
 
+  /// Callback when connection is lost (for triggering UI updates)
+  VoidCallback? onDisconnect;
+
+  /// Callback when reconnected (for re-subscribing to topics)
+  VoidCallback? onReconnect;
+
+  void _setState(WsConnectionState state) {
+    if (_connectionState != state) {
+      _connectionState = state;
+      _stateController.add(state);
+      debugPrint('RosbridgeClient: State changed to $state');
+    }
+  }
+
   /// Connect to rosbridge server
   Future<void> connect(String url) async {
     // CRITICAL: Close any existing connection first!
-    disconnect();
+    _stopTimers();
+    _closeConnection();
+
+    _lastUrl = url;
+    _setState(WsConnectionState.connecting);
 
     try {
       final uri = Uri.parse(url);
@@ -62,23 +105,130 @@ class RosbridgeClient {
       // Listen for incoming messages
       _streamSubscription = _channel!.stream.listen(
         (data) {
+          _lastMessageTime = DateTime.now();
           final msg = jsonDecode(data as String) as Map<String, dynamic>;
           _handleMessage(msg);
         },
         onError: (error) {
-          _isConnected = false;
-          _messageController.addError(error);
+          debugPrint('RosbridgeClient: Stream error: $error');
+          _handleDisconnect();
         },
         onDone: () {
-          _isConnected = false;
+          debugPrint('RosbridgeClient: Stream done (connection closed)');
+          _handleDisconnect();
         },
+        cancelOnError: false,
       );
 
       _isConnected = true;
+      _reconnectAttempts = 0;
+      _lastMessageTime = DateTime.now();
+      _setState(WsConnectionState.connected);
+      _startPingTimer();
     } catch (e) {
+      debugPrint('RosbridgeClient: Connect error: $e');
       _isConnected = false;
+      _setState(WsConnectionState.disconnected);
       rethrow;
     }
+  }
+
+  /// Handle disconnection - trigger reconnect if we have a URL
+  void _handleDisconnect() {
+    if (!_isConnected && _connectionState == WsConnectionState.disconnected) {
+      return; // Already handled
+    }
+
+    _isConnected = false;
+    _stopTimers();
+    _closeConnection();
+
+    onDisconnect?.call();
+
+    // Attempt to reconnect if we have a URL
+    if (_lastUrl != null && _reconnectAttempts < _maxReconnectAttempts) {
+      _scheduleReconnect();
+    } else {
+      _setState(WsConnectionState.disconnected);
+    }
+  }
+
+  /// Schedule a reconnect with exponential backoff
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _setState(WsConnectionState.reconnecting);
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
+    final delay = Duration(
+      seconds: (1 << _reconnectAttempts).clamp(1, 30),
+    );
+    _reconnectAttempts++;
+
+    debugPrint('RosbridgeClient: Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts/$_maxReconnectAttempts)');
+
+    _reconnectTimer = Timer(delay, () async {
+      if (_lastUrl != null) {
+        try {
+          await connect(_lastUrl!);
+          onReconnect?.call();
+        } catch (e) {
+          debugPrint('RosbridgeClient: Reconnect failed: $e');
+          // Will trigger another reconnect via _handleDisconnect
+        }
+      }
+    });
+  }
+
+  /// Start the ping timer to detect dead connections
+  void _startPingTimer() {
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(_pingInterval, (_) {
+      _checkConnection();
+    });
+  }
+
+  /// Check if connection is still alive
+  void _checkConnection() {
+    if (!_isConnected || _channel == null) {
+      return;
+    }
+
+    // Check if we've received any message recently
+    final now = DateTime.now();
+    if (_lastMessageTime != null &&
+        now.difference(_lastMessageTime!) > _connectionTimeout) {
+      debugPrint('RosbridgeClient: Connection timeout - no messages for ${_connectionTimeout.inSeconds}s');
+      _handleDisconnect();
+      return;
+    }
+
+    // Send a ping (rosbridge doesn't have ping, but we can send an empty subscribe)
+    // This will fail if the connection is dead
+    try {
+      // Use a harmless operation that won't affect state
+      send({'op': 'ping'}); // Rosbridge ignores unknown ops
+    } catch (e) {
+      debugPrint('RosbridgeClient: Ping failed: $e');
+      _handleDisconnect();
+    }
+  }
+
+  void _stopTimers() {
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+  }
+
+  void _closeConnection() {
+    _streamSubscription?.cancel();
+    _streamSubscription = null;
+    try {
+      _channel?.sink.close();
+    } catch (e) {
+      // Ignore close errors
+    }
+    _channel = null;
   }
 
   void _handleMessage(Map<String, dynamic> msg) {
@@ -99,13 +249,14 @@ class RosbridgeClient {
     _messageController.add(msg);
   }
 
-  /// Disconnect from rosbridge
+  /// Disconnect from rosbridge (manual disconnect - no auto-reconnect)
   void disconnect() {
-    _streamSubscription?.cancel();
-    _streamSubscription = null;
-    _channel?.sink.close();
-    _channel = null;
+    _stopTimers();
+    _closeConnection();
     _isConnected = false;
+    _lastUrl = null; // Clear URL to prevent auto-reconnect
+    _reconnectAttempts = 0;
+
     // Cancel any pending service calls
     for (final completer in _pendingCalls.values) {
       if (!completer.isCompleted) {
@@ -120,6 +271,21 @@ class RosbridgeClient {
     _logController.close();
     _messageController = StreamController<Map<String, dynamic>>.broadcast();
     _logController = StreamController<RosbridgeMessage>.broadcast();
+
+    _setState(WsConnectionState.disconnected);
+  }
+
+  /// Force a reconnect now (reset backoff)
+  Future<void> reconnect() async {
+    if (_lastUrl == null) {
+      debugPrint('RosbridgeClient: Cannot reconnect - no URL');
+      return;
+    }
+    _reconnectAttempts = 0;
+    final url = _lastUrl!;
+    disconnect();
+    _lastUrl = url; // Restore URL after disconnect clears it
+    await connect(url);
   }
 
   /// Send raw message
@@ -213,9 +379,11 @@ class RosbridgeClient {
   }
 
   void dispose() {
+    _stopTimers();
     disconnect();
     _messageController.close();
     _logController.close();
+    _stateController.close();
   }
 
   // === Tablet Commands (intercepted by relay, not forwarded to robot) ===
