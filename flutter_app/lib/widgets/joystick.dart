@@ -126,7 +126,19 @@ class _JoystickControlState extends State<JoystickControl> {
   @override
   void dispose() {
     _sendTimer?.cancel();
-    _scanSubscription?.cancel();
+    // Unsubscribe from /scan topic before cancelling listener
+    if (_scanSubscription != null) {
+      try {
+        final robot = context.read<RobotConnection>();
+        if (robot.isConnected) {
+          robot.client.unsubscribe(topic: '/scan');
+        }
+      } catch (e) {
+        // Context may not be available during dispose
+      }
+      _scanSubscription!.cancel();
+      _scanSubscription = null;
+    }
     super.dispose();
   }
 

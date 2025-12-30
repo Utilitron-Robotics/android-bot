@@ -394,17 +394,38 @@ class RelayWebSocketServer(
                 val json = gson.fromJson(payload, com.google.gson.JsonObject::class.java)
                 val op = json.get("op")?.asString
 
+                // Log all ops that start with "tablet_" for debugging
+                if (op?.startsWith("tablet_") == true) {
+                    Log.i(TAG, ">>> Received tablet command: op=$op, executor=${taskExecutor != null}")
+                }
+
                 when (op) {
                     "tablet_speak" -> {
-                        val text = json.get("text")?.asString ?: return
+                        val text = json.get("text")?.asString
+                        if (text == null) {
+                            Log.e(TAG, "tablet_speak missing 'text' field!")
+                            return
+                        }
                         Log.i(TAG, "Tablet speak: $text")
-                        taskExecutor?.speakText(text)
+                        if (taskExecutor != null) {
+                            taskExecutor.speakText(text)
+                        } else {
+                            Log.e(TAG, "taskExecutor is null! Cannot speak.")
+                        }
                         return
                     }
                     "tablet_display" -> {
-                        val url = json.get("url")?.asString ?: return
-                        Log.i(TAG, "Tablet display: ${url.take(50)}...")
-                        taskExecutor?.displayUrl(url)
+                        val url = json.get("url")?.asString
+                        if (url == null) {
+                            Log.e(TAG, "tablet_display missing 'url' field!")
+                            return
+                        }
+                        Log.i(TAG, "Tablet display: ${url.take(100)}...")
+                        if (taskExecutor != null) {
+                            taskExecutor.displayUrl(url)
+                        } else {
+                            Log.e(TAG, "taskExecutor is null! Cannot display.")
+                        }
                         return
                     }
                     "tablet_close_display" -> {
@@ -427,6 +448,7 @@ class RelayWebSocketServer(
                     }
                 }
             } catch (e: Exception) {
+                Log.e(TAG, "Error parsing message: ${e.message}")
                 // Not a tablet command, forward to robot
             }
 

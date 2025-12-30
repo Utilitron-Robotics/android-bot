@@ -178,7 +178,12 @@ class RobotConnection extends ChangeNotifier {
 
   /// Disconnect from robot
   void disconnect() {
-    _statusSubscription?.cancel();
+    // Unsubscribe from robot topics before disconnecting
+    if (_statusSubscription != null) {
+      _client.unsubscribe(topic: '/robot_status');
+      _statusSubscription!.cancel();
+      _statusSubscription = null;
+    }
     _client.disconnect();
     _state = RobotConnectionState.disconnected;
     _capabilities = null;

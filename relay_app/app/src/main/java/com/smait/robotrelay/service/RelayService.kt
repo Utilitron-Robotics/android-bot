@@ -1,10 +1,15 @@
 package com.smait.robotrelay.service
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
@@ -16,6 +21,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.*
+import javax.net.SocketFactory
 
 /**
  * Task types that can be performed at waypoints
@@ -45,6 +51,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "robot_relay_channel"
 
+        // Robot base IP via USB wired connection (NOT the WiFi hotspot IP!)
+        // WiFi hotspot: 10.42.0.1 | Wired/USB: 192.168.20.22
+        private const val ROBOT_WIRED_IP = "192.168.20.22"
+
         // Broadcast actions for UI updates
         const val ACTION_DISPLAY = "com.smait.robotrelay.DISPLAY"
         const val ACTION_TASK_STATUS = "com.smait.robotrelay.TASK_STATUS"
@@ -54,6 +64,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
     private val binder = RelayBinder()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     // TTS engine
     private var tts: TextToSpeech? = null
@@ -73,7 +84,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private val _taskStatus = MutableStateFlow("")
     val taskStatus: StateFlow<String> = _taskStatus
 
-    private var robotIp = "10.42.0.1" // Default to direct connection
+    // Robot connection settings - defaults to wired (USB) connection
+    private var robotIp = ROBOT_WIRED_IP
     private var robotPort = 9090
     private var relayPort = 8765
 
@@ -133,6 +145,11 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             relayPort = it.getIntExtra("relay_port", relayPort)
         }
 
+        // Log available networks for debugging
+        findUsbNetworkSocketFactory() // Just for logging
+
+        Log.i(TAG, "Connecting to robot at ws://$robotIp:$robotPort")
+
         // Stop existing clients if they are running
         if (::robotClient.isInitialized) robotClient.destroy()
         if (::relayServer.isInitialized) relayServer.destroy()
@@ -140,8 +157,9 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         // Start as foreground service
         startForeground(NOTIFICATION_ID, createNotification("Starting..."))
 
-        // Initialize clients
-        robotClient = RobotWebSocketClient(robotIp, robotPort)
+        // Initialize clients - let Android handle routing
+        // The 10.42.0.x subnet should only be reachable via USB
+        robotClient = RobotWebSocketClient(robotIp, robotPort, null)
         relayServer = RelayServer(robotClient, relayPort, this)
 
         // Connect to robot
@@ -206,6 +224,63 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         manager.notify(NOTIFICATION_ID, createNotification(status))
     }
 
+    /**
+     * Find the USB/Ethernet network and return its SocketFactory.
+     * This allows the robot connection to use the wired interface
+     * while WiFi handles internet traffic.
+     */
+    private fun findUsbNetworkSocketFactory(): SocketFactory? {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        // Get all networks and log what we find
+        val networks = cm.allNetworks
+        Log.i(TAG, "Found ${networks.size} network(s)")
+
+        for (network in networks) {
+            val caps = cm.getNetworkCapabilities(network)
+            if (caps == null) {
+                Log.d(TAG, "Network $network has no capabilities")
+                continue
+            }
+
+            // Log all transports for this network
+            val transports = mutableListOf<String>()
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) transports.add("WIFI")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) transports.add("CELLULAR")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) transports.add("ETHERNET")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)) transports.add("BLUETOOTH")
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) transports.add("VPN")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_USB)) transports.add("USB")
+            }
+            Log.i(TAG, "Network $network transports: ${transports.joinToString(", ")}")
+
+            // Skip WiFi networks - we want USB/Ethernet
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                continue
+            }
+
+            // Check for Ethernet (USB network adapters appear as Ethernet)
+            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
+                Log.i(TAG, ">>> Using ETHERNET network for robot connection")
+                return network.socketFactory
+            }
+
+            // Also check for USB transport (Android 12+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_USB)) {
+                    Log.i(TAG, ">>> Using USB network for robot connection")
+                    return network.socketFactory
+                }
+            }
+        }
+
+        // No USB/Ethernet found
+        Log.w(TAG, "No USB/Ethernet network found! Available transports logged above.")
+        Log.w(TAG, "Robot connection will use default routing (may fail if only WiFi available)")
+        return null
+    }
+
     // Public methods for UI
 
     fun getConnectionState(): StateFlow<ConnectionState> = robotClient.connectionState
@@ -253,6 +328,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     // === Task Execution Methods ===
 
     fun speak(text: String, onComplete: (() -> Unit)? = null) {
+        Log.i(TAG, "speak() called: text='$text', ttsReady=${_ttsReady.value}, tts=${tts != null}")
+
         if (!_ttsReady.value) {
             Log.w(TAG, "TTS not ready, skipping: $text")
             onComplete?.invoke()
@@ -267,27 +344,38 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             onComplete?.invoke()
         }
 
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "task_${System.currentTimeMillis()}")
+        // TTS must be called from main thread
+        mainHandler.post {
+            val result = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "task_${System.currentTimeMillis()}")
+            Log.i(TAG, "TTS speak() returned: $result")
+        }
     }
 
     fun display(url: String) {
-        Log.i(TAG, "Displaying: $url")
+        Log.i(TAG, "display() called: url='${url.take(100)}...'")
         _taskStatus.value = "Displaying content"
 
-        val intent = Intent(ACTION_DISPLAY).apply {
-            putExtra(EXTRA_URL, url)
+        // Broadcast must be sent from main thread for reliable delivery
+        mainHandler.post {
+            val intent = Intent(ACTION_DISPLAY).apply {
+                putExtra(EXTRA_URL, url)
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+            Log.i(TAG, "Display broadcast sent")
         }
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     override fun closeDisplay() {
-        Log.i(TAG, "Closing display")
+        Log.i(TAG, "closeDisplay() called")
         _taskStatus.value = ""
 
-        val intent = Intent(ACTION_DISPLAY).apply {
-            putExtra(EXTRA_URL, "") // Empty URL = close
+        mainHandler.post {
+            val intent = Intent(ACTION_DISPLAY).apply {
+                putExtra(EXTRA_URL, "") // Empty URL = close
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+            Log.i(TAG, "Close display broadcast sent")
         }
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
     fun executeTask(task: WaypointTask, onComplete: (() -> Unit)? = null) {
@@ -341,13 +429,15 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         _taskStatus.value = ""
     }
 
-    // === TaskExecutor Interface Methods (for HTTP API) ===
+    // === TaskExecutor Interface Methods (for WebSocket/HTTP API) ===
 
     override fun speakText(text: String) {
+        Log.i(TAG, ">>> speakText() called from TaskExecutor: '$text'")
         speak(text, null)
     }
 
     override fun displayUrl(url: String) {
+        Log.i(TAG, ">>> displayUrl() called from TaskExecutor: '${url.take(100)}...'")
         display(url)
     }
 
