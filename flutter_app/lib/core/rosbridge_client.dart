@@ -46,14 +46,19 @@ class RosbridgeClient {
 
   bool get isConnected => _isConnected;
 
+  StreamSubscription? _streamSubscription;
+
   /// Connect to rosbridge server
   Future<void> connect(String url) async {
+    // CRITICAL: Close any existing connection first!
+    disconnect();
+
     try {
       final uri = Uri.parse(url);
       _channel = WebSocketChannel.connect(uri);
 
       // Listen for incoming messages
-      _channel!.stream.listen(
+      _streamSubscription = _channel!.stream.listen(
         (data) {
           final msg = jsonDecode(data as String) as Map<String, dynamic>;
           _handleMessage(msg);
@@ -94,9 +99,18 @@ class RosbridgeClient {
 
   /// Disconnect from rosbridge
   void disconnect() {
+    _streamSubscription?.cancel();
+    _streamSubscription = null;
     _channel?.sink.close();
     _channel = null;
     _isConnected = false;
+    // Cancel any pending service calls
+    for (final completer in _pendingCalls.values) {
+      if (!completer.isCompleted) {
+        completer.completeError('Connection closed');
+      }
+    }
+    _pendingCalls.clear();
   }
 
   /// Send raw message

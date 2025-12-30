@@ -5,6 +5,7 @@ import 'waypoint_grid.dart';
 import 'joystick.dart';
 import 'parameter_list.dart';
 import 'voice_control.dart';
+import 'map_view.dart';
 
 /// Dynamically generates UI widgets based on discovered robot capabilities
 class WidgetFactory {
@@ -31,6 +32,11 @@ class WidgetFactory {
     // Joystick if velocity control available
     if (capabilities.hasVelocityControl) {
       widgets.add(const JoystickControl());
+    }
+
+    // Map view if map topic available
+    if (capabilities.hasMap) {
+      widgets.add(const MapView());
     }
 
     // Parameters if any discovered

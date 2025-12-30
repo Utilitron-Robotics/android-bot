@@ -32,7 +32,7 @@ class RobotBase {
 
   RobotBase({
     required this.ssid,
-    this.ip = '192.168.20.22',  // Pudu default
+    this.ip = '10.42.0.1',  // Direct WiFi default (robot's own hotspot)
     this.port = 9090,
     this.nickname,
     this.password,
@@ -54,7 +54,7 @@ class RobotBase {
 
   factory RobotBase.fromJson(Map<String, dynamic> json) => RobotBase(
     ssid: json['ssid'] as String,
-    ip: json['ip'] as String? ?? '192.168.20.22',
+    ip: json['ip'] as String? ?? '10.42.0.1',
     port: json['port'] as int? ?? 9090,
     nickname: json['nickname'] as String?,
     password: json['password'] as String?,
@@ -121,8 +121,8 @@ class FleetDiscovery extends ChangeNotifier {
     // Add known Pudu bases if list is empty
     if (_knownRobots.isEmpty) {
       _knownRobots.addAll([
-        RobotBase(ssid: 'TY126AA003F0-005878', nickname: 'Pudu Bot 1'),
-        RobotBase(ssid: 'TY126AA003F0-005993', nickname: 'Pudu Bot 2'),
+        RobotBase(ssid: 'TY126AA003F0-005878', nickname: 'Pudu Bot 1', password: '123456789'),
+        RobotBase(ssid: 'TY126AA003F0-005993', nickname: 'Pudu Bot 2', password: '123456789'),
       ]);
     }
 

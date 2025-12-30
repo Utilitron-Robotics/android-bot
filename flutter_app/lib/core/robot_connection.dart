@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'rosbridge_client.dart';
 import '../services/robot_introspection.dart';
+import '../services/audio_announcer.dart';
 
 /// Robot connection state (renamed to avoid conflict with Flutter's ConnectionState)
 enum RobotConnectionState { disconnected, connecting, connected, error }
@@ -36,7 +37,7 @@ class RobotConnection extends ChangeNotifier {
 
   Future<void> _loadSavedUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    _robotUrl = prefs.getString('robot_url') ?? 'ws://192.168.1.100:9090';
+    _robotUrl = prefs.getString('robot_url') ?? 'ws://10.42.0.1:9090';
     notifyListeners();
   }
 
@@ -48,6 +49,11 @@ class RobotConnection extends ChangeNotifier {
   /// Connect to robot and discover capabilities
   Future<void> connect(String url) async {
     if (_state == RobotConnectionState.connecting) return;
+
+    // CRITICAL: Disconnect from any existing robot first!
+    if (_state == RobotConnectionState.connected) {
+      disconnect();
+    }
 
     _state = RobotConnectionState.connecting;
     _errorMessage = null;
@@ -75,30 +81,48 @@ class RobotConnection extends ChangeNotifier {
   }
 
   void _subscribeToStatus() {
-    if (_capabilities == null) return;
-
-    // Subscribe to robot_status if available
-    if (_capabilities!.topics.any((t) => t.name == '/robot_status')) {
-      _client.subscribe(
-        topic: '/robot_status',
-        type: 'yutong_assistance/RobotStatus',
-      );
-    }
+    // Always subscribe to robot_status - smAiT robots always have this
+    _client.subscribe(
+      topic: '/robot_status',
+      type: 'yutong_assistance/RobotStatus',
+    );
 
     // Listen for status updates
     _statusSubscription = _client.messages.listen((msg) {
       if (msg['topic'] == '/robot_status') {
         final data = msg['msg'] as Map<String, dynamic>?;
         if (data != null) {
-          _status = RobotStatus(
+          final newStatus = RobotStatus(
             navStatus: data['nav_status'] as int? ?? 0,
             battery: (data['battery'] as num?)?.toDouble() ?? 0,
-            velocity: (data['velocity'] as List?)?.cast<double>() ?? [0, 0],
+            velocity: _parseVelocity(data['velocity']),
+            hardEstop: data['hard_estop'] as bool? ?? false,
+            softEstop: data['soft_estop'] as bool? ?? false,
+            charger: data['charger'] as int? ?? 0,
+            controlState: data['control_state'] as int? ?? 0,
+            buildingName: data['current_building_name'] as String? ?? '',
+            floorName: data['current_floor_name'] as String? ?? '',
+            currentGoal: data['current_goal_name'] as String? ?? '',
           );
+
+          // Trigger audio announcements on status changes
+          AudioAnnouncer().onNavStatusChanged(
+            newStatus.navStatus,
+            newStatus.currentGoal,
+          );
+
+          _status = newStatus;
           notifyListeners();
         }
       }
     });
+  }
+
+  List<double> _parseVelocity(dynamic vel) {
+    if (vel is List) {
+      return vel.map((v) => (v as num).toDouble()).toList();
+    }
+    return [0.0, 0.0];
   }
 
   /// Navigate to a waypoint (POI)
@@ -130,14 +154,21 @@ class RobotConnection extends ChangeNotifier {
   }
 
   /// Send velocity command (joystick)
+  /// smAiT protocol: advertise then publish to /cmd_vel_mux/input/teleop
+  /// Speed command lasts 0.6 seconds per the protocol spec
   void sendVelocity(double linear, double angular) {
     if (!isConnected) return;
 
+    _client.advertise(
+      topic: '/cmd_vel_mux/input/teleop',
+      type: 'geometry_msgs/Twist',
+    );
+
     _client.publish(
-      topic: '/cmd_vel',
+      topic: '/cmd_vel_mux/input/teleop',
       msg: {
-        'linear': {'x': linear, 'y': 0.0, 'z': 0.0},
-        'angular': {'x': 0.0, 'y': 0.0, 'z': angular},
+        'linear': {'x': linear},
+        'angular': {'z': angular},
       },
     );
   }
@@ -160,29 +191,64 @@ class RobotConnection extends ChangeNotifier {
   }
 }
 
-/// Live robot status
+/// Live robot status from /robot_status topic
 class RobotStatus {
   final int navStatus;
   final double battery;
   final List<double> velocity;
+  final bool hardEstop;
+  final bool softEstop;
+  final int charger;
+  final int controlState;
+  final String buildingName;
+  final String floorName;
+  final String currentGoal;
 
   RobotStatus({
     this.navStatus = 0,
     this.battery = 0,
     this.velocity = const [0, 0],
+    this.hardEstop = false,
+    this.softEstop = false,
+    this.charger = 0,
+    this.controlState = 0,
+    this.buildingName = '',
+    this.floorName = '',
+    this.currentGoal = '',
   });
 
   String get navStatusText {
     switch (navStatus) {
       case 600: return 'Idle';
       case 601: return 'Moving';
-      case 602: return 'Paused';
+      case 602: return 'Cancelled';
       case 603: return 'Arrived';
-      case 604: return 'At destination';
+      case 604: return 'Failed';
       case 605: return 'Standby';
       default: return 'Unknown ($navStatus)';
     }
   }
 
+  String get chargerText {
+    switch (charger) {
+      case 0: return 'Not charging';
+      case 1: return 'Charging';
+      case 2: return 'Recharging';
+      case -1: return 'Charge failed';
+      default: return 'Unknown';
+    }
+  }
+
+  String get controlStateText {
+    switch (controlState) {
+      case 20: return 'Mapping';
+      case 30: return 'Navigation';
+      case 99: return 'Error';
+      default: return 'Unknown';
+    }
+  }
+
   bool get isMoving => navStatus == 601;
+  bool get hasEstop => hardEstop || softEstop;
+  bool get isCharging => charger == 1 || charger == 2;
 }
