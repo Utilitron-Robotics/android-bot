@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/fleet_discovery.dart';
 import '../core/robot_connection.dart';
+import '../core/dual_connection.dart';
 
 /// Fleet picker with WiFi scanning and robot selection
 class FleetPicker extends StatefulWidget {
@@ -22,19 +23,23 @@ class FleetPicker extends StatefulWidget {
   State<FleetPicker> createState() => _FleetPickerState();
 }
 
-class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStateMixin {
+class _FleetPickerState extends State<FleetPicker>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final _ssidController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _ipController = TextEditingController(text: '192.168.20.22');
+  final _ipController = TextEditingController(text: '10.42.0.1');
   final _portController = TextEditingController(text: '9090');
   final _nicknameController = TextEditingController();
+  final _relayIpController = TextEditingController();
   bool _showAddForm = false;
+  bool _scanningRelays = false;
+  List<String> _discoveredRelays = [];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final fleet = context.read<FleetDiscovery>();
@@ -51,6 +56,7 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
     _ipController.dispose();
     _portController.dispose();
     _nicknameController.dispose();
+    _relayIpController.dispose();
     super.dispose();
   }
 
@@ -79,14 +85,16 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
                 // Current WiFi status
                 if (fleet.currentSsid != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     child: Row(
                       children: [
                         const Icon(Icons.wifi, size: 16, color: Colors.green),
                         const SizedBox(width: 8),
                         Text(
                           'WiFi: ${fleet.currentSsid}',
-                          style: TextStyle(color: Colors.grey[400], fontSize: 12),
+                          style:
+                              TextStyle(color: Colors.grey[400], fontSize: 12),
                         ),
                       ],
                     ),
@@ -97,6 +105,7 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
                   tabs: const [
                     Tab(icon: Icon(Icons.router), text: 'Robots'),
                     Tab(icon: Icon(Icons.wifi_find), text: 'Scan WiFi'),
+                    Tab(icon: Icon(Icons.tablet_android), text: 'Relay'),
                   ],
                 ),
                 // Tab content
@@ -106,6 +115,7 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
                     children: [
                       _buildRobotsTab(fleet, scrollController),
                       _buildWifiScanTab(fleet, scrollController),
+                      _buildRelayTab(scrollController),
                     ],
                   ),
                 ),
@@ -118,7 +128,8 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
   }
 
   /// Robots tab - list known robots and add new ones
-  Widget _buildRobotsTab(FleetDiscovery fleet, ScrollController scrollController) {
+  Widget _buildRobotsTab(
+      FleetDiscovery fleet, ScrollController scrollController) {
     return Column(
       children: [
         // Header
@@ -181,7 +192,8 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
   }
 
   /// WiFi scan tab - scan and connect to robot networks
-  Widget _buildWifiScanTab(FleetDiscovery fleet, ScrollController scrollController) {
+  Widget _buildWifiScanTab(
+      FleetDiscovery fleet, ScrollController scrollController) {
     return Column(
       children: [
         // Scan controls
@@ -191,7 +203,8 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: fleet.isScanning ? null : () => fleet.scanWifiNetworks(),
+                  onPressed:
+                      fleet.isScanning ? null : () => fleet.scanWifiNetworks(),
                   icon: fleet.isScanning
                       ? const SizedBox(
                           width: 16,
@@ -199,12 +212,15 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.wifi_find),
-                  label: Text(fleet.isScanning ? 'Scanning...' : 'Scan All Networks'),
+                  label: Text(
+                      fleet.isScanning ? 'Scanning...' : 'Scan All Networks'),
                 ),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: fleet.isScanning ? null : () => fleet.scanWifiNetworks(filterRobots: true),
+                onPressed: fleet.isScanning
+                    ? null
+                    : () => fleet.scanWifiNetworks(filterRobots: true),
                 icon: const Icon(Icons.filter_alt),
                 label: const Text('Robots Only'),
               ),
@@ -251,6 +267,132 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
     );
   }
 
+  /// Relay tab - connect through tablet relay
+  Widget _buildRelayTab(ScrollController scrollController) {
+    return Column(
+      children: [
+        // Scan controls
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Connect via Tablet Relay',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Use a tablet running Robot Relay app as a bridge',
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _relayIpController,
+                      decoration: const InputDecoration(
+                        labelText: 'Relay IP Address',
+                        hintText: '192.168.1.100',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: () => _connectToRelay(_relayIpController.text),
+                    child: const Text('Connect'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _scanningRelays ? null : _scanForRelays,
+                icon: _scanningRelays
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.search),
+                label: Text(_scanningRelays ? 'Scanning...' : 'Scan Network for Relays'),
+              ),
+            ],
+          ),
+        ),
+        // Discovered relays list
+        Expanded(
+          child: _discoveredRelays.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.tablet_android, size: 48, color: Colors.grey[600]),
+                      const SizedBox(height: 8),
+                      const Text('No relays discovered'),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Enter IP manually or scan network',
+                        style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.builder(
+                  controller: scrollController,
+                  itemCount: _discoveredRelays.length,
+                  itemBuilder: (context, index) {
+                    final ip = _discoveredRelays[index];
+                    return ListTile(
+                      leading: const CircleAvatar(
+                        backgroundColor: Colors.green,
+                        child: Icon(Icons.tablet_android, color: Colors.white),
+                      ),
+                      title: Text('Relay at $ip'),
+                      subtitle: Text('http://$ip:8765 • ws://$ip:8766'),
+                      trailing: FilledButton(
+                        onPressed: () => _connectToRelay(ip),
+                        child: const Text('Connect'),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _scanForRelays() async {
+    setState(() => _scanningRelays = true);
+    try {
+      final relays = await RelayDiscovery.scanForRelays(
+        subnet: '192.168.1', // TODO: detect current subnet
+        timeout: const Duration(milliseconds: 300),
+      );
+      setState(() => _discoveredRelays = relays);
+    } finally {
+      setState(() => _scanningRelays = false);
+    }
+  }
+
+  void _connectToRelay(String ip) {
+    if (ip.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter relay IP address')),
+      );
+      return;
+    }
+    // Return a special RobotBase that indicates relay mode
+    Navigator.pop(context, RobotBase(
+      ssid: 'RELAY:$ip',
+      ip: ip,
+      port: 8766, // WebSocket port
+      nickname: 'Relay @ $ip',
+    ));
+  }
+
   Widget _buildAddForm(FleetDiscovery fleet) {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -259,7 +401,8 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Add Robot Manually', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Add Robot Manually',
+                style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -356,8 +499,12 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
             title: const Text('Remove Robot?'),
             content: Text('Remove ${robot.displayName}?'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Remove')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Remove')),
             ],
           ),
         );
@@ -365,9 +512,13 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
       onDismissed: (_) => fleet.removeRobot(robot.ssid),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: robot.isOnline ? Colors.green : (isCurrentWifi ? Colors.blue : Colors.grey),
+          backgroundColor: robot.isOnline
+              ? Colors.green
+              : (isCurrentWifi ? Colors.blue : Colors.grey),
           child: Icon(
-            robot.isOnline ? Icons.check : (isCurrentWifi ? Icons.wifi : Icons.wifi_off),
+            robot.isOnline
+                ? Icons.check
+                : (isCurrentWifi ? Icons.wifi : Icons.wifi_off),
             color: Colors.white,
           ),
         ),
@@ -383,7 +534,8 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
                   color: Colors.green,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text('Online', style: TextStyle(fontSize: 11, color: Colors.white)),
+                child: const Text('Online',
+                    style: TextStyle(fontSize: 11, color: Colors.white)),
               ),
             if (!isCurrentWifi && !robot.isOnline)
               IconButton(
@@ -419,9 +571,14 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
       trailing: isCurrent
           ? const Chip(label: Text('Connected'), backgroundColor: Colors.green)
           : FilledButton(
-              onPressed: fleet.isConnecting ? null : () => _connectToNetwork(network, fleet),
+              onPressed: fleet.isConnecting
+                  ? null
+                  : () => _connectToNetwork(network, fleet),
               child: fleet.isConnecting
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Connect'),
             ),
     );
@@ -453,12 +610,13 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
     setState(() => _showAddForm = false);
     _ssidController.clear();
     _passwordController.clear();
-    _ipController.text = '192.168.20.22';
+    _ipController.text = '10.42.0.1';
     _portController.text = '9090';
     _nicknameController.clear();
   }
 
-  Future<void> _connectToNetwork(ScannedNetwork network, FleetDiscovery fleet) async {
+  Future<void> _connectToNetwork(
+      ScannedNetwork network, FleetDiscovery fleet) async {
     String? password;
 
     if (network.isSecured) {
@@ -478,8 +636,12 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
               autofocus: true,
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-              FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Connect')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, controller.text),
+                  child: const Text('Connect')),
             ],
           );
         },
@@ -504,8 +666,10 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
     }
   }
 
-  Future<void> _connectToRobotWifi(RobotBase robot, FleetDiscovery fleet) async {
-    final result = await fleet.connectToWifi(robot.ssid, password: robot.password);
+  Future<void> _connectToRobotWifi(
+      RobotBase robot, FleetDiscovery fleet) async {
+    final result =
+        await fleet.connectToWifi(robot.ssid, password: robot.password);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -524,7 +688,8 @@ class _FleetPickerState extends State<FleetPicker> with SingleTickerProviderStat
         title: const Text('Add as Robot?'),
         content: Text('Connected to $ssid. Add it as a robot?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('No')),
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text('No')),
           FilledButton(
             onPressed: () {
               Navigator.pop(context);
@@ -567,7 +732,8 @@ class FleetConnectButton extends StatelessWidget {
     );
   }
 
-  Future<void> _showFleetPicker(BuildContext context, RobotConnection robot) async {
+  Future<void> _showFleetPicker(
+      BuildContext context, RobotConnection robot) async {
     final selected = await FleetPicker.show(context);
     if (selected != null && context.mounted) {
       robot.connect(selected.wsUrl);

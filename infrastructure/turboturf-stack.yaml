@@ -1,0 +1,387 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'TurboTurf - Robot Fleet Management Backend'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ApiDomainName:
+    Type: String
+    Default: ''
+    Description: Custom domain name (optional)
+
+Resources:
+  # DynamoDB Tables
+  RobotsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'turboturf-robots-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: robot_id
+          AttributeType: S
+        - AttributeName: building
+          AttributeType: S
+      KeySchema:
+        - AttributeName: robot_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: by-building
+          KeySchema:
+            - AttributeName: building
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  CommandsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'turboturf-commands-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: robot_id
+          AttributeType: S
+        - AttributeName: command_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: robot_id
+          KeyType: HASH
+        - AttributeName: command_id
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  AlertsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'turboturf-alerts-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: robot_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: robot_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # Lambda Execution Role
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'turboturf-lambda-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt RobotsTable.Arn
+                  - !Sub '${RobotsTable.Arn}/index/*'
+                  - !GetAtt CommandsTable.Arn
+                  - !GetAtt AlertsTable.Arn
+
+  # API Lambda Functions
+  FleetApiFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'turboturf-fleet-api-${Environment}'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          ROBOTS_TABLE: !Ref RobotsTable
+          COMMANDS_TABLE: !Ref CommandsTable
+          ALERTS_TABLE: !Ref AlertsTable
+          ENVIRONMENT: !Ref Environment
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import time
+          import uuid
+          from decimal import Decimal
+
+          dynamodb = boto3.resource('dynamodb')
+          robots_table = dynamodb.Table(os.environ['ROBOTS_TABLE'])
+          commands_table = dynamodb.Table(os.environ['COMMANDS_TABLE'])
+          alerts_table = dynamodb.Table(os.environ['ALERTS_TABLE'])
+
+          def decimal_default(obj):
+              if isinstance(obj, Decimal):
+                  return float(obj)
+              raise TypeError
+
+          def handler(event, context):
+              method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method'))
+              path = event.get('path', event.get('rawPath', ''))
+              body = json.loads(event.get('body', '{}') or '{}')
+
+              # Route requests
+              if path == '/fleet/register' and method == 'POST':
+                  return register_robot(body)
+              elif path == '/fleet/deregister' and method == 'POST':
+                  return deregister_robot(body)
+              elif path == '/fleet/status' and method in ['GET', 'POST']:
+                  if method == 'POST':
+                      return update_status(body)
+                  return get_fleet_status()
+              elif path.startswith('/fleet/commands') and method == 'GET':
+                  robot_id = path.split('/')[-1]
+                  return get_commands(robot_id)
+              elif path == '/fleet/commands' and method == 'POST':
+                  return send_command(body)
+              elif path == '/fleet/commands/ack' and method == 'POST':
+                  return ack_command(body)
+              elif path == '/fleet/commands/complete' and method == 'POST':
+                  return complete_command(body)
+              elif path == '/fleet/alerts' and method in ['GET', 'POST']:
+                  if method == 'POST':
+                      return create_alert(body)
+                  return get_alerts(event.get('queryStringParameters', {}))
+
+              return response(404, {'error': 'Not found'})
+
+          def register_robot(body):
+              robot_id = body.get('robot_id')
+              if not robot_id:
+                  return response(400, {'error': 'robot_id required'})
+
+              robots_table.put_item(Item={
+                  'robot_id': robot_id,
+                  'tablet_model': body.get('tablet_model', 'unknown'),
+                  'android_version': body.get('android_version', 0),
+                  'app_version': body.get('app_version', '1.0.0'),
+                  'capabilities': body.get('capabilities', {}),
+                  'registered_at': int(time.time() * 1000),
+                  'online': True,
+                  'last_seen': int(time.time() * 1000),
+              })
+              return response(200, {'status': 'registered', 'robot_id': robot_id})
+
+          def deregister_robot(body):
+              robot_id = body.get('robot_id')
+              if robot_id:
+                  robots_table.update_item(
+                      Key={'robot_id': robot_id},
+                      UpdateExpression='SET online = :o, last_seen = :t',
+                      ExpressionAttributeValues={':o': False, ':t': int(time.time() * 1000)}
+                  )
+              return response(200, {'status': 'deregistered'})
+
+          def update_status(body):
+              robot_id = body.get('robot_id')
+              if not robot_id:
+                  return response(400, {'error': 'robot_id required'})
+
+              robots_table.update_item(
+                  Key={'robot_id': robot_id},
+                  UpdateExpression='SET battery = :b, #pos = :p, nav_status = :n, current_goal = :g, estop = :e, online = :o, building = :bld, floor = :f, last_seen = :t',
+                  ExpressionAttributeNames={'#pos': 'position'},
+                  ExpressionAttributeValues={
+                      ':b': body.get('battery', 0),
+                      ':p': body.get('position', {'x': 0, 'y': 0, 'theta': 0}),
+                      ':n': body.get('nav_status', 0),
+                      ':g': body.get('current_goal'),
+                      ':e': body.get('estop', False),
+                      ':o': body.get('online', True),
+                      ':bld': body.get('building'),
+                      ':f': body.get('floor'),
+                      ':t': body.get('timestamp', int(time.time() * 1000)),
+                  }
+              )
+              return response(200, {'status': 'updated'})
+
+          def get_fleet_status():
+              result = robots_table.scan()
+              robots = result.get('Items', [])
+              return response(200, {'robots': robots})
+
+          def send_command(body):
+              robot_id = body.get('robot_id')
+              cmd_type = body.get('type')
+              if not robot_id or not cmd_type:
+                  return response(400, {'error': 'robot_id and type required'})
+
+              command_id = str(uuid.uuid4())
+              ttl = int(time.time()) + 300  # 5 minute TTL
+
+              commands_table.put_item(Item={
+                  'robot_id': robot_id,
+                  'command_id': command_id,
+                  'type': cmd_type,
+                  'payload': body.get('payload', {}),
+                  'status': 'pending',
+                  'timestamp': int(time.time() * 1000),
+                  'ttl': ttl,
+              })
+              return response(200, {'status': 'sent', 'command_id': command_id})
+
+          def get_commands(robot_id):
+              result = commands_table.query(
+                  KeyConditionExpression='robot_id = :r',
+                  FilterExpression='#s = :p',
+                  ExpressionAttributeNames={'#s': 'status'},
+                  ExpressionAttributeValues={':r': robot_id, ':p': 'pending'}
+              )
+              return response(200, {'commands': result.get('Items', [])})
+
+          def ack_command(body):
+              robot_id = body.get('robot_id')
+              command_id = body.get('command_id')
+              if robot_id and command_id:
+                  commands_table.update_item(
+                      Key={'robot_id': robot_id, 'command_id': command_id},
+                      UpdateExpression='SET #s = :s',
+                      ExpressionAttributeNames={'#s': 'status'},
+                      ExpressionAttributeValues={':s': 'received'}
+                  )
+              return response(200, {'status': 'acknowledged'})
+
+          def complete_command(body):
+              robot_id = body.get('robot_id')
+              command_id = body.get('command_id')
+              if robot_id and command_id:
+                  commands_table.update_item(
+                      Key={'robot_id': robot_id, 'command_id': command_id},
+                      UpdateExpression='SET #s = :s, message = :m',
+                      ExpressionAttributeNames={'#s': 'status'},
+                      ExpressionAttributeValues={
+                          ':s': body.get('status', 'completed'),
+                          ':m': body.get('message')
+                      }
+                  )
+              return response(200, {'status': 'completed'})
+
+          def create_alert(body):
+              robot_id = body.get('robot_id')
+              if not robot_id:
+                  return response(400, {'error': 'robot_id required'})
+
+              timestamp = body.get('timestamp', int(time.time() * 1000))
+              ttl = int(time.time()) + 86400 * 7  # 7 day TTL
+
+              alerts_table.put_item(Item={
+                  'robot_id': robot_id,
+                  'timestamp': timestamp,
+                  'alert_type': body.get('alert_type', 'info'),
+                  'message': body.get('message', ''),
+                  'severity': body.get('severity', 'info'),
+                  'ttl': ttl,
+              })
+              return response(200, {'status': 'created'})
+
+          def get_alerts(params):
+              limit = int(params.get('limit', 50)) if params else 50
+              result = alerts_table.scan(Limit=limit)
+              alerts = sorted(result.get('Items', []), key=lambda x: x.get('timestamp', 0), reverse=True)
+              return response(200, {'alerts': alerts})
+
+          def response(status_code, body):
+              return {
+                  'statusCode': status_code,
+                  'headers': {
+                      'Content-Type': 'application/json',
+                      'Access-Control-Allow-Origin': '*',
+                      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                      'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+                  },
+                  'body': json.dumps(body, default=decimal_default)
+              }
+
+  # API Gateway
+  FleetApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'turboturf-api-${Environment}'
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - X-API-Key
+
+  FleetApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref FleetApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt FleetApiFunction.Arn
+      PayloadFormatVersion: '2.0'
+
+  FleetApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref FleetApi
+      RouteKey: '$default'
+      Target: !Sub 'integrations/${FleetApiIntegration}'
+
+  FleetApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref FleetApi
+      StageName: !Ref Environment
+      AutoDeploy: true
+
+  LambdaApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FleetApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FleetApi}/*'
+
+Outputs:
+  ApiEndpoint:
+    Description: Fleet API Endpoint
+    Value: !Sub 'https://${FleetApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub 'TurboTurf-ApiEndpoint-${Environment}'
+
+  RobotsTableName:
+    Description: DynamoDB Robots Table
+    Value: !Ref RobotsTable
+
+  CommandsTableName:
+    Description: DynamoDB Commands Table
+    Value: !Ref CommandsTable
+
+  AlertsTableName:
+    Description: DynamoDB Alerts Table
+    Value: !Ref AlertsTable

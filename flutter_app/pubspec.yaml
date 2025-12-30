@@ -24,11 +24,17 @@ dependencies:
   # Local storage for robot IP
   shared_preferences: ^2.2.2
 
-  # Speech recognition (voice commands)
-  speech_to_text: ^6.6.0
+  # Speech recognition (voice commands) - disabled due to Kotlin compat issue
+  # speech_to_text: ^6.6.0
 
-  # Permissions
-  permission_handler: ^11.1.0
+  # Permissions - disabled with speech
+  # permission_handler: ^11.1.0
+
+  # HTTP client for relay
+  http: ^1.1.0
+
+  # Text-to-speech for announcements
+  flutter_tts: ^4.0.2
 
 dev_dependencies:
   flutter_test:

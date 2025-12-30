@@ -158,35 +158,20 @@ class RobotIntrospection {
 
   Future<List<String>> _discoverWaypoints() async {
     try {
-      // Try to get POI list from robot
+      // smAiT protocol: call /poi with empty string to get available waypoints
       final result = await client.callService(
-        service: '/get_poi_list',
+        service: '/poi',
+        args: {'poi': ''},
         timeout: const Duration(seconds: 5),
       );
 
-      final pois = result['values']?['pois'] as List?;
-      if (pois != null) {
-        return pois.map((p) => p['name'].toString()).toList();
+      // Response has avaliable_list (note: typo in API is intentional)
+      final pois = result['values']?['avaliable_list'] as List?;
+      if (pois != null && pois.isNotEmpty) {
+        return pois.map((p) => p.toString()).toList();
       }
     } catch (e) {
-      // Service might not exist
-    }
-
-    // Try getting from parameter
-    try {
-      final result = await client.callService(
-        service: '/rosapi/get_param',
-        args: {'name': '/poi_list'},
-        timeout: const Duration(seconds: 5),
-      );
-
-      final value = result['values']?['value'];
-      if (value is String) {
-        // Might be JSON encoded
-        return value.split(',').map((s) => s.trim()).toList();
-      }
-    } catch (e) {
-      // Parameter might not exist
+      // Service might not exist or timeout
     }
 
     // Return empty - user can configure manually

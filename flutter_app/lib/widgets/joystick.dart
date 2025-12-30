@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
+import '../services/audio_announcer.dart';
 
 /// Virtual joystick for manual robot control
 class JoystickControl extends StatefulWidget {
@@ -15,10 +16,24 @@ class _JoystickControlState extends State<JoystickControl> {
   double _linearVel = 0;
   double _angularVel = 0;
   Timer? _sendTimer;
+  bool _slamSafe = false; // SLAM-safe mode (slower, announces obstacles)
+  bool _audioEnabled = true;
 
-  static const double maxLinear = 0.5; // m/s
-  static const double maxAngular = 1.0; // rad/s
+  // Speed limits - reduced when SLAM-safe is on
+  static const double maxLinearFast = 0.5; // m/s - full speed
+  static const double maxLinearSafe = 0.25; // m/s - safe mode
+  static const double maxAngularFast = 1.0; // rad/s
+  static const double maxAngularSafe = 0.5; // rad/s
   static const double joystickSize = 200;
+
+  double get _maxLinear => _slamSafe ? maxLinearSafe : maxLinearFast;
+  double get _maxAngular => _slamSafe ? maxAngularSafe : maxAngularFast;
+
+  @override
+  void initState() {
+    super.initState();
+    AudioAnnouncer().init();
+  }
 
   @override
   void dispose() {
@@ -33,17 +48,70 @@ class _JoystickControlState extends State<JoystickControl> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Header with title
             Row(
               children: [
-                const Icon(Icons.gamepad),
+                Icon(Icons.gamepad,
+                  color: _slamSafe ? Colors.orange : null),
                 const SizedBox(width: 8),
                 Text(
                   'Manual Control',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
+                if (_slamSafe)
+                  Container(
+                    margin: const EdgeInsets.only(left: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.orange,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text('SAFE',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Control toggles row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // SLAM Safe toggle
+                FilterChip(
+                  label: const Text('SLAM Safe'),
+                  avatar: Icon(_slamSafe ? Icons.shield : Icons.shield_outlined,
+                    size: 18),
+                  selected: _slamSafe,
+                  selectedColor: Colors.orange.shade700,
+                  onSelected: (value) {
+                    setState(() => _slamSafe = value);
+                    if (_audioEnabled) {
+                      AudioAnnouncer().speak(
+                        value ? 'Safe mode on. Speed reduced.' : 'Safe mode off. Full speed.');
+                    }
+                  },
+                ),
+                const SizedBox(width: 12),
+                // Audio toggle
+                FilterChip(
+                  label: const Text('Audio'),
+                  avatar: Icon(_audioEnabled ? Icons.volume_up : Icons.volume_off,
+                    size: 18),
+                  selected: _audioEnabled,
+                  selectedColor: Colors.blue.shade700,
+                  onSelected: (value) {
+                    setState(() => _audioEnabled = value);
+                    AudioAnnouncer().enabled = value;
+                    if (value) {
+                      AudioAnnouncer().speak('Audio enabled');
+                    }
+                  },
+                ),
               ],
             ),
             const SizedBox(height: 16),
+
             // Joystick
             SizedBox(
               width: joystickSize,
@@ -56,13 +124,15 @@ class _JoystickControlState extends State<JoystickControl> {
                   painter: _JoystickPainter(
                     linearVel: _linearVel,
                     angularVel: _angularVel,
-                    maxLinear: maxLinear,
-                    maxAngular: maxAngular,
+                    maxLinear: _maxLinear,
+                    maxAngular: _maxAngular,
+                    safeMode: _slamSafe,
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 16),
+
             // Velocity display
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -70,24 +140,26 @@ class _JoystickControlState extends State<JoystickControl> {
                 _VelocityIndicator(
                   label: 'Linear',
                   value: _linearVel,
-                  max: maxLinear,
+                  max: _maxLinear,
                   unit: 'm/s',
                 ),
                 const SizedBox(width: 32),
                 _VelocityIndicator(
                   label: 'Angular',
                   value: _angularVel,
-                  max: maxAngular,
+                  max: _maxAngular,
                   unit: 'rad/s',
                 ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              'Drag to control robot movement',
+              _slamSafe
+                ? 'Safe mode: Reduced speed (${maxLinearSafe}m/s max)'
+                : 'Drag to control • Full speed (${maxLinearFast}m/s)',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey,
-                  ),
+                color: _slamSafe ? Colors.orange : Colors.grey,
+              ),
             ),
           ],
         ),
@@ -105,15 +177,12 @@ class _JoystickControlState extends State<JoystickControl> {
     const center = Offset(joystickSize / 2, joystickSize / 2);
     final position = details.localPosition - center;
 
-    // Calculate velocities from joystick position
-    // Forward/backward from Y axis, rotation from X axis
     setState(() {
-      _linearVel = (-position.dy / (joystickSize / 2)) * maxLinear;
-      _angularVel = (-position.dx / (joystickSize / 2)) * maxAngular;
+      _linearVel = (-position.dy / (joystickSize / 2)) * _maxLinear;
+      _angularVel = (-position.dx / (joystickSize / 2)) * _maxAngular;
 
-      // Clamp values
-      _linearVel = _linearVel.clamp(-maxLinear, maxLinear);
-      _angularVel = _angularVel.clamp(-maxAngular, maxAngular);
+      _linearVel = _linearVel.clamp(-_maxLinear, _maxLinear);
+      _angularVel = _angularVel.clamp(-_maxAngular, _maxAngular);
     });
   }
 
@@ -137,12 +206,14 @@ class _JoystickPainter extends CustomPainter {
   final double angularVel;
   final double maxLinear;
   final double maxAngular;
+  final bool safeMode;
 
   _JoystickPainter({
     required this.linearVel,
     required this.angularVel,
     required this.maxLinear,
     required this.maxAngular,
+    this.safeMode = false,
   });
 
   @override
@@ -150,12 +221,12 @@ class _JoystickPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width / 2;
 
-    // Background circle
+    // Background circle - orange tint in safe mode
     canvas.drawCircle(
       center,
       radius,
       Paint()
-        ..color = Colors.grey.shade800
+        ..color = safeMode ? Colors.orange.shade900 : Colors.grey.shade800
         ..style = PaintingStyle.fill,
     );
 
@@ -164,14 +235,14 @@ class _JoystickPainter extends CustomPainter {
       center,
       radius,
       Paint()
-        ..color = Colors.grey.shade600
+        ..color = safeMode ? Colors.orange.shade600 : Colors.grey.shade600
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2,
     );
 
     // Crosshairs
     final linePaint = Paint()
-      ..color = Colors.grey.shade600
+      ..color = safeMode ? Colors.orange.shade700 : Colors.grey.shade600
       ..strokeWidth = 1;
     canvas.drawLine(
       Offset(center.dx, 0),
@@ -195,19 +266,19 @@ class _JoystickPainter extends CustomPainter {
       Paint()..color = Colors.black.withOpacity(0.3),
     );
 
-    // Knob
+    // Knob - orange in safe mode
     canvas.drawCircle(
       Offset(knobX, knobY),
       30,
       Paint()
-        ..color = Colors.blue
+        ..color = safeMode ? Colors.orange : Colors.blue
         ..style = PaintingStyle.fill,
     );
     canvas.drawCircle(
       Offset(knobX, knobY),
       30,
       Paint()
-        ..color = Colors.blue.shade300
+        ..color = safeMode ? Colors.orange.shade300 : Colors.blue.shade300
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2,
     );
@@ -216,7 +287,8 @@ class _JoystickPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _JoystickPainter oldDelegate) {
     return oldDelegate.linearVel != linearVel ||
-        oldDelegate.angularVel != angularVel;
+        oldDelegate.angularVel != angularVel ||
+        oldDelegate.safeMode != safeMode;
   }
 }
 
