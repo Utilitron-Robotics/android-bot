@@ -39,7 +39,9 @@ class _ParameterListState extends State<ParameterList> {
       }
     }
 
-    setState(() => _loading = false);
+    if (mounted) {
+      setState(() => _loading = false);
+    }
   }
 
   @override
