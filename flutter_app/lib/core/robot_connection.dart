@@ -64,6 +64,9 @@ class RobotConnection extends ChangeNotifier {
       await _client.connect(url);
       await _saveUrl(url);
 
+      // Inject dependency for audio announcements
+      AudioAnnouncer().setRobotConnection(this);
+
       // Discover robot capabilities
       _introspection = RobotIntrospection(_client);
       _capabilities = await _introspection!.discover();
@@ -219,32 +222,48 @@ class RobotStatus {
 
   String get navStatusText {
     switch (navStatus) {
-      case 600: return 'Idle';
-      case 601: return 'Moving';
-      case 602: return 'Cancelled';
-      case 603: return 'Arrived';
-      case 604: return 'Failed';
-      case 605: return 'Standby';
-      default: return 'Unknown ($navStatus)';
+      case 600:
+        return 'Idle';
+      case 601:
+        return 'Moving';
+      case 602:
+        return 'Cancelled';
+      case 603:
+        return 'Arrived';
+      case 604:
+        return 'Failed';
+      case 605:
+        return 'Standby';
+      default:
+        return 'Unknown ($navStatus)';
     }
   }
 
   String get chargerText {
     switch (charger) {
-      case 0: return 'Not charging';
-      case 1: return 'Charging';
-      case 2: return 'Recharging';
-      case -1: return 'Charge failed';
-      default: return 'Unknown';
+      case 0:
+        return 'Not charging';
+      case 1:
+        return 'Charging';
+      case 2:
+        return 'Recharging';
+      case -1:
+        return 'Charge failed';
+      default:
+        return 'Unknown';
     }
   }
 
   String get controlStateText {
     switch (controlState) {
-      case 20: return 'Mapping';
-      case 30: return 'Navigation';
-      case 99: return 'Error';
-      default: return 'Unknown';
+      case 20:
+        return 'Mapping';
+      case 30:
+        return 'Navigation';
+      case 99:
+        return 'Error';
+      default:
+        return 'Unknown';
     }
   }
 

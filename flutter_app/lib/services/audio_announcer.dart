@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import '../core/robot_connection.dart';
 
 /// Audio announcement service for robot status changes
 class AudioAnnouncer {
@@ -15,6 +16,9 @@ class AudioAnnouncer {
   final double _rate = 0.5;
   final double _pitch = 1.0;
 
+  // Reference to RobotConnection for tablet forwarding
+  RobotConnection? _robotConnection;
+
   // ignore: unnecessary_getters_setters
   bool get enabled => _enabled;
   // ignore: unnecessary_getters_setters
@@ -24,6 +28,11 @@ class AudioAnnouncer {
   set volume(double value) {
     _volume = value;
     _tts?.setVolume(value);
+  }
+
+  /// Set the robot connection to enable tablet forwarding
+  void setRobotConnection(RobotConnection robot) {
+    _robotConnection = robot;
   }
 
   /// Initialize TTS engine
@@ -50,6 +59,13 @@ class AudioAnnouncer {
   Future<void> speak(String text) async {
     if (!_enabled || _tts == null) return;
     debugPrint('Announcing: $text');
+
+    // Forward to tablet if connected
+    if (_robotConnection != null && _robotConnection!.isConnected) {
+      _robotConnection!.client.tabletSpeak(text);
+    }
+
+    await _tts!.stop(); // Stop any current speech before starting new
     await _tts!.speak(text);
   }
 
