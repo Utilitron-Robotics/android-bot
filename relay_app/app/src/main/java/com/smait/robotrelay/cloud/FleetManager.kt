@@ -3,7 +3,8 @@ package com.smait.robotrelay.cloud
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import com.smait.robotrelay.protocol.RobotStatus
+import com.smait.robotrelay.service.ConnectionState
+import com.smait.robotrelay.service.RobotStatusData
 import com.smait.robotrelay.service.RobotWebSocketClient
 
 /**
@@ -113,17 +114,17 @@ class FleetManager(
     /**
      * Update cloud with robot status
      */
-    fun updateRobotStatus(status: RobotStatus) {
+    fun updateRobotStatus(status: RobotStatusData) {
         cloudClient?.updateStatus(
             RobotCloudStatus(
                 battery = status.battery,
-                x = status.pose?.x ?: 0.0,
-                y = status.pose?.y ?: 0.0,
-                theta = status.pose?.theta ?: 0.0,
+                x = status.x,
+                y = status.y,
+                theta = status.theta,
                 navStatus = status.navStatus,
                 currentGoal = status.currentGoalName,
                 estop = status.softEstop || status.hardEstop,
-                robotConnected = robotClient.isConnected,
+                robotConnected = robotClient.connectionState.value == ConnectionState.CONNECTED,
                 building = status.buildingName,
                 floor = status.floorName,
             )
@@ -139,7 +140,7 @@ class FleetManager(
         val success = when (command.type) {
             FleetCommand.TYPE_NAVIGATE -> {
                 command.poi?.let { poi ->
-                    robotClient.navigateTo(poi)
+                    robotClient.navigateToPoi(poi)
                     true
                 } ?: false
             }
@@ -150,7 +151,7 @@ class FleetManager(
             }
 
             FleetCommand.TYPE_ESTOP -> {
-                robotClient.emergencyStop(command.enabled)
+                robotClient.setSoftStop(command.enabled)
                 true
             }
 

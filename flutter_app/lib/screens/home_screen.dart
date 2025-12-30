@@ -138,8 +138,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.all(16),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate(
-                      WidgetFactory(robot.capabilities!)
-                          .generateWidgets(context),
+                      WidgetFactory(
+                        robot.capabilities!,
+                        relayHttpUrl: _getRelayHttpUrl(),
+                      ).generateWidgets(context),
                     ),
                   ),
                 )
@@ -269,6 +271,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (url.isNotEmpty) {
       robot.connect(url);
     }
+  }
+
+  /// Get the HTTP relay URL for tablet tasks (if using relay mode)
+  String? _getRelayHttpUrl() {
+    // Only provide relay URL if we're in relay mode
+    if (_connectionMode == ConnectionMode.direct) return null;
+
+    final currentUrl = _urlController.text;
+    final uri = Uri.tryParse(currentUrl);
+    if (uri == null) return null;
+
+    // Return HTTP URL on port 8765
+    return 'http://${uri.host}:8765';
   }
 }
 

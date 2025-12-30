@@ -18,7 +18,9 @@ class _MapViewState extends State<MapView> {
   ui.Image? _mapImage;
   MapInfo? _mapInfo;
   bool _isLoading = true;
+  bool _subscribed = false;
   String? _error;
+  Timer? _timeoutTimer;
 
   // Robot pose on map
   double _robotX = 0;
@@ -36,19 +38,35 @@ class _MapViewState extends State<MapView> {
   @override
   void dispose() {
     _mapSubscription?.cancel();
+    _timeoutTimer?.cancel();
     _mapImage?.dispose();
     super.dispose();
   }
 
   void _subscribeToMap() {
     final robot = context.read<RobotConnection>();
-    if (!robot.isConnected) return;
+    if (!robot.isConnected) {
+      setState(() {
+        _error = 'Not connected';
+        _isLoading = false;
+      });
+      return;
+    }
 
-    // Subscribe to map topic
-    robot.client.subscribe(
-      topic: '/map',
-      type: 'nav_msgs/OccupancyGrid',
-    );
+    setState(() {
+      _isLoading = true;
+      _subscribed = false;
+      _error = null;
+    });
+
+    // Subscribe to map topic with throttle to avoid flooding
+    robot.client.send({
+      'op': 'subscribe',
+      'topic': '/map',
+      'type': 'nav_msgs/OccupancyGrid',
+      'throttle_rate': 5000, // Only get map updates every 5 seconds
+      'queue_length': 1,
+    });
 
     // Subscribe to robot pose for showing position on map
     robot.client.subscribe(
@@ -56,6 +74,7 @@ class _MapViewState extends State<MapView> {
       type: 'geometry_msgs/Pose2D',
     );
 
+    _mapSubscription?.cancel();
     _mapSubscription = robot.client.messages.listen((msg) {
       final topic = msg['topic'] as String?;
       if (topic == '/map') {
@@ -65,7 +84,15 @@ class _MapViewState extends State<MapView> {
       }
     });
 
-    setState(() => _isLoading = true);
+    setState(() => _subscribed = true);
+
+    // Set timeout - stop spinner after 8 seconds if no data
+    _timeoutTimer?.cancel();
+    _timeoutTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted && _isLoading && _mapImage == null) {
+        setState(() => _isLoading = false);
+      }
+    });
   }
 
   void _handleMapMessage(dynamic data) async {
@@ -259,8 +286,15 @@ class _MapViewState extends State<MapView> {
             Icon(Icons.map_outlined, size: 48, color: Colors.grey.shade600),
             const SizedBox(height: 8),
             const Text('No map data'),
-            const Text('Waiting for /map topic...',
-              style: TextStyle(color: Colors.grey, fontSize: 12)),
+            Text(
+              _subscribed ? 'Subscribed to /map - waiting for data...' : 'Not subscribed',
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Robot may not be publishing map',
+              style: TextStyle(color: Colors.grey, fontSize: 11),
+            ),
           ],
         ),
       );

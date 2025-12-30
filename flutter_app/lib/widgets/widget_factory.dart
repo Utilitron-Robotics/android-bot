@@ -10,8 +10,9 @@ import 'map_view.dart';
 /// Dynamically generates UI widgets based on discovered robot capabilities
 class WidgetFactory {
   final RobotCapabilities capabilities;
+  final String? relayHttpUrl;  // HTTP URL for tablet relay (e.g., http://192.168.1.100:8765)
 
-  WidgetFactory(this.capabilities);
+  WidgetFactory(this.capabilities, {this.relayHttpUrl});
 
   /// Generate all applicable widgets for this robot
   List<Widget> generateWidgets(BuildContext context) {
@@ -24,7 +25,10 @@ class WidgetFactory {
 
     // Waypoint grid if navigation available
     if (capabilities.hasNavigation) {
-      widgets.add(WaypointGrid(waypoints: capabilities.waypoints));
+      widgets.add(WaypointGrid(
+        waypoints: capabilities.waypoints,
+        relayUrl: relayHttpUrl,
+      ));
       // Voice control (uses waypoints for matching)
       widgets.add(VoiceControl(availableWaypoints: capabilities.waypoints));
     }
@@ -34,10 +38,8 @@ class WidgetFactory {
       widgets.add(const JoystickControl());
     }
 
-    // Map view if map topic available
-    if (capabilities.hasMap) {
-      widgets.add(const MapView());
-    }
+    // Map view - always show, it will display status if no data
+    widgets.add(const MapView());
 
     // Parameters if any discovered
     if (capabilities.parameters.isNotEmpty) {
