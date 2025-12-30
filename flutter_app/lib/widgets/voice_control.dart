@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Voice command input - temporarily disabled (speech_to_text Kotlin compat issue)
-/// TODO: Re-enable when speech_to_text plugin is updated
+/// Re-enable when speech_to_text plugin is updated
 class VoiceControl extends StatelessWidget {
   final List<String> availableWaypoints;
 

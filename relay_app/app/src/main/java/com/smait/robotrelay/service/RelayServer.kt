@@ -58,9 +58,9 @@ class RelayServer(
             httpServer?.start()
 
             // Start WebSocket server on port + 1
-            wsServer = RelayWebSocketServer(port + 1, robotClient, scope) { count ->
+            wsServer = RelayWebSocketServer(port + 1, robotClient, scope, { count ->
                 _connectedClients.value = count
-            }
+            }, taskExecutor)
             wsServer?.start()
 
             _isRunning.value = true
@@ -114,7 +114,7 @@ class RelayHttpServer(
         // CORS headers for browser access
         val corsHeaders = mutableMapOf(
             "Access-Control-Allow-Origin" to "*",
-            "Access-Control-Allow-Methods" to "GET, POST, OPTIONS",
+            "Access-Control-Allow-Methods" to "GET, POST, DELETE, OPTIONS",
             "Access-Control-Allow-Headers" to "Content-Type"
         )
 
@@ -330,7 +330,8 @@ class RelayWebSocketServer(
     port: Int,
     private val robotClient: RobotWebSocketClient,
     private val scope: CoroutineScope,
-    private val onClientCountChanged: (Int) -> Unit
+    private val onClientCountChanged: (Int) -> Unit,
+    private val taskExecutor: RelayServer.TaskExecutor? = null
 ) : NanoWSD(port) {
 
     companion object {
@@ -340,7 +341,7 @@ class RelayWebSocketServer(
     private val clients = mutableListOf<WebSocket>()
 
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
-        return RelayWebSocket(handshake, robotClient, scope) { ws, connected ->
+        return RelayWebSocket(handshake, robotClient, scope, taskExecutor) { ws, connected ->
             synchronized(clients) {
                 if (connected) {
                     clients.add(ws)
@@ -369,8 +370,11 @@ class RelayWebSocketServer(
         handshake: IHTTPSession,
         private val robotClient: RobotWebSocketClient,
         private val scope: CoroutineScope,
+        private val taskExecutor: RelayServer.TaskExecutor?,
         private val onConnectionChanged: (WebSocket, Boolean) -> Unit
     ) : NanoWSD.WebSocket(handshake) {
+
+        private val gson = com.google.gson.Gson()
 
         override fun onOpen() {
             Log.i(TAG, "Client connected")
@@ -384,6 +388,48 @@ class RelayWebSocketServer(
 
         override fun onMessage(message: WebSocketFrame) {
             val payload = message.textPayload
+
+            // Check for tablet-specific commands (intercept before forwarding to robot)
+            try {
+                val json = gson.fromJson(payload, com.google.gson.JsonObject::class.java)
+                val op = json.get("op")?.asString
+
+                when (op) {
+                    "tablet_speak" -> {
+                        val text = json.get("text")?.asString ?: return
+                        Log.i(TAG, "Tablet speak: $text")
+                        taskExecutor?.speakText(text)
+                        return
+                    }
+                    "tablet_display" -> {
+                        val url = json.get("url")?.asString ?: return
+                        Log.i(TAG, "Tablet display: ${url.take(50)}...")
+                        taskExecutor?.displayUrl(url)
+                        return
+                    }
+                    "tablet_close_display" -> {
+                        Log.i(TAG, "Tablet close display")
+                        taskExecutor?.closeDisplay()
+                        return
+                    }
+                    "tablet_task" -> {
+                        val type = json.get("type")?.asString ?: return
+                        val data = json.get("data")?.asString ?: ""
+                        val wait = json.get("wait_seconds")?.asInt ?: 0
+                        Log.i(TAG, "Tablet task: $type")
+                        taskExecutor?.runTask(type, data, wait)
+                        return
+                    }
+                    "tablet_cancel" -> {
+                        Log.i(TAG, "Tablet cancel task")
+                        taskExecutor?.cancelTask()
+                        return
+                    }
+                }
+            } catch (e: Exception) {
+                // Not a tablet command, forward to robot
+            }
+
             Log.d(TAG, "Relaying: ${payload.take(100)}...")
             robotClient.send(payload)
         }

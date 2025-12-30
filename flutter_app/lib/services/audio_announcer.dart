@@ -15,7 +15,9 @@ class AudioAnnouncer {
   final double _rate = 0.5;
   final double _pitch = 1.0;
 
+  // ignore: unnecessary_getters_setters
   bool get enabled => _enabled;
+  // ignore: unnecessary_getters_setters
   set enabled(bool value) => _enabled = value;
 
   double get volume => _volume;
