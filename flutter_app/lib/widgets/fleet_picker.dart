@@ -368,7 +368,7 @@ class _FleetPickerState extends State<FleetPicker>
     setState(() => _scanningRelays = true);
     try {
       final relays = await RelayDiscovery.scanForRelays(
-        subnet: '192.168.1', // TODO: detect current subnet
+        subnet: '192.168.1', // Future: detect current subnet
         timeout: const Duration(milliseconds: 300),
       );
       setState(() => _discoveredRelays = relays);

@@ -9,6 +9,16 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import okhttp3.*
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.min
+
+// Following the excellent logic from the Flutter app
+enum class SafetyZone {
+    CLEAR,
+    WARN,
+    CREEP,
+    STOP
+}
 
 /**
  * WebSocket client for connecting to the robot base
@@ -21,12 +31,19 @@ class RobotWebSocketClient(
     companion object {
         private const val TAG = "RobotWSClient"
         private const val RECONNECT_DELAY_MS = 3000L
+
+        // Zone constants from Flutter app
+        private const val STOP_DISTANCE = 0.20f
+        private const val CREEP_DISTANCE = 0.50f
+        private const val WARN_DISTANCE = 0.80f
+        private const val CREEP_SPEED = 0.05
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var webSocket: WebSocket? = null
     private var isConnecting = false
 
+    // --- State Management ---
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
@@ -35,6 +52,8 @@ class RobotWebSocketClient(
 
     private val _robotStatus = MutableStateFlow<RobotStatusData?>(null)
     val robotStatus: StateFlow<RobotStatusData?> = _robotStatus
+
+    private val safetyZone = AtomicReference(SafetyZone.CLEAR)
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -48,8 +67,6 @@ class RobotWebSocketClient(
             Log.i(TAG, "Connected to robot at $robotIp:$robotPort")
             _connectionState.value = ConnectionState.CONNECTED
             isConnecting = false
-
-            // Subscribe to essential topics
             scope.launch {
                 delay(500)
                 setupSubscriptions()
@@ -57,7 +74,7 @@ class RobotWebSocketClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            Log.d(TAG, "Received: ${text.take(200)}...")
+            Log.d(TAG, text) // Log all raw messages
             scope.launch {
                 _incomingMessages.emit(text)
                 parseStatusUpdate(text)
@@ -84,21 +101,12 @@ class RobotWebSocketClient(
     }
 
     fun connect() {
-        if (isConnecting || _connectionState.value == ConnectionState.CONNECTED) {
-            Log.d(TAG, "Already connected or connecting")
-            return
-        }
-
+        if (isConnecting || _connectionState.value == ConnectionState.CONNECTED) return
         isConnecting = true
         _connectionState.value = ConnectionState.CONNECTING
-
         val url = "ws://$robotIp:$robotPort"
         Log.i(TAG, "Connecting to $url")
-
-        val request = Request.Builder()
-            .url(url)
-            .build()
-
+        val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, listener)
     }
 
@@ -115,15 +123,14 @@ class RobotWebSocketClient(
     }
 
     private fun setupSubscriptions() {
-        // Advertise velocity control
         send(SmaitProtocol.advertiseVelocity())
         send(SmaitProtocol.advertiseCancelGoal())
         send(SmaitProtocol.advertiseSoftStop())
-
-        // Subscribe to status updates
         send(SmaitProtocol.subscribeRobotStatus())
         send(SmaitProtocol.subscribeRobotPose())
         send(SmaitProtocol.subscribeNaviStatus())
+        send(SmaitProtocol.subscribeSensorsCore())
+        send(SmaitProtocol.subscribeLaserData())
     }
 
     private fun parseStatusUpdate(json: String) {
@@ -131,7 +138,6 @@ class RobotWebSocketClient(
             val obj = com.google.gson.JsonParser.parseString(json).asJsonObject
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
-
             val current = _robotStatus.value ?: RobotStatusData()
 
             when (topic) {
@@ -156,10 +162,59 @@ class RobotWebSocketClient(
                         theta = msg.get("theta")?.asDouble ?: current.theta
                     )
                 }
+                SmaitProtocol.TOPIC_SENSORS_CORE -> {
+                    val bumper = msg.get("bumper")?.asInt ?: 0
+                    val cliff = msg.get("cliff")?.asInt ?: 0
+                    if (bumper > 0 || cliff > 0) {
+                        safetyZone.set(SafetyZone.STOP)
+                        Log.w(TAG, "SAFETY STOP: Bumper or Cliff detected!")
+                        stop()
+                    }
+                    _robotStatus.value = current.copy(
+                        sensors = SensorStatus(
+                            bumperLeft = bumper and 4 != 0,
+                            bumperCenter = bumper and 2 != 0,
+                            bumperRight = bumper and 1 != 0,
+                            cliffLeft = cliff and 4 != 0,
+                            cliffCenter = cliff and 2 != 0,
+                            cliffRight = cliff and 1 != 0
+                        )
+                    )
+                }
+                SmaitProtocol.TOPIC_LASER_DATA -> {
+                    val points = msg.get("points")?.asJsonArray?.mapNotNull { it.asFloat.takeIf { f -> f > 0.01 } } ?: emptyList()
+                    checkLaserData(points)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse status: ${e.message}")
         }
+    }
+
+    private fun checkLaserData(points: List<Float>) {
+        if (points.isEmpty()) return
+
+        // Split into arcs as per Flutter app logic (Front: 40-60%)
+        val frontStartIndex = (points.size * 0.4).toInt()
+        val frontEndIndex = (points.size * 0.6).toInt()
+        val frontPoints = points.subList(frontStartIndex, frontEndIndex)
+        val minFront = frontPoints.minOrNull() ?: Float.MAX_VALUE
+
+        val newZone = when {
+            minFront < STOP_DISTANCE -> SafetyZone.STOP
+            minFront < CREEP_DISTANCE -> SafetyZone.CREEP
+            minFront < WARN_DISTANCE -> SafetyZone.WARN
+            else -> SafetyZone.CLEAR
+        }
+
+        val oldZone = safetyZone.getAndSet(newZone)
+        if (newZone != oldZone) {
+            Log.i(TAG, "LIDAR Safety Zone changed: $newZone (was $oldZone) at ${minFront}m")
+            if (newZone == SafetyZone.STOP) {
+                stop()
+            }
+        }
+        _robotStatus.value = _robotStatus.value?.copy(safetyZone = newZone)
     }
 
     private fun scheduleReconnect() {
@@ -180,7 +235,23 @@ class RobotWebSocketClient(
     // === Control Methods ===
 
     fun sendVelocity(linearX: Double, angularZ: Double) {
-        send(SmaitProtocol.publishVelocity(linearX, angularZ))
+        var adjustedLinear = linearX
+        when (safetyZone.get()) {
+            SafetyZone.STOP -> {
+                if (linearX > 0) {
+                    Log.d(TAG, "Forward velocity blocked by STOP zone.")
+                    adjustedLinear = 0.0
+                }
+            }
+            SafetyZone.CREEP -> {
+                if (linearX > CREEP_SPEED) {
+                    Log.d(TAG, "Forward velocity limited to CREEP speed.")
+                    adjustedLinear = CREEP_SPEED
+                }
+            }
+            else -> { /* WARN or CLEAR, no adjustment needed */ }
+        }
+        send(SmaitProtocol.publishVelocity(adjustedLinear, angularZ))
     }
 
     fun stop() {
@@ -200,7 +271,17 @@ class RobotWebSocketClient(
     }
 
     fun setSpeedMode(mode: Int) {
-        send(SmaitProtocol.callSetSpeedMode(mode))
+        // Deprecated - speed is now handled in MainActivity
+    }
+
+    fun startSlam() {
+        // TODO: Replace with actual command from robot documentation
+        Log.w(TAG, "startSlam() not implemented")
+    }
+
+    fun stopSlam() {
+        // TODO: Replace with actual command from robot documentation
+        Log.w(TAG, "stopSlam() not implemented")
     }
 }
 
@@ -210,6 +291,16 @@ enum class ConnectionState {
     CONNECTED,
     ERROR
 }
+
+data class SensorStatus(
+    val bumperLeft: Boolean = false,
+    val bumperCenter: Boolean = false,
+
+    val bumperRight: Boolean = false,
+    val cliffLeft: Boolean = false,
+    val cliffCenter: Boolean = false,
+    val cliffRight: Boolean = false
+)
 
 data class RobotStatusData(
     val battery: Int = 0,
@@ -224,5 +315,7 @@ data class RobotStatusData(
     val theta: Double = 0.0,
     val buildingName: String? = null,
     val floorName: String? = null,
-    val currentGoalName: String? = null
+    val currentGoalName: String? = null,
+    val sensors: SensorStatus = SensorStatus(),
+    val safetyZone: SafetyZone = SafetyZone.CLEAR
 )

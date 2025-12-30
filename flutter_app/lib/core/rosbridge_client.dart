@@ -208,4 +208,36 @@ class RosbridgeClient {
     _messageController.close();
     _logController.close();
   }
+
+  // === Tablet Commands (intercepted by relay, not forwarded to robot) ===
+
+  /// Speak text on the tablet via TTS
+  void tabletSpeak(String text) {
+    send({'op': 'tablet_speak', 'text': text});
+  }
+
+  /// Display URL on tablet screen
+  void tabletDisplay(String url) {
+    send({'op': 'tablet_display', 'url': url});
+  }
+
+  /// Close tablet display
+  void tabletCloseDisplay() {
+    send({'op': 'tablet_close_display'});
+  }
+
+  /// Run a task on the tablet (SPEAK, DISPLAY, DELIVER)
+  void tabletTask(String type, String data, int waitSeconds) {
+    send({
+      'op': 'tablet_task',
+      'type': type,
+      'data': data,
+      'wait_seconds': waitSeconds,
+    });
+  }
+
+  /// Cancel current tablet task
+  void tabletCancelTask() {
+    send({'op': 'tablet_cancel'});
+  }
 }

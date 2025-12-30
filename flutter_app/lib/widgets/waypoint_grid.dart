@@ -76,12 +76,26 @@ class _WaypointGridState extends State<WaypointGrid> {
     }
   }
 
-  /// Execute the configured task for a waypoint
-  Future<void> _executeWaypointTask(String waypoint) async {
-    final task = _waypointConfig.getTask(waypoint);
-    if (task.type == TaskType.none || _taskClient == null) return;
+  /// Execute the configured task for a waypoint (or default arrival behavior)
+  void _executeWaypointTask(String waypoint) {
+    final robot = context.read<RobotConnection>();
+    if (!robot.isConnected) return;
 
-    await _taskClient!.executeTask(task);
+    final task = _waypointConfig.getTask(waypoint);
+    final displayName = _formatWaypointName(waypoint);
+
+    if (task.type == TaskType.none) {
+      // Default: announce arrival and display waypoint name via WebSocket
+      robot.client.tabletSpeak('Arrived at $displayName');
+      robot.client.tabletDisplay('data:text/html,<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:%23222;"><h1 style="color:white;font-size:72px;font-family:sans-serif;">$displayName</h1></body></html>');
+      // Auto-close display after 5 seconds
+      Future.delayed(const Duration(seconds: 5), () {
+        robot.client.tabletCloseDisplay();
+      });
+    } else {
+      // Execute configured task via WebSocket
+      robot.client.tabletTask(task.type.name.toUpperCase(), task.data, task.waitSeconds);
+    }
   }
 
   @override

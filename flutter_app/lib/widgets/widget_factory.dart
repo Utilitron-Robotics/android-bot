@@ -6,6 +6,7 @@ import 'joystick.dart';
 import 'parameter_list.dart';
 import 'voice_control.dart';
 import 'map_view.dart';
+import 'tablet_control_panel.dart';
 
 /// Dynamically generates UI widgets based on discovered robot capabilities
 class WidgetFactory {
@@ -40,6 +41,11 @@ class WidgetFactory {
 
     // Map view - always show, it will display status if no data
     widgets.add(const MapView());
+
+    // Tablet control panel (only when connected via relay)
+    if (relayHttpUrl != null) {
+      widgets.add(TabletControlPanel(relayHttpUrl: relayHttpUrl));
+    }
 
     // Parameters if any discovered
     if (capabilities.parameters.isNotEmpty) {

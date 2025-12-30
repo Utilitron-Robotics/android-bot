@@ -549,7 +549,7 @@ class _JoystickPainter extends CustomPainter {
     canvas.drawCircle(
       Offset(knobX + 2, knobY + 2),
       30,
-      Paint()..color = Colors.black.withOpacity(0.3),
+      Paint()..color = Colors.black.withValues(alpha: 0.3),
     );
 
     // Knob - orange in safe mode
@@ -664,19 +664,19 @@ class _DistanceGauge extends StatelessWidget {
                 children: [
                   Expanded(
                     flex: ((2.0 - warnDist) / 2.0 * 100).round(),
-                    child: Container(color: Colors.green.withOpacity(0.2)),
+                    child: Container(color: Colors.green.withValues(alpha: 0.2)),
                   ),
                   Expanded(
                     flex: ((warnDist - creepDist) / 2.0 * 100).round(),
-                    child: Container(color: Colors.yellow.withOpacity(0.2)),
+                    child: Container(color: Colors.yellow.withValues(alpha: 0.2)),
                   ),
                   Expanded(
                     flex: ((creepDist - stopDist) / 2.0 * 100).round(),
-                    child: Container(color: Colors.orange.withOpacity(0.2)),
+                    child: Container(color: Colors.orange.withValues(alpha: 0.2)),
                   ),
                   Expanded(
                     flex: (stopDist / 2.0 * 100).round(),
-                    child: Container(color: Colors.red.withOpacity(0.2)),
+                    child: Container(color: Colors.red.withValues(alpha: 0.2)),
                   ),
                 ],
               ),
@@ -685,7 +685,7 @@ class _DistanceGauge extends StatelessWidget {
                 heightFactor: gaugePercent,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: zoneColor.withOpacity(0.7),
+                    color: zoneColor.withValues(alpha: 0.7),
                     borderRadius: const BorderRadius.vertical(
                       bottom: Radius.circular(3),
                     ),

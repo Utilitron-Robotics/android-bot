@@ -86,6 +86,13 @@ object SmaitProtocol {
         type = "actionlib_msgs/GoalStatus"
     ))
 
+    fun subscribeSensorsCore(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_sensors_core",
+        topic = TOPIC_SENSORS_CORE,
+        type = "kobuki_msgs/CoreSensors"
+    ))
+
     fun subscribeMap(): String = toJson(MapSubscribeMsg(
         op = OP_SUBSCRIBE,
         id = "get_map",

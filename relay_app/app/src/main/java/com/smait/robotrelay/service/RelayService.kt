@@ -10,6 +10,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.smait.robotrelay.protocol.SmaitProtocol
 import com.smait.robotrelay.ui.MainActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +57,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
     // TTS engine
     private var tts: TextToSpeech? = null
-    private var ttsReady = false
+    private val _ttsReady = MutableStateFlow(false)
+    val ttsReady: StateFlow<Boolean> = _ttsReady
     private var currentUtteranceCallback: (() -> Unit)? = null
 
     lateinit var robotClient: RobotWebSocketClient
@@ -71,7 +73,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private val _taskStatus = MutableStateFlow("")
     val taskStatus: StateFlow<String> = _taskStatus
 
-    private var robotIp = "192.168.20.22"
+    private var robotIp = "10.42.0.1" // Default to direct connection
     private var robotPort = 9090
     private var relayPort = 8765
 
@@ -96,24 +98,19 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                 val result = engine.setLanguage(Locale.US)
                 if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
                     Log.e(TAG, "TTS language not supported")
+                    _ttsReady.value = false
                 } else {
-                    ttsReady = true
+                    _ttsReady.value = true
                     Log.i(TAG, "TTS initialized successfully")
 
                     // Set up utterance listener
                     engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                        override fun onStart(utteranceId: String?) {
-                            Log.d(TAG, "TTS started: $utteranceId")
-                        }
-
+                        override fun onStart(utteranceId: String?) {}
                         override fun onDone(utteranceId: String?) {
-                            Log.d(TAG, "TTS done: $utteranceId")
                             currentUtteranceCallback?.invoke()
                             currentUtteranceCallback = null
                         }
-
                         override fun onError(utteranceId: String?) {
-                            Log.e(TAG, "TTS error: $utteranceId")
                             currentUtteranceCallback?.invoke()
                             currentUtteranceCallback = null
                         }
@@ -122,6 +119,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             }
         } else {
             Log.e(TAG, "TTS initialization failed")
+            _ttsReady.value = false
         }
     }
 
@@ -134,6 +132,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             robotPort = it.getIntExtra("robot_port", robotPort)
             relayPort = it.getIntExtra("relay_port", relayPort)
         }
+
+        // Stop existing clients if they are running
+        if (::robotClient.isInitialized) robotClient.destroy()
+        if (::relayServer.isInitialized) relayServer.destroy()
 
         // Start as foreground service
         startForeground(NOTIFICATION_ID, createNotification("Starting..."))
@@ -155,7 +157,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             }
         }
 
-        return START_STICKY
+        return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
@@ -236,15 +238,22 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         robotClient.cancelNavigation()
     }
 
+    fun setSpeedMode(mode: Int) {
+        robotClient.setSpeedMode(mode)
+    }
+
+    fun startSlam() {
+        robotClient.startSlam()
+    }
+
+    fun stopSlam() {
+        robotClient.stopSlam()
+    }
+
     // === Task Execution Methods ===
 
-    /**
-     * Speak text using TTS
-     * @param text The text to speak
-     * @param onComplete Callback when speech is done
-     */
     fun speak(text: String, onComplete: (() -> Unit)? = null) {
-        if (!ttsReady) {
+        if (!_ttsReady.value) {
             Log.w(TAG, "TTS not ready, skipping: $text")
             onComplete?.invoke()
             return
@@ -261,10 +270,6 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "task_${System.currentTimeMillis()}")
     }
 
-    /**
-     * Display a URL/video on the tablet screen
-     * Sends broadcast to MainActivity to show WebView/VideoView
-     */
     fun display(url: String) {
         Log.i(TAG, "Displaying: $url")
         _taskStatus.value = "Displaying content"
@@ -275,9 +280,6 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    /**
-     * Close any displayed content
-     */
     override fun closeDisplay() {
         Log.i(TAG, "Closing display")
         _taskStatus.value = ""
@@ -288,9 +290,6 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
-    /**
-     * Execute a waypoint task
-     */
     fun executeTask(task: WaypointTask, onComplete: (() -> Unit)? = null) {
         Log.i(TAG, "Executing task: ${task.type} - ${task.data}")
         _currentTask.value = task
@@ -312,20 +311,17 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                 }
 
                 TaskType.DELIVER -> {
-                    // Announce arrival
                     val completion = CompletableDeferred<Unit>()
                     speak(task.data.ifEmpty { "Your order has arrived. Please collect your items." }) {
                         completion.complete(Unit)
                     }
                     completion.await()
 
-                    // Wait for pickup
                     if (task.waitSeconds > 0) {
                         _taskStatus.value = "Waiting for pickup..."
                         delay(task.waitSeconds * 1000L)
                     }
 
-                    // Thank customer
                     val thankCompletion = CompletableDeferred<Unit>()
                     speak("Thank you! Have a nice day.") { thankCompletion.complete(Unit) }
                     thankCompletion.await()
@@ -338,9 +334,6 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         }
     }
 
-    /**
-     * Cancel current task
-     */
     override fun cancelTask() {
         tts?.stop()
         closeDisplay()
