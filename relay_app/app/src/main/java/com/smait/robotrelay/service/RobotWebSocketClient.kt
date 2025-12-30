@@ -132,24 +132,28 @@ class RobotWebSocketClient(
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
 
+            val current = _robotStatus.value ?: RobotStatusData()
+
             when (topic) {
                 SmaitProtocol.TOPIC_ROBOT_STATUS -> {
-                    _robotStatus.value = RobotStatusData(
-                        battery = msg.get("battery")?.asInt ?: 0,
-                        charger = msg.get("charger")?.asInt ?: 0,
-                        navStatus = msg.get("nav_status")?.asInt ?: 0,
-                        controlState = msg.get("control_state")?.asInt ?: 0,
-                        softEstop = msg.get("soft_estop")?.asBoolean ?: false,
-                        hardEstop = msg.get("hard_estop")?.asBoolean ?: false,
-                        velocity = msg.get("velocity")?.asJsonArray?.map { it.asDouble } ?: listOf(0.0, 0.0)
+                    _robotStatus.value = current.copy(
+                        battery = msg.get("battery")?.asInt ?: current.battery,
+                        charger = msg.get("charger")?.asInt ?: current.charger,
+                        navStatus = msg.get("nav_status")?.asInt ?: current.navStatus,
+                        controlState = msg.get("control_state")?.asInt ?: current.controlState,
+                        softEstop = msg.get("soft_estop")?.asBoolean ?: current.softEstop,
+                        hardEstop = msg.get("hard_estop")?.asBoolean ?: current.hardEstop,
+                        velocity = msg.get("velocity")?.asJsonArray?.map { it.asDouble } ?: current.velocity,
+                        buildingName = msg.get("current_building_name")?.asString,
+                        floorName = msg.get("current_floor_name")?.asString,
+                        currentGoalName = msg.get("current_goal_name")?.asString
                     )
                 }
                 SmaitProtocol.TOPIC_ROBOT_POSE -> {
-                    val current = _robotStatus.value ?: RobotStatusData()
                     _robotStatus.value = current.copy(
-                        x = msg.get("x")?.asDouble ?: 0.0,
-                        y = msg.get("y")?.asDouble ?: 0.0,
-                        theta = msg.get("theta")?.asDouble ?: 0.0
+                        x = msg.get("x")?.asDouble ?: current.x,
+                        y = msg.get("y")?.asDouble ?: current.y,
+                        theta = msg.get("theta")?.asDouble ?: current.theta
                     )
                 }
             }
@@ -217,5 +221,8 @@ data class RobotStatusData(
     val velocity: List<Double> = listOf(0.0, 0.0),
     val x: Double = 0.0,
     val y: Double = 0.0,
-    val theta: Double = 0.0
+    val theta: Double = 0.0,
+    val buildingName: String? = null,
+    val floorName: String? = null,
+    val currentGoalName: String? = null
 )

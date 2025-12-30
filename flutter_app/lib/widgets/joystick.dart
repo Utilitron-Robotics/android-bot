@@ -2,7 +2,33 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
+import '../core/smait_protocol.dart';
 import '../services/audio_announcer.dart';
+
+/// Robot speed mode - controls built-in collision avoidance behavior
+enum RobotSpeedMode {
+  safetyLow(0, 'Safety Low', 'Most cautious - slow, large stop distance'),
+  safetyMed(1, 'Safety Med', 'Balanced safety - moderate speed'),
+  safetyHigh(2, 'Safety High', 'Less cautious - faster, shorter stop distance'),
+  balanceLow(3, 'Balance Low', 'Balanced mode - conservative'),
+  balanceMed(4, 'Balance Med', 'Balanced mode - moderate'),
+  balanceHigh(5, 'Balance High', 'Balanced mode - aggressive'),
+  efficiencyLow(6, 'Efficiency Low', 'Speed focused - conservative'),
+  efficiencyMed(7, 'Efficiency Med', 'Speed focused - moderate'),
+  efficiencyHigh(8, 'Efficiency High', 'Speed focused - fastest');
+
+  final int value;
+  final String label;
+  final String description;
+  const RobotSpeedMode(this.value, this.label, this.description);
+
+  static RobotSpeedMode fromValue(int v) {
+    return RobotSpeedMode.values.firstWhere(
+      (m) => m.value == v,
+      orElse: () => RobotSpeedMode.safetyMed,
+    );
+  }
+}
 
 /// Virtual joystick for manual robot control
 class JoystickControl extends StatefulWidget {
@@ -16,29 +42,164 @@ class _JoystickControlState extends State<JoystickControl> {
   double _linearVel = 0;
   double _angularVel = 0;
   Timer? _sendTimer;
-  bool _slamSafe = false; // SLAM-safe mode (slower, announces obstacles)
+  bool _slamSafe = false; // SLAM-safe mode (slower, stops on obstacles)
   bool _audioEnabled = true;
+  bool _obstacleAhead = false;
+  bool _obstacleLeft = false;
+  bool _obstacleRight = false;
+  double _minFrontRange = double.infinity;
+  StreamSubscription? _scanSubscription;
+  RobotSpeedMode _robotSpeedMode = RobotSpeedMode.safetyMed;
+  bool _speedModeLoading = false;
 
-  // Speed limits - reduced when SLAM-safe is on
+  // Speed limits
   static const double maxLinearFast = 0.5; // m/s - full speed
-  static const double maxLinearSafe = 0.25; // m/s - safe mode
   static const double maxAngularFast = 1.0; // rad/s
-  static const double maxAngularSafe = 0.5; // rad/s
   static const double joystickSize = 200;
 
-  double get _maxLinear => _slamSafe ? maxLinearSafe : maxLinearFast;
-  double get _maxAngular => _slamSafe ? maxAngularSafe : maxAngularFast;
+  // Obstacle zones for graduated response
+  static const double stopDistance = 0.20;    // meters - full stop
+  static const double creepDistance = 0.50;   // meters - creep speed
+  static const double warnDistance = 0.80;    // meters - warning only
+  static const double creepSpeed = 0.05;      // m/s - very slow creep
+
+  // SLAM Safe allows full speed - obstacle avoidance handles slowing
+  double get _maxLinear => maxLinearFast;
+  double get _maxAngular => maxAngularFast;
 
   @override
   void initState() {
     super.initState();
     AudioAnnouncer().init();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _subscribeToScan();
+      _querySpeedMode();
+    });
+  }
+
+  Future<void> _querySpeedMode() async {
+    final robot = context.read<RobotConnection>();
+    if (!robot.isConnected) return;
+
+    setState(() => _speedModeLoading = true);
+    try {
+      final result = await robot.client.callService(
+        service: serviceVelocityControl,
+        args: {'cmd': speedGetCurrent, 'str': ''},
+        timeout: const Duration(seconds: 3),
+      );
+      final mode = result['values']?['cmd'] as int?;
+      if (mode != null && mounted) {
+        setState(() => _robotSpeedMode = RobotSpeedMode.fromValue(mode));
+      }
+    } catch (e) {
+      // Ignore - robot may not support this
+    } finally {
+      if (mounted) setState(() => _speedModeLoading = false);
+    }
+  }
+
+  Future<void> _setSpeedMode(RobotSpeedMode mode) async {
+    final robot = context.read<RobotConnection>();
+    if (!robot.isConnected) return;
+
+    setState(() => _speedModeLoading = true);
+    try {
+      await robot.client.callService(
+        service: serviceVelocityControl,
+        args: {'cmd': mode.value, 'str': ''},
+        timeout: const Duration(seconds: 3),
+      );
+      if (mounted) {
+        setState(() => _robotSpeedMode = mode);
+        if (_audioEnabled) {
+          AudioAnnouncer().speak('Speed mode: ${mode.label}');
+        }
+      }
+    } catch (e) {
+      // Show error
+    } finally {
+      if (mounted) setState(() => _speedModeLoading = false);
+    }
   }
 
   @override
   void dispose() {
     _sendTimer?.cancel();
+    _scanSubscription?.cancel();
     super.dispose();
+  }
+
+  void _subscribeToScan() {
+    final robot = context.read<RobotConnection>();
+    if (!robot.isConnected) return;
+
+    // Subscribe to laser scan for obstacle detection
+    robot.client.send({
+      'op': 'subscribe',
+      'topic': '/scan',
+      'type': 'sensor_msgs/LaserScan',
+      'throttle_rate': 150, // ~6Hz for responsive safety
+      'queue_length': 1,
+    });
+
+    _scanSubscription = robot.client.messages.listen((msg) {
+      if (msg['topic'] == '/scan') {
+        _handleLaserScan(msg['msg']);
+      }
+    });
+  }
+
+  void _handleLaserScan(dynamic data) {
+    if (data == null) return;
+
+    final ranges = data['ranges'] as List?;
+    if (ranges == null || ranges.isEmpty) return;
+
+    final numRanges = ranges.length;
+    // Front arc: center ~60 degrees
+    final frontStart = (numRanges * 0.4).round();
+    final frontEnd = (numRanges * 0.6).round();
+    // Left arc
+    final leftStart = (numRanges * 0.6).round();
+    final leftEnd = (numRanges * 0.8).round();
+    // Right arc
+    final rightStart = (numRanges * 0.2).round();
+    final rightEnd = (numRanges * 0.4).round();
+
+    double minFront = double.infinity;
+    double minLeft = double.infinity;
+    double minRight = double.infinity;
+
+    for (var i = frontStart; i < frontEnd; i++) {
+      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
+      if (r > 0.05 && r < minFront) minFront = r;
+    }
+    for (var i = leftStart; i < leftEnd; i++) {
+      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
+      if (r > 0.05 && r < minLeft) minLeft = r;
+    }
+    for (var i = rightStart; i < rightEnd; i++) {
+      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
+      if (r > 0.05 && r < minRight) minRight = r;
+    }
+
+    final wasObstacle = _obstacleAhead;
+    _obstacleAhead = minFront < creepDistance;  // Anything in creep zone or closer
+    _obstacleLeft = minLeft < creepDistance;
+    _obstacleRight = minRight < creepDistance;
+    _minFrontRange = minFront;
+
+    // Announce when entering danger zones
+    if (_slamSafe && _audioEnabled) {
+      if (minFront < stopDistance && !wasObstacle) {
+        AudioAnnouncer().speak('Stop! Too close!');
+      } else if (_obstacleAhead && !wasObstacle) {
+        AudioAnnouncer().speak('Obstacle ahead. Creeping.');
+      }
+    }
+
+    if (mounted) setState(() {});
   }
 
   @override
@@ -110,7 +271,38 @@ class _JoystickControlState extends State<JoystickControl> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+
+            // Robot base speed mode selector
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.speed, size: 16),
+                const SizedBox(width: 8),
+                const Text('Base Mode: ', style: TextStyle(fontSize: 12)),
+                if (_speedModeLoading)
+                  const SizedBox(
+                    width: 16, height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  DropdownButton<RobotSpeedMode>(
+                    value: _robotSpeedMode,
+                    isDense: true,
+                    underline: Container(height: 1, color: Colors.grey),
+                    items: RobotSpeedMode.values.map((mode) {
+                      return DropdownMenuItem(
+                        value: mode,
+                        child: Text(mode.label, style: const TextStyle(fontSize: 12)),
+                      );
+                    }).toList(),
+                    onChanged: (mode) {
+                      if (mode != null) _setSpeedMode(mode);
+                    },
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
 
             // Joystick
             SizedBox(
@@ -133,7 +325,7 @@ class _JoystickControlState extends State<JoystickControl> {
             ),
             const SizedBox(height: 16),
 
-            // Velocity display
+            // Velocity and Distance display
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -143,7 +335,15 @@ class _JoystickControlState extends State<JoystickControl> {
                   max: _maxLinear,
                   unit: 'm/s',
                 ),
-                const SizedBox(width: 32),
+                const SizedBox(width: 24),
+                // Distance gauge
+                _DistanceGauge(
+                  distance: _minFrontRange,
+                  stopDist: stopDistance,
+                  creepDist: creepDistance,
+                  warnDist: warnDistance,
+                ),
+                const SizedBox(width: 24),
                 _VelocityIndicator(
                   label: 'Angular',
                   value: _angularVel,
@@ -153,9 +353,61 @@ class _JoystickControlState extends State<JoystickControl> {
               ],
             ),
             const SizedBox(height: 8),
+            // Obstacle zone indicator in safe mode
+            if (_slamSafe && _minFrontRange < warnDistance)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: _minFrontRange < stopDistance
+                      ? Colors.red.shade900
+                      : _minFrontRange < creepDistance
+                          ? Colors.orange.shade900
+                          : Colors.yellow.shade900,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _minFrontRange < stopDistance
+                        ? Colors.red
+                        : _minFrontRange < creepDistance
+                            ? Colors.orange
+                            : Colors.yellow,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _minFrontRange < stopDistance ? Icons.block : Icons.warning,
+                      color: _minFrontRange < stopDistance
+                          ? Colors.red
+                          : _minFrontRange < creepDistance
+                              ? Colors.orange
+                              : Colors.yellow,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _minFrontRange < stopDistance
+                          ? 'STOPPED - ${_minFrontRange.toStringAsFixed(2)}m'
+                          : _minFrontRange < creepDistance
+                              ? 'CREEPING - ${_minFrontRange.toStringAsFixed(2)}m'
+                              : 'WARNING - ${_minFrontRange.toStringAsFixed(2)}m',
+                      style: TextStyle(
+                        color: _minFrontRange < stopDistance
+                            ? Colors.red
+                            : _minFrontRange < creepDistance
+                                ? Colors.orange
+                                : Colors.yellow,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Text(
               _slamSafe
-                ? 'Safe mode: Reduced speed (${maxLinearSafe}m/s max)'
+                ? 'Safe: Stop<${stopDistance}m • Creep<${creepDistance}m • Warn<${warnDistance}m'
                 : 'Drag to control • Full speed (${maxLinearFast}m/s)',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: _slamSafe ? Colors.orange : Colors.grey,
@@ -197,7 +449,41 @@ class _JoystickControlState extends State<JoystickControl> {
 
   void _sendVelocity() {
     final robot = context.read<RobotConnection>();
-    robot.sendVelocity(_linearVel, _angularVel);
+
+    double linear = _linearVel;
+    double angular = _angularVel;
+
+    // In SLAM Safe mode, graduated obstacle response
+    if (_slamSafe && linear > 0) {
+      final dist = _minFrontRange;
+
+      if (dist < stopDistance) {
+        // STOP ZONE: Too close - no forward motion at all
+        linear = 0;
+      } else if (dist < creepDistance) {
+        // CREEP ZONE: Scale speed based on distance
+        // At stopDistance: creepSpeed (0.05), at creepDistance: 0.15 m/s
+        final t = (dist - stopDistance) / (creepDistance - stopDistance);
+        final maxCreep = creepSpeed + t * (0.15 - creepSpeed);
+        linear = linear.clamp(-maxCreep, maxCreep);
+      } else if (dist < warnDistance) {
+        // WARNING ZONE: Half speed max
+        linear = linear.clamp(-maxLinearFast / 2, maxLinearFast / 2);
+      }
+      // Beyond warnDistance: full speed allowed
+    }
+
+    // Reduce turning towards obstacles
+    if (_slamSafe) {
+      if (_obstacleLeft && angular > 0) {
+        angular = angular * 0.3;
+      }
+      if (_obstacleRight && angular < 0) {
+        angular = angular * 0.3;
+      }
+    }
+
+    robot.sendVelocity(linear, angular);
   }
 }
 
@@ -315,6 +601,117 @@ class _VelocityIndicator extends StatelessWidget {
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                 fontFamily: 'monospace',
               ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Visual gauge showing distance to nearest obstacle
+class _DistanceGauge extends StatelessWidget {
+  final double distance;
+  final double stopDist;
+  final double creepDist;
+  final double warnDist;
+
+  const _DistanceGauge({
+    required this.distance,
+    required this.stopDist,
+    required this.creepDist,
+    required this.warnDist,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Determine zone and color
+    Color zoneColor;
+    String zoneLabel;
+    if (distance < stopDist) {
+      zoneColor = Colors.red;
+      zoneLabel = 'STOP';
+    } else if (distance < creepDist) {
+      zoneColor = Colors.orange;
+      zoneLabel = 'CREEP';
+    } else if (distance < warnDist) {
+      zoneColor = Colors.yellow;
+      zoneLabel = 'WARN';
+    } else {
+      zoneColor = Colors.green;
+      zoneLabel = 'CLEAR';
+    }
+
+    // Clamp display distance for gauge
+    final displayDist = distance.isInfinite ? 2.0 : distance.clamp(0.0, 2.0);
+    final gaugePercent = (displayDist / 2.0).clamp(0.0, 1.0);
+
+    return Column(
+      children: [
+        Text('Distance', style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 4),
+        // Vertical gauge bar
+        Container(
+          width: 24,
+          height: 60,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade600),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              // Background zones
+              Column(
+                children: [
+                  Expanded(
+                    flex: ((2.0 - warnDist) / 2.0 * 100).round(),
+                    child: Container(color: Colors.green.withOpacity(0.2)),
+                  ),
+                  Expanded(
+                    flex: ((warnDist - creepDist) / 2.0 * 100).round(),
+                    child: Container(color: Colors.yellow.withOpacity(0.2)),
+                  ),
+                  Expanded(
+                    flex: ((creepDist - stopDist) / 2.0 * 100).round(),
+                    child: Container(color: Colors.orange.withOpacity(0.2)),
+                  ),
+                  Expanded(
+                    flex: (stopDist / 2.0 * 100).round(),
+                    child: Container(color: Colors.red.withOpacity(0.2)),
+                  ),
+                ],
+              ),
+              // Distance indicator fill
+              FractionallySizedBox(
+                heightFactor: gaugePercent,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: zoneColor.withOpacity(0.7),
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(3),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        // Distance value
+        Text(
+          distance.isInfinite ? '>2m' : '${distance.toStringAsFixed(2)}m',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontFamily: 'monospace',
+            color: zoneColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          zoneLabel,
+          style: TextStyle(
+            fontSize: 9,
+            color: zoneColor,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ],
     );

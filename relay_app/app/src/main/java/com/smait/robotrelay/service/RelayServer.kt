@@ -24,8 +24,17 @@ import java.io.IOException
  */
 class RelayServer(
     private val robotClient: RobotWebSocketClient,
-    private val port: Int = 8765
+    private val port: Int = 8765,
+    private val taskExecutor: TaskExecutor? = null
 ) {
+
+    interface TaskExecutor {
+        fun speakText(text: String)
+        fun displayUrl(url: String)
+        fun closeDisplay()
+        fun runTask(type: String, data: String, waitSeconds: Int)
+        fun cancelTask()
+    }
     companion object {
         private const val TAG = "RelayServer"
     }
@@ -45,7 +54,7 @@ class RelayServer(
     fun start() {
         try {
             // Start HTTP server on port
-            httpServer = RelayHttpServer(port, robotClient, gson)
+            httpServer = RelayHttpServer(port, robotClient, gson, taskExecutor)
             httpServer?.start()
 
             // Start WebSocket server on port + 1
@@ -88,7 +97,8 @@ class RelayServer(
 class RelayHttpServer(
     port: Int,
     private val robotClient: RobotWebSocketClient,
-    private val gson: Gson
+    private val gson: Gson,
+    private val taskExecutor: RelayServer.TaskExecutor? = null
 ) : NanoHTTPD(port) {
 
     companion object {
@@ -123,6 +133,12 @@ class RelayHttpServer(
             uri == "/estop" && method == Method.POST -> handleEStop(session)
             uri == "/cancel" && method == Method.POST -> handleCancel()
             uri == "/info" && method == Method.GET -> handleGetInfo()
+            // Task endpoints
+            uri == "/speak" && method == Method.POST -> handleSpeak(session)
+            uri == "/display" && method == Method.POST -> handleDisplay(session)
+            uri == "/display" && method == Method.DELETE -> handleCloseDisplay()
+            uri == "/task" && method == Method.POST -> handleTask(session)
+            uri == "/task" && method == Method.DELETE -> handleCancelTask()
             uri == "/" && method == Method.GET -> handleRoot()
             else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
         }
@@ -139,7 +155,7 @@ class RelayHttpServer(
             <body>
                 <h1>Robot Relay Server</h1>
                 <p>Connection: ${robotClient.connectionState.value}</p>
-                <h2>Endpoints:</h2>
+                <h2>Robot Control:</h2>
                 <ul>
                     <li>GET /status - Robot status</li>
                     <li>POST /cmd - Raw command (JSON body)</li>
@@ -148,6 +164,14 @@ class RelayHttpServer(
                     <li>POST /stop - Stop robot</li>
                     <li>POST /estop - {"enabled": true/false}</li>
                     <li>POST /cancel - Cancel navigation</li>
+                </ul>
+                <h2>Tablet Tasks:</h2>
+                <ul>
+                    <li>POST /speak - {"text": "Hello!"} - TTS announcement</li>
+                    <li>POST /display - {"url": "https://..."} - Show webpage/video</li>
+                    <li>DELETE /display - Close displayed content</li>
+                    <li>POST /task - {"type": "DELIVER|SPEAK|DISPLAY", "data": "...", "wait_seconds": 10}</li>
+                    <li>DELETE /task - Cancel current task</li>
                 </ul>
                 <p>WebSocket: ws://[this-ip]:${(this as NanoHTTPD).listeningPort + 1}</p>
             </body>
@@ -230,6 +254,64 @@ class RelayHttpServer(
 
     private fun handleCancel(): Response {
         robotClient.cancelNavigation()
+        return newFixedLengthResponse(Response.Status.OK, "application/json",
+            gson.toJson(mapOf("cancelled" to true)))
+    }
+
+    // === Task Endpoints ===
+
+    private fun handleSpeak(session: IHTTPSession): Response {
+        return try {
+            val body = gson.fromJson(getBody(session), JsonObject::class.java)
+            val text = body.get("text")?.asString ?: throw IllegalArgumentException("Missing 'text'")
+            taskExecutor?.speakText(text) ?: throw IllegalStateException("Task executor not available")
+            newFixedLengthResponse(Response.Status.OK, "application/json",
+                gson.toJson(mapOf("speaking" to text)))
+        } catch (e: Exception) {
+            newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                gson.toJson(mapOf("error" to e.message)))
+        }
+    }
+
+    private fun handleDisplay(session: IHTTPSession): Response {
+        return try {
+            val body = gson.fromJson(getBody(session), JsonObject::class.java)
+            val url = body.get("url")?.asString ?: throw IllegalArgumentException("Missing 'url'")
+            taskExecutor?.displayUrl(url) ?: throw IllegalStateException("Task executor not available")
+            newFixedLengthResponse(Response.Status.OK, "application/json",
+                gson.toJson(mapOf("displaying" to url)))
+        } catch (e: Exception) {
+            newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                gson.toJson(mapOf("error" to e.message)))
+        }
+    }
+
+    private fun handleCloseDisplay(): Response {
+        taskExecutor?.closeDisplay()
+        return newFixedLengthResponse(Response.Status.OK, "application/json",
+            gson.toJson(mapOf("closed" to true)))
+    }
+
+    private fun handleTask(session: IHTTPSession): Response {
+        return try {
+            val body = gson.fromJson(getBody(session), JsonObject::class.java)
+            val type = body.get("type")?.asString ?: throw IllegalArgumentException("Missing 'type'")
+            val data = body.get("data")?.asString ?: ""
+            val waitSeconds = body.get("wait_seconds")?.asInt ?: 0
+
+            taskExecutor?.runTask(type, data, waitSeconds)
+                ?: throw IllegalStateException("Task executor not available")
+
+            newFixedLengthResponse(Response.Status.OK, "application/json",
+                gson.toJson(mapOf("executing" to type, "data" to data)))
+        } catch (e: Exception) {
+            newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                gson.toJson(mapOf("error" to e.message)))
+        }
+    }
+
+    private fun handleCancelTask(): Response {
+        taskExecutor?.cancelTask()
         return newFixedLengthResponse(Response.Status.OK, "application/json",
             gson.toJson(mapOf("cancelled" to true)))
     }
