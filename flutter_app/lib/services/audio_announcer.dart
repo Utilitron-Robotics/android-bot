@@ -113,6 +113,8 @@ class AudioAnnouncer {
       case 603: // Arrived
         if (goalName.isNotEmpty) {
           speak('Arrived at $goalName');
+          // Display waypoint name on tablet screen
+          _displayWaypointOnTablet(goalName);
         } else {
           speak('Destination reached');
         }
@@ -129,6 +131,37 @@ class AudioAnnouncer {
           speak('Stopped');
         }
         break;
+    }
+  }
+
+  /// Display waypoint name on tablet screen when arrived
+  void _displayWaypointOnTablet(String goalName) {
+    final robot = _robotConnection;
+    if (robot == null || !robot.isConnected) return;
+
+    // Format the name nicely (convert snake_case to Title Case)
+    final displayName = goalName
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((word) => word.isEmpty
+            ? ''
+            : '${word[0].toUpperCase()}${word.substring(1)}')
+        .join(' ');
+
+    // Show waypoint name on tablet with dark background
+    final html = 'data:text/html,<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:%23222;"><h1 style="color:white;font-size:72px;font-family:sans-serif;">$displayName</h1></body></html>';
+
+    try {
+      robot.client.tabletDisplay(html);
+
+      // Auto-close after 5 seconds
+      Future.delayed(const Duration(seconds: 5), () {
+        if (_robotConnection?.isConnected == true) {
+          _robotConnection!.client.tabletCloseDisplay();
+        }
+      });
+    } catch (e) {
+      debugPrint('AudioAnnouncer: Failed to display on tablet: $e');
     }
   }
 
