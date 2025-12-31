@@ -87,9 +87,9 @@ class RobotConnection extends ChangeNotifier {
     }
   }
 
-  /// Called when the WebSocket connection is lost
+  /// Called when the WebSocket connection is lost (only after silent retries fail)
   void _onClientDisconnect() {
-    debugPrint('RobotConnection: Connection lost, will auto-reconnect');
+    debugPrint('RobotConnection: Connection lost after silent retries');
     _state = RobotConnectionState.error;
     _errorMessage = 'Connection lost - reconnecting...';
     notifyListeners();

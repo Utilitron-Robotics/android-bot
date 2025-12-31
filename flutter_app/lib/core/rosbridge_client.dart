@@ -143,12 +143,12 @@ class RosbridgeClient {
     _stopTimers();
     _closeConnection();
 
-    onDisconnect?.call();
-
     // Attempt to reconnect if we have a URL
     if (_lastUrl != null && _reconnectAttempts < _maxReconnectAttempts) {
       _scheduleReconnect();
     } else {
+      // Only notify after all retries exhausted
+      onDisconnect?.call();
       _setState(WsConnectionState.disconnected);
     }
   }
@@ -156,7 +156,13 @@ class RosbridgeClient {
   /// Schedule a reconnect with exponential backoff
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
-    _setState(WsConnectionState.reconnecting);
+
+    // Only show "reconnecting" state after 2 failed attempts (silent recovery first)
+    // Call onDisconnect only ONCE when we first exceed the silent threshold
+    if (_reconnectAttempts == 2) {
+      _setState(WsConnectionState.reconnecting);
+      onDisconnect?.call(); // Notify UI only once
+    }
 
     // Exponential backoff: 1s, 2s, 4s, 8s, 16s, max 30s
     final delay = Duration(
