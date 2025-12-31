@@ -106,6 +106,10 @@ class AudioAnnouncer {
 
     switch (navStatus) {
       case 601: // Moving
+        // Close any existing display when leaving a waypoint
+        if (previousStatus == 603) {
+          _closeTabletDisplay();
+        }
         if (previousStatus != 601 && goalName.isNotEmpty) {
           speak('Navigating to $goalName');
         }
@@ -120,9 +124,11 @@ class AudioAnnouncer {
         }
         break;
       case 602: // Cancelled
+        _closeTabletDisplay(); // Close display on cancel
         speak('Navigation cancelled');
         break;
       case 604: // Failed
+        _closeTabletDisplay(); // Close display on failure
         speak('Navigation failed. Path blocked.');
         break;
       case 600: // Idle
@@ -131,6 +137,18 @@ class AudioAnnouncer {
           speak('Stopped');
         }
         break;
+    }
+  }
+
+  /// Close any displayed content on the tablet
+  void _closeTabletDisplay() {
+    final robot = _robotConnection;
+    if (robot == null || !robot.isConnected) return;
+
+    try {
+      robot.client.tabletCloseDisplay();
+    } catch (e) {
+      debugPrint('AudioAnnouncer: Failed to close tablet display: $e');
     }
   }
 
