@@ -15,6 +15,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.smait.robotrelay.cloud.FleetApiClient
 import com.smait.robotrelay.protocol.SmaitProtocol
 import com.smait.robotrelay.ui.MainActivity
 import kotlinx.coroutines.*
@@ -44,12 +45,15 @@ data class WaypointTask(
 /**
  * Foreground service to keep the relay running
  */
-class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExecutor {
+class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExecutor, RelayHttpServer.ConfigStore {
 
     companion object {
         private const val TAG = "RelayService"
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "robot_relay_channel"
+        private const val CONFIG_PREFS = "task_config"
+        private const val CONFIG_KEY = "waypoint_modes"
+        private const val TTS_API_KEY = "google_tts_api_key"
 
         // Robot base IP via USB wired connection (NOT the WiFi hotspot IP!)
         // WiFi hotspot: 10.42.0.1 | Wired/USB: 192.168.20.22
@@ -60,17 +64,34 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         const val ACTION_TASK_STATUS = "com.smait.robotrelay.TASK_STATUS"
         const val EXTRA_URL = "url"
         const val EXTRA_STATUS = "status"
+
+        // Common phrases to precache for instant playback
+        private val PRECACHE_PHRASES = listOf(
+            "Your order is ready",
+            "Your delivery has arrived",
+            "Please collect your items",
+            "Thank you! Have a nice day",
+            "Navigation cancelled",
+            "Destination reached",
+            "Obstacle detected",
+            "Battery low"
+        )
     }
 
     private val binder = RelayBinder()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // TTS engine
-    private var tts: TextToSpeech? = null
+    // TTS engines - Cloud TTS (high quality) with device TTS fallback
+    private var cloudTts: CloudTtsService? = null
+    private var tts: TextToSpeech? = null  // Legacy fallback
     private val _ttsReady = MutableStateFlow(false)
     val ttsReady: StateFlow<Boolean> = _ttsReady
     private var currentUtteranceCallback: (() -> Unit)? = null
+
+    // AWS Fleet API client - syncs config across ALL robots
+    private lateinit var fleetClient: FleetApiClient
+    private var fleetSyncJob: Job? = null
 
     lateinit var robotClient: RobotWebSocketClient
         private set
@@ -100,8 +121,81 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         Log.i(TAG, "Service created")
         createNotificationChannel()
 
-        // Initialize TTS
+        // Initialize AWS Fleet API client
+        fleetClient = FleetApiClient(this)
+
+        // Fetch fleet config from cloud (will update TTS key if available)
+        scope.launch {
+            val config = fleetClient.fetchConfig()
+            if (config != null) {
+                Log.i(TAG, "Fetched fleet config: ${config.keys}")
+
+                // Use TTS key from fleet config if available
+                val fleetTtsKey = fleetClient.getTtsApiKey()
+                if (!fleetTtsKey.isNullOrEmpty()) {
+                    Log.i(TAG, "Using TTS API key from fleet config")
+                    withContext(Dispatchers.Main) {
+                        initializeTts(fleetTtsKey)
+                    }
+                    return@launch
+                }
+            }
+
+            // Fall back to local preferences
+            val prefs = getSharedPreferences(CONFIG_PREFS, Context.MODE_PRIVATE)
+            val localApiKey = prefs.getString(TTS_API_KEY, null)
+            withContext(Dispatchers.Main) {
+                initializeTts(localApiKey)
+            }
+        }
+
+        // Start periodic fleet sync (every 30 seconds)
+        startFleetSync()
+
+        // Initialize legacy TTS as additional fallback
         tts = TextToSpeech(this, this)
+    }
+
+    /**
+     * Initialize Cloud TTS with given API key
+     */
+    private fun initializeTts(apiKey: String?) {
+        cloudTts = CloudTtsService(this, apiKey)
+        cloudTts?.init()
+
+        if (!apiKey.isNullOrEmpty()) {
+            cloudTts?.precache(PRECACHE_PHRASES)
+        }
+    }
+
+    /**
+     * Start periodic fleet config sync
+     */
+    private fun startFleetSync() {
+        fleetSyncJob?.cancel()
+        fleetSyncJob = scope.launch {
+            while (isActive) {
+                delay(30_000) // 30 seconds
+                try {
+                    fleetClient.fetchConfig()
+
+                    // Update robot status in cloud if registered
+                    if (fleetClient.robotId.isNotEmpty() && ::robotClient.isInitialized) {
+                        val status = robotClient.robotStatus.value
+                        if (status != null) {
+                            fleetClient.updateStatus(
+                                battery = status.battery,
+                                navStatus = status.navStatus,
+                                currentGoal = status.currentGoalName,
+                                estop = status.softEstop || status.hardEstop
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Fleet sync failed: ${e.message}")
+                }
+            }
+        }
     }
 
     override fun onInit(status: Int) {
@@ -160,7 +254,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         // Initialize clients - let Android handle routing
         // The 10.42.0.x subnet should only be reachable via USB
         robotClient = RobotWebSocketClient(robotIp, robotPort, null)
-        relayServer = RelayServer(robotClient, relayPort, this)
+        relayServer = RelayServer(robotClient, relayPort, this, this)
 
         // Connect to robot
         robotClient.connect()
@@ -180,6 +274,9 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
     override fun onDestroy() {
         Log.i(TAG, "Service destroying")
+        fleetSyncJob?.cancel()
+        fleetClient.destroy()
+        cloudTts?.destroy()
         tts?.stop()
         tts?.shutdown()
         relayServer.destroy()
@@ -288,6 +385,40 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     fun isRelayRunning(): StateFlow<Boolean> = relayServer.isRunning
     fun getConnectedClients(): StateFlow<Int> = relayServer.connectedClients
 
+    // Fleet API access
+    fun getFleetClient(): FleetApiClient = fleetClient
+
+    /**
+     * Register this tablet as a robot in the fleet
+     */
+    fun registerWithFleet(robotId: String) {
+        scope.launch {
+            val success = fleetClient.register(robotId)
+            if (success) {
+                Log.i(TAG, "Registered with fleet as: $robotId")
+            }
+        }
+    }
+
+    /**
+     * Manually trigger fleet config sync
+     */
+    fun syncFleetConfig() {
+        scope.launch {
+            val config = fleetClient.fetchConfig()
+            if (config != null) {
+                // Check if TTS key changed
+                val newTtsKey = fleetClient.getTtsApiKey()
+                if (!newTtsKey.isNullOrEmpty()) {
+                    mainHandler.post {
+                        cloudTts?.destroy()
+                        initializeTts(newTtsKey)
+                    }
+                }
+            }
+        }
+    }
+
     fun reconnectRobot() {
         robotClient.disconnect()
         robotClient.connect()
@@ -328,26 +459,18 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     // === Task Execution Methods ===
 
     fun speak(text: String, onComplete: (() -> Unit)? = null) {
-        Log.i(TAG, "speak() called: text='$text', ttsReady=${_ttsReady.value}, tts=${tts != null}")
-
-        if (!_ttsReady.value) {
-            Log.w(TAG, "TTS not ready, skipping: $text")
-            onComplete?.invoke()
-            return
-        }
-
+        Log.i(TAG, "speak() called: text='$text'")
         Log.i(TAG, "Speaking: $text")
         _taskStatus.value = "Speaking..."
 
-        currentUtteranceCallback = {
-            _taskStatus.value = ""
-            onComplete?.invoke()
-        }
-
-        // TTS must be called from main thread
+        // Use Cloud TTS (handles its own fallback to device TTS)
         mainHandler.post {
-            val result = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "task_${System.currentTimeMillis()}")
-            Log.i(TAG, "TTS speak() returned: $result")
+            cloudTts?.speak(text) {
+                mainHandler.post {
+                    _taskStatus.value = ""
+                    onComplete?.invoke()
+                }
+            }
         }
     }
 
@@ -423,13 +546,53 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     }
 
     override fun cancelTask() {
+        cloudTts?.stop()
         tts?.stop()
         closeDisplay()
         _currentTask.value = null
         _taskStatus.value = ""
     }
 
+    /**
+     * Set Google Cloud TTS API key (internal implementation)
+     */
+    private fun updateTtsApiKey(apiKey: String?) {
+        val prefs = getSharedPreferences(CONFIG_PREFS, Context.MODE_PRIVATE)
+        if (apiKey.isNullOrEmpty()) {
+            prefs.edit().remove(TTS_API_KEY).apply()
+        } else {
+            prefs.edit().putString(TTS_API_KEY, apiKey).apply()
+        }
+
+        // Reinitialize Cloud TTS with new key
+        cloudTts?.destroy()
+        cloudTts = CloudTtsService(this, apiKey)
+        cloudTts?.init()
+
+        if (!apiKey.isNullOrEmpty()) {
+            cloudTts?.precache(PRECACHE_PHRASES)
+        }
+
+        Log.i(TAG, "TTS API key ${if (apiKey.isNullOrEmpty()) "cleared" else "set"}")
+    }
+
+    /**
+     * Check if Cloud TTS API key is configured (internal implementation)
+     */
+    private fun checkHasTtsApiKey(): Boolean {
+        val prefs = getSharedPreferences(CONFIG_PREFS, Context.MODE_PRIVATE)
+        return !prefs.getString(TTS_API_KEY, null).isNullOrEmpty()
+    }
+
     // === TaskExecutor Interface Methods (for WebSocket/HTTP API) ===
+
+    override fun setTtsApiKey(apiKey: String?) {
+        updateTtsApiKey(apiKey)
+    }
+
+    override fun hasTtsApiKey(): Boolean {
+        return checkHasTtsApiKey()
+    }
 
     override fun speakText(text: String) {
         Log.i(TAG, ">>> speakText() called from TaskExecutor: '$text'")
@@ -449,5 +612,18 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             return
         }
         executeTask(WaypointTask(taskType, data, waitSeconds))
+    }
+
+    // === ConfigStore Interface Methods ===
+
+    override fun getConfig(): String? {
+        val prefs = getSharedPreferences(CONFIG_PREFS, Context.MODE_PRIVATE)
+        return prefs.getString(CONFIG_KEY, null)
+    }
+
+    override fun saveConfig(json: String) {
+        val prefs = getSharedPreferences(CONFIG_PREFS, Context.MODE_PRIVATE)
+        prefs.edit().putString(CONFIG_KEY, json).apply()
+        Log.i(TAG, "Config saved to SharedPreferences")
     }
 }

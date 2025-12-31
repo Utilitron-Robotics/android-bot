@@ -75,6 +75,19 @@ Resources:
         AttributeName: ttl
         Enabled: true
 
+  # Fleet-wide configuration (shared across ALL robots)
+  FleetConfigTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'turboturf-fleet-config-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: config_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: config_key
+          KeyType: HASH
+
   # Lambda Execution Role
   LambdaRole:
     Type: AWS::IAM::Role
@@ -107,6 +120,7 @@ Resources:
                   - !Sub '${RobotsTable.Arn}/index/*'
                   - !GetAtt CommandsTable.Arn
                   - !GetAtt AlertsTable.Arn
+                  - !GetAtt FleetConfigTable.Arn
 
   # API Lambda Functions
   FleetApiFunction:
@@ -123,6 +137,7 @@ Resources:
           ROBOTS_TABLE: !Ref RobotsTable
           COMMANDS_TABLE: !Ref CommandsTable
           ALERTS_TABLE: !Ref AlertsTable
+          FLEET_CONFIG_TABLE: !Ref FleetConfigTable
           ENVIRONMENT: !Ref Environment
       Code:
         ZipFile: |
@@ -137,15 +152,30 @@ Resources:
           robots_table = dynamodb.Table(os.environ['ROBOTS_TABLE'])
           commands_table = dynamodb.Table(os.environ['COMMANDS_TABLE'])
           alerts_table = dynamodb.Table(os.environ['ALERTS_TABLE'])
+          config_table = dynamodb.Table(os.environ['FLEET_CONFIG_TABLE'])
 
           def decimal_default(obj):
               if isinstance(obj, Decimal):
                   return float(obj)
               raise TypeError
 
+          def convert_floats(obj):
+              """Convert floats to Decimal for DynamoDB"""
+              if isinstance(obj, float):
+                  return Decimal(str(obj))
+              elif isinstance(obj, dict):
+                  return {k: convert_floats(v) for k, v in obj.items()}
+              elif isinstance(obj, list):
+                  return [convert_floats(i) for i in obj]
+              return obj
+
           def handler(event, context):
               method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method'))
               path = event.get('path', event.get('rawPath', ''))
+              # Strip stage prefix from API Gateway HTTP API v2 paths (e.g., /dev/fleet/config -> /fleet/config)
+              if path.startswith('/dev/') or path.startswith('/staging/') or path.startswith('/prod/'):
+                  path = path.split('/', 2)[2] if path.count('/') >= 2 else path
+                  path = '/' + path
               body = json.loads(event.get('body', '{}') or '{}')
 
               # Route requests
@@ -170,6 +200,17 @@ Resources:
                   if method == 'POST':
                       return create_alert(body)
                   return get_alerts(event.get('queryStringParameters', {}))
+              # Fleet-wide config (shared by ALL robots)
+              elif path == '/fleet/config' and method == 'GET':
+                  return get_fleet_config()
+              elif path == '/fleet/config' and method == 'POST':
+                  return update_fleet_config(body)
+              elif path.startswith('/fleet/config/') and method == 'GET':
+                  key = path.split('/')[-1]
+                  return get_config_key(key)
+              elif path.startswith('/fleet/config/') and method == 'POST':
+                  key = path.split('/')[-1]
+                  return set_config_key(key, body)
 
               return response(404, {'error': 'Not found'})
 
@@ -308,6 +349,39 @@ Resources:
               alerts = sorted(result.get('Items', []), key=lambda x: x.get('timestamp', 0), reverse=True)
               return response(200, {'alerts': alerts})
 
+          # Fleet config functions - ONE config for ALL robots
+          def get_fleet_config():
+              result = config_table.scan()
+              items = result.get('Items', [])
+              config = {item['config_key']: item.get('value') for item in items}
+              return response(200, config)
+
+          def update_fleet_config(body):
+              # body is a dict of key-value pairs to set
+              for key, value in body.items():
+                  config_table.put_item(Item={
+                      'config_key': key,
+                      'value': convert_floats(value),
+                      'updated_at': int(time.time() * 1000)
+                  })
+              return response(200, {'status': 'updated', 'keys': list(body.keys())})
+
+          def get_config_key(key):
+              result = config_table.get_item(Key={'config_key': key})
+              item = result.get('Item')
+              if item:
+                  return response(200, {'key': key, 'value': item.get('value')})
+              return response(404, {'error': f'Config key {key} not found'})
+
+          def set_config_key(key, body):
+              value = body.get('value', body)  # Accept {"value": X} or just X
+              config_table.put_item(Item={
+                  'config_key': key,
+                  'value': convert_floats(value),
+                  'updated_at': int(time.time() * 1000)
+              })
+              return response(200, {'status': 'set', 'key': key})
+
           def response(status_code, body):
               return {
                   'statusCode': status_code,
@@ -385,3 +459,7 @@ Outputs:
   AlertsTableName:
     Description: DynamoDB Alerts Table
     Value: !Ref AlertsTable
+
+  FleetConfigTableName:
+    Description: DynamoDB Fleet Config Table (shared across ALL robots)
+    Value: !Ref FleetConfigTable

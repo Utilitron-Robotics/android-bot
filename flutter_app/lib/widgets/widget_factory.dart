@@ -7,6 +7,7 @@ import 'parameter_list.dart';
 import 'voice_control.dart';
 import 'map_view.dart';
 import 'tablet_control_panel.dart';
+import 'tour_editor.dart';
 
 /// Dynamically generates UI widgets based on discovered robot capabilities
 class WidgetFactory {
@@ -32,6 +33,8 @@ class WidgetFactory {
       ));
       // Voice control (uses waypoints for matching)
       widgets.add(VoiceControl(availableWaypoints: capabilities.waypoints));
+      // Tour mode editor
+      widgets.add(_buildTourSection(capabilities.waypoints));
     }
 
     // Joystick if velocity control available
@@ -56,6 +59,23 @@ class WidgetFactory {
     widgets.add(_buildDiscoverySummary());
 
     return widgets;
+  }
+
+  Widget _buildTourSection(List<String> waypoints) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: ExpansionTile(
+        title: const Text('Tour Mode'),
+        leading: const Icon(Icons.tour),
+        subtitle: const Text('Create guided tours with waypoint sequences'),
+        children: [
+          SizedBox(
+            height: 400,
+            child: TourEditor(availableWaypoints: waypoints),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildDiscoverySummary() {

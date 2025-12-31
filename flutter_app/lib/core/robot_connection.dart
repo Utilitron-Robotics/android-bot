@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'rosbridge_client.dart';
 import '../services/robot_introspection.dart';
 import '../services/audio_announcer.dart';
+import '../services/tour_executor.dart';
 
 /// Robot connection state (renamed to avoid conflict with Flutter's ConnectionState)
 enum RobotConnectionState { disconnected, connecting, connected, error }
@@ -71,6 +72,9 @@ class RobotConnection extends ChangeNotifier {
       // Inject dependency for audio announcements
       AudioAnnouncer().setRobotConnection(this);
 
+      // Initialize tour executor
+      TourExecutor().init(this);
+
       // Discover robot capabilities
       _introspection = RobotIntrospection(_client);
       _capabilities = await _introspection!.discover();
@@ -135,6 +139,12 @@ class RobotConnection extends ChangeNotifier {
 
           // Trigger audio announcements on status changes
           AudioAnnouncer().onNavStatusChanged(
+            newStatus.navStatus,
+            newStatus.currentGoal,
+          );
+
+          // Forward to tour executor for tour mode
+          TourExecutor().onNavStatusChanged(
             newStatus.navStatus,
             newStatus.currentGoal,
           );
