@@ -25,7 +25,8 @@ import java.io.IOException
 class RelayServer(
     private val robotClient: RobotWebSocketClient,
     private val port: Int = 8765,
-    private val taskExecutor: TaskExecutor? = null
+    private val taskExecutor: TaskExecutor? = null,
+    private val configStore: RelayHttpServer.ConfigStore? = null
 ) {
 
     interface TaskExecutor {
@@ -34,6 +35,8 @@ class RelayServer(
         fun closeDisplay()
         fun runTask(type: String, data: String, waitSeconds: Int)
         fun cancelTask()
+        fun setTtsApiKey(apiKey: String?)
+        fun hasTtsApiKey(): Boolean
     }
     companion object {
         private const val TAG = "RelayServer"
@@ -54,7 +57,7 @@ class RelayServer(
     fun start() {
         try {
             // Start HTTP server on port
-            httpServer = RelayHttpServer(port, robotClient, gson, taskExecutor)
+            httpServer = RelayHttpServer(port, robotClient, gson, taskExecutor, configStore)
             httpServer?.start()
 
             // Start WebSocket server on port + 1
@@ -98,11 +101,17 @@ class RelayHttpServer(
     port: Int,
     private val robotClient: RobotWebSocketClient,
     private val gson: Gson,
-    private val taskExecutor: RelayServer.TaskExecutor? = null
+    private val taskExecutor: RelayServer.TaskExecutor? = null,
+    private val configStore: ConfigStore? = null
 ) : NanoHTTPD(port) {
 
     companion object {
         private const val TAG = "RelayHTTP"
+    }
+
+    interface ConfigStore {
+        fun getConfig(): String?
+        fun saveConfig(json: String)
     }
 
     override fun serve(session: IHTTPSession): Response {
@@ -139,6 +148,12 @@ class RelayHttpServer(
             uri == "/display" && method == Method.DELETE -> handleCloseDisplay()
             uri == "/task" && method == Method.POST -> handleTask(session)
             uri == "/task" && method == Method.DELETE -> handleCancelTask()
+            // Config sync endpoints
+            uri == "/config" && method == Method.GET -> handleGetConfig()
+            uri == "/config" && method == Method.POST -> handleSaveConfig(session)
+            // TTS API key configuration
+            uri == "/tts/apikey" && method == Method.POST -> handleSetTtsApiKey(session)
+            uri == "/tts/apikey" && method == Method.GET -> handleGetTtsStatus()
             uri == "/" && method == Method.GET -> handleRoot()
             else -> newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found")
         }
@@ -172,6 +187,16 @@ class RelayHttpServer(
                     <li>DELETE /display - Close displayed content</li>
                     <li>POST /task - {"type": "DELIVER|SPEAK|DISPLAY", "data": "...", "wait_seconds": 10}</li>
                     <li>DELETE /task - Cancel current task</li>
+                </ul>
+                <h2>Config Sync:</h2>
+                <ul>
+                    <li>GET /config - Get shared task mode configurations</li>
+                    <li>POST /config - Save task mode configurations (JSON body)</li>
+                </ul>
+                <h2>TTS Settings:</h2>
+                <ul>
+                    <li>GET /tts/apikey - Check if Google Cloud TTS API key is set</li>
+                    <li>POST /tts/apikey - {"api_key": "YOUR_KEY"} - Set API key for high-quality TTS</li>
                 </ul>
                 <p>WebSocket: ws://[this-ip]:${(this as NanoHTTPD).listeningPort + 1}</p>
             </body>
@@ -316,6 +341,49 @@ class RelayHttpServer(
             gson.toJson(mapOf("cancelled" to true)))
     }
 
+    // === Config Sync Endpoints ===
+
+    private fun handleGetConfig(): Response {
+        val config = configStore?.getConfig() ?: "{}"
+        return newFixedLengthResponse(Response.Status.OK, "application/json", config)
+    }
+
+    private fun handleSaveConfig(session: IHTTPSession): Response {
+        return try {
+            val body = getBody(session)
+            configStore?.saveConfig(body) ?: throw IllegalStateException("Config store not available")
+            Log.i(TAG, "Config saved: ${body.take(100)}...")
+            newFixedLengthResponse(Response.Status.OK, "application/json",
+                gson.toJson(mapOf("saved" to true)))
+        } catch (e: Exception) {
+            newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                gson.toJson(mapOf("error" to e.message)))
+        }
+    }
+
+    // === TTS API Key Endpoints ===
+
+    private fun handleSetTtsApiKey(session: IHTTPSession): Response {
+        return try {
+            val body = gson.fromJson(getBody(session), JsonObject::class.java)
+            val apiKey = body.get("api_key")?.asString
+            taskExecutor?.setTtsApiKey(apiKey)
+                ?: throw IllegalStateException("Task executor not available")
+            Log.i(TAG, "TTS API key ${if (apiKey.isNullOrEmpty()) "cleared" else "set"}")
+            newFixedLengthResponse(Response.Status.OK, "application/json",
+                gson.toJson(mapOf("configured" to !apiKey.isNullOrEmpty())))
+        } catch (e: Exception) {
+            newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                gson.toJson(mapOf("error" to e.message)))
+        }
+    }
+
+    private fun handleGetTtsStatus(): Response {
+        val hasKey = taskExecutor?.hasTtsApiKey() ?: false
+        return newFixedLengthResponse(Response.Status.OK, "application/json",
+            gson.toJson(mapOf("configured" to hasKey, "engine" to if (hasKey) "google_cloud" else "device")))
+    }
+
     private fun getBody(session: IHTTPSession): String {
         val files = mutableMapOf<String, String>()
         session.parseBody(files)
@@ -336,9 +404,44 @@ class RelayWebSocketServer(
 
     companion object {
         private const val TAG = "RelayWS"
+        private const val PING_INTERVAL_MS = 10_000L  // Send ping every 10 seconds
     }
 
     private val clients = mutableListOf<WebSocket>()
+    private var pingJob: Job? = null
+
+    override fun start(timeout: Int, daemon: Boolean) {
+        // Use a long socket timeout (60 seconds) to avoid premature disconnects
+        super.start(60000, daemon)
+        // Start periodic ping to keep connections alive
+        pingJob = scope.launch {
+            while (isActive) {
+                delay(PING_INTERVAL_MS)
+                pingAllClients()
+            }
+        }
+    }
+
+    override fun start() {
+        start(60000, false)
+    }
+
+    override fun stop() {
+        pingJob?.cancel()
+        super.stop()
+    }
+
+    private fun pingAllClients() {
+        synchronized(clients) {
+            clients.forEach { client ->
+                try {
+                    client.ping(ByteArray(0))
+                } catch (e: Exception) {
+                    Log.w(TAG, "Ping failed for client: ${e.message}")
+                }
+            }
+        }
+    }
 
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
         return RelayWebSocket(handshake, robotClient, scope, taskExecutor) { ws, connected ->
@@ -444,6 +547,15 @@ class RelayWebSocketServer(
                     "tablet_cancel" -> {
                         Log.i(TAG, "Tablet cancel task")
                         taskExecutor?.cancelTask()
+                        return
+                    }
+                    // Handle rosbridge ping - respond with pong to keep connection alive
+                    "ping" -> {
+                        try {
+                            send("""{"op":"pong"}""")
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to send pong: ${e.message}")
+                        }
                         return
                     }
                 }

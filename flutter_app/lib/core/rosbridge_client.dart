@@ -244,6 +244,13 @@ class RosbridgeClient {
       data: msg,
     ));
 
+    // Handle pong response (keep-alive acknowledgment)
+    final op = msg['op'] as String?;
+    if (op == 'pong') {
+      // Connection is alive - lastMessageTime already updated by stream listener
+      return;
+    }
+
     // Check if this is a service response
     final id = msg['id'] as String?;
     if (id != null && _pendingCalls.containsKey(id)) {

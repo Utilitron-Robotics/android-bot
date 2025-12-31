@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Task types that can be performed at waypoints
+/// Task types for UI selection (kept for backwards compat, but now tasks stack)
 enum TaskType {
-  none('None', 'No task'),
-  deliver('Deliver', 'Announce arrival and wait for pickup'),
+  none('None', 'No task - just announce arrival'),
+  deliver('Deliver', 'Wait for pickup and return to origin'),
   speak('Speak', 'Text-to-speech announcement'),
   display('Display', 'Show webpage or video on tablet');
 
@@ -13,63 +15,165 @@ enum TaskType {
   const TaskType(this.label, this.description);
 }
 
-/// A task to execute at a waypoint
+/// A task to execute at a waypoint - now supports stacking speak + display
 class WaypointTask {
-  final TaskType type;
-  final String data;       // For SPEAK: text, for DISPLAY: URL, for DELIVER: message
-  final int waitSeconds;   // How long to wait (for DELIVER)
+  final String? speakText;       // Text to speak on arrival (null = don't speak)
+  final String? displayUrl;      // URL to display on tablet (null = don't display)
+  final int displayDuration;     // How long to show display (0 = until next nav)
+  final bool announceArrival;    // Say "Arrived at [waypoint]" before custom text
+  final int waitSeconds;         // For delivery: how long to wait for pickup
+  final bool returnToOrigin;     // For delivery: return to previous waypoint after
+  final String? returnWaypoint;  // Specific waypoint to return to (null = previous)
 
   const WaypointTask({
-    this.type = TaskType.none,
-    this.data = '',
+    this.speakText,
+    this.displayUrl,
+    this.displayDuration = 0,
+    this.announceArrival = true,
     this.waitSeconds = 30,
+    this.returnToOrigin = false,
+    this.returnWaypoint,
   });
 
+  /// Legacy getter for UI compatibility
+  TaskType get type {
+    if (returnToOrigin) return TaskType.deliver;
+    if (displayUrl != null && displayUrl!.isNotEmpty) return TaskType.display;
+    if (speakText != null && speakText!.isNotEmpty) return TaskType.speak;
+    return TaskType.none;
+  }
+
+  /// Legacy getter - returns speakText or displayUrl for backwards compat
+  String get data => speakText ?? displayUrl ?? '';
+
+  /// Check if this task has any actions configured
+  bool get hasActions =>
+      (speakText != null && speakText!.isNotEmpty) ||
+      (displayUrl != null && displayUrl!.isNotEmpty) ||
+      returnToOrigin;
+
   Map<String, dynamic> toJson() => {
-    'type': type.name.toUpperCase(),
-    'data': data,
+    if (speakText != null) 'speak_text': speakText,
+    if (displayUrl != null) 'display_url': displayUrl,
+    'display_duration': displayDuration,
+    'announce_arrival': announceArrival,
     'wait_seconds': waitSeconds,
+    'return_to_origin': returnToOrigin,
+    if (returnWaypoint != null) 'return_waypoint': returnWaypoint,
   };
 
   factory WaypointTask.fromJson(Map<String, dynamic> json) {
-    final typeStr = json['type'] as String? ?? 'none';
-    return WaypointTask(
-      type: TaskType.values.firstWhere(
+    // Handle legacy format with 'type' and 'data' fields
+    if (json.containsKey('type') && !json.containsKey('speak_text')) {
+      final typeStr = json['type'] as String? ?? 'none';
+      final data = json['data'] as String? ?? '';
+      final type = TaskType.values.firstWhere(
         (t) => t.name.toUpperCase() == typeStr.toUpperCase(),
         orElse: () => TaskType.none,
-      ),
-      data: json['data'] as String? ?? '',
+      );
+
+      return WaypointTask(
+        speakText: (type == TaskType.speak || type == TaskType.deliver) ? data : null,
+        displayUrl: type == TaskType.display ? data : null,
+        waitSeconds: json['wait_seconds'] as int? ?? 30,
+        returnToOrigin: type == TaskType.deliver,
+      );
+    }
+
+    // New format
+    return WaypointTask(
+      speakText: json['speak_text'] as String?,
+      displayUrl: json['display_url'] as String?,
+      displayDuration: json['display_duration'] as int? ?? 0,
+      announceArrival: json['announce_arrival'] as bool? ?? true,
       waitSeconds: json['wait_seconds'] as int? ?? 30,
+      returnToOrigin: json['return_to_origin'] as bool? ?? false,
+      returnWaypoint: json['return_waypoint'] as String?,
     );
   }
 
   WaypointTask copyWith({
-    TaskType? type,
-    String? data,
+    String? speakText,
+    String? displayUrl,
+    int? displayDuration,
+    bool? announceArrival,
     int? waitSeconds,
+    bool? returnToOrigin,
+    String? returnWaypoint,
   }) => WaypointTask(
-    type: type ?? this.type,
-    data: data ?? this.data,
+    speakText: speakText ?? this.speakText,
+    displayUrl: displayUrl ?? this.displayUrl,
+    displayDuration: displayDuration ?? this.displayDuration,
+    announceArrival: announceArrival ?? this.announceArrival,
     waitSeconds: waitSeconds ?? this.waitSeconds,
+    returnToOrigin: returnToOrigin ?? this.returnToOrigin,
+    returnWaypoint: returnWaypoint ?? this.returnWaypoint,
   );
 }
 
 /// Configuration of waypoints and their tasks
 class WaypointConfig {
+  static const String _prefsKey = 'waypoint_tasks';
+  static WaypointConfig? _instance;
+
   final Map<String, WaypointTask> _tasks = {};
+  bool _loaded = false;
+
+  /// Get singleton instance
+  static WaypointConfig get instance {
+    _instance ??= WaypointConfig._();
+    return _instance!;
+  }
+
+  WaypointConfig._();
+
+  /// For backwards compatibility - creates new instance (use .instance for persistence)
+  factory WaypointConfig() => WaypointConfig._();
+
+  /// Load tasks from SharedPreferences
+  Future<void> load() async {
+    if (_loaded) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString(_prefsKey);
+      if (jsonStr != null) {
+        final json = jsonDecode(jsonStr) as Map<String, dynamic>;
+        loadFromJson(json);
+        debugPrint('WaypointConfig: Loaded ${_tasks.length} tasks from storage');
+      }
+      _loaded = true;
+    } catch (e) {
+      debugPrint('WaypointConfig: Failed to load: $e');
+    }
+  }
+
+  /// Save tasks to SharedPreferences
+  Future<void> save() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = jsonEncode(toJson());
+      await prefs.setString(_prefsKey, jsonStr);
+      debugPrint('WaypointConfig: Saved ${_tasks.length} tasks to storage');
+    } catch (e) {
+      debugPrint('WaypointConfig: Failed to save: $e');
+    }
+  }
 
   /// Get task for a waypoint
   WaypointTask getTask(String waypoint) =>
       _tasks[waypoint] ?? const WaypointTask();
 
-  /// Set task for a waypoint
+  /// Set task for a waypoint (auto-saves)
   void setTask(String waypoint, WaypointTask task) {
     _tasks[waypoint] = task;
+    save(); // Auto-save on change
   }
 
-  /// Remove task for a waypoint
+  /// Remove task for a waypoint (auto-saves)
   void removeTask(String waypoint) {
     _tasks.remove(waypoint);
+    save(); // Auto-save on change
   }
 
   /// Get all configured waypoints

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
-import '../core/waypoint_task.dart';
+import '../core/task_engine.dart';
 
 /// Grid of waypoint buttons - dynamically generated from discovered POIs
 class WaypointGrid extends StatefulWidget {
   final List<String> waypoints;
-  final String? relayUrl;  // HTTP URL of tablet relay (e.g., http://192.168.1.100:8765)
+  final String? relayUrl;
 
   const WaypointGrid({
     super.key,
@@ -18,33 +18,23 @@ class WaypointGrid extends StatefulWidget {
   State<WaypointGrid> createState() => _WaypointGridState();
 }
 
-class _WaypointGridState extends State<WaypointGrid> {
+class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCallback {
   String? _navigatingTo;
+  String? _lastWaypoint;
   int? _lastNavStatus;
   final _customWaypointController = TextEditingController();
-  final _waypointConfig = WaypointConfig();
-  TabletTaskClient? _taskClient;
+  final _taskEngine = TaskEngine.instance;
 
   @override
   void initState() {
     super.initState();
-    _updateTaskClient();
+    _loadConfig();
   }
 
-  @override
-  void didUpdateWidget(WaypointGrid oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.relayUrl != widget.relayUrl) {
-      _updateTaskClient();
-    }
-  }
-
-  void _updateTaskClient() {
-    if (widget.relayUrl != null && widget.relayUrl!.isNotEmpty) {
-      _taskClient = TabletTaskClient(widget.relayUrl!);
-    } else {
-      _taskClient = null;
-    }
+  Future<void> _loadConfig() async {
+    await _taskEngine.load();
+    _taskEngine.setCallback(this);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -53,20 +43,63 @@ class _WaypointGridState extends State<WaypointGrid> {
     super.dispose();
   }
 
+  // TaskExecutorCallback implementation
+  @override
+  void onSpeak(String text) {
+    final robot = context.read<RobotConnection>();
+    if (robot.isConnected) {
+      robot.client.tabletSpeak(text);
+    }
+  }
+
+  @override
+  void onDisplay(String url, int durationSeconds) {
+    final robot = context.read<RobotConnection>();
+    if (robot.isConnected) {
+      robot.client.tabletDisplay(url);
+      if (durationSeconds > 0) {
+        Future.delayed(Duration(seconds: durationSeconds), () {
+          if (mounted) onCloseDisplay();
+        });
+      }
+    }
+  }
+
+  @override
+  void onCloseDisplay() {
+    final robot = context.read<RobotConnection>();
+    if (robot.isConnected) {
+      robot.client.tabletCloseDisplay();
+    }
+  }
+
+  @override
+  void onNavigate(String waypoint) {
+    final robot = context.read<RobotConnection>();
+    if (robot.isConnected) {
+      _goToWaypoint(robot, waypoint);
+    }
+  }
+
+  @override
+  void onWait(int seconds) {
+    // Wait is handled by TaskEngine timer
+  }
+
   /// Check nav status and execute task on arrival
-  void _checkNavStatus(int navStatus) {
-    // Only react to status changes
+  void _checkNavStatus(int navStatus, String goalName) {
     if (_lastNavStatus == navStatus) return;
     final previousStatus = _lastNavStatus;
     _lastNavStatus = navStatus;
 
     // Execute task on arrival (603 = Success/Arrived)
     if (_navigatingTo != null && navStatus == 603 && previousStatus == 601) {
-      _executeWaypointTask(_navigatingTo!);
+      final arrivedAt = _navigatingTo!;
+      _taskEngine.executeForWaypoint(arrivedAt, fromWaypoint: _lastWaypoint);
+      _lastWaypoint = arrivedAt;
     }
 
     // Clear navigating state on terminal statuses (not 601=Moving)
-    // 600=Idle, 602=Cancelled, 603=Arrived, 604=Failed, 605=Standby
     if (_navigatingTo != null && navStatus != 601) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -76,34 +109,11 @@ class _WaypointGridState extends State<WaypointGrid> {
     }
   }
 
-  /// Execute the configured task for a waypoint (or default arrival behavior)
-  void _executeWaypointTask(String waypoint) {
-    final robot = context.read<RobotConnection>();
-    if (!robot.isConnected) return;
-
-    final task = _waypointConfig.getTask(waypoint);
-    final displayName = _formatWaypointName(waypoint);
-
-    if (task.type == TaskType.none) {
-      // Default: announce arrival and display waypoint name via WebSocket
-      robot.client.tabletSpeak('Arrived at $displayName');
-      robot.client.tabletDisplay('data:text/html,<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:%23222;"><h1 style="color:white;font-size:72px;font-family:sans-serif;">$displayName</h1></body></html>');
-      // Auto-close display after 5 seconds
-      Future.delayed(const Duration(seconds: 5), () {
-        robot.client.tabletCloseDisplay();
-      });
-    } else {
-      // Execute configured task via WebSocket
-      robot.client.tabletTask(task.type.name.toUpperCase(), task.data, task.waitSeconds);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Consumer<RobotConnection>(
       builder: (context, robot, _) {
-        // Check nav status on every rebuild to catch status changes
-        _checkNavStatus(robot.status.navStatus);
+        _checkNavStatus(robot.status.navStatus, robot.status.currentGoal);
 
         return Card(
           child: Padding(
@@ -120,21 +130,21 @@ class _WaypointGridState extends State<WaypointGrid> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const Spacer(),
-                    // Task indicator
-                    if (_taskClient != null)
+                    // Task engine indicator
+                    if (_taskEngine.isExecuting)
                       Tooltip(
-                        message: 'Tablet tasks enabled',
-                        child: Icon(Icons.speaker_phone,
+                        message: 'Task running',
+                        child: Icon(Icons.play_circle,
                           size: 20,
                           color: Colors.green.shade600),
                       ),
                     const SizedBox(width: 8),
                     // Cancel button
-                    if (robot.status.isMoving)
+                    if (robot.status.isMoving || _taskEngine.isExecuting)
                       FilledButton.tonalIcon(
                         onPressed: () async {
                           await robot.cancelNavigation();
-                          _taskClient?.cancelTask();
+                          _taskEngine.cancel();
                           setState(() => _navigatingTo = null);
                         },
                         icon: const Icon(Icons.stop),
@@ -146,9 +156,8 @@ class _WaypointGridState extends State<WaypointGrid> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                // Hint text
                 Text(
-                  'Long-press to configure task',
+                  'Long-press to configure task mode',
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                 ),
                 const SizedBox(height: 8),
@@ -196,11 +205,10 @@ class _WaypointGridState extends State<WaypointGrid> {
 
   Widget _buildWaypointButton(RobotConnection robot, String waypoint) {
     final isNavigating = _navigatingTo == waypoint;
-    final task = _waypointConfig.getTask(waypoint);
-    final hasTask = task.type != TaskType.none;
+    final hasMode = _taskEngine.hasMode(waypoint);
 
     return GestureDetector(
-      onLongPress: () => _showTaskConfigDialog(waypoint),
+      onLongPress: () => _showModeConfigDialog(waypoint),
       child: FilledButton.tonal(
         onPressed: robot.status.isMoving
             ? null
@@ -219,8 +227,8 @@ class _WaypointGridState extends State<WaypointGrid> {
               ),
               const SizedBox(width: 8),
             ],
-            if (hasTask && !isNavigating) ...[
-              Icon(_getTaskIcon(task.type), size: 16),
+            if (hasMode && !isNavigating) ...[
+              const Icon(Icons.auto_awesome, size: 16),
               const SizedBox(width: 4),
             ],
             Text(_formatWaypointName(waypoint)),
@@ -228,19 +236,6 @@ class _WaypointGridState extends State<WaypointGrid> {
         ),
       ),
     );
-  }
-
-  IconData _getTaskIcon(TaskType type) {
-    switch (type) {
-      case TaskType.deliver:
-        return Icons.delivery_dining;
-      case TaskType.speak:
-        return Icons.volume_up;
-      case TaskType.display:
-        return Icons.tv;
-      case TaskType.none:
-        return Icons.location_on;
-    }
   }
 
   Widget _buildCustomWaypointInput(RobotConnection robot) {
@@ -268,7 +263,6 @@ class _WaypointGridState extends State<WaypointGrid> {
   }
 
   String _formatWaypointName(String name) {
-    // Convert snake_case to Title Case
     return name
         .replaceAll('_', ' ')
         .split(' ')
@@ -281,7 +275,13 @@ class _WaypointGridState extends State<WaypointGrid> {
   Future<void> _goToWaypoint(RobotConnection robot, String waypoint) async {
     setState(() => _navigatingTo = waypoint);
     await robot.goToWaypoint(waypoint);
-    // Status updates will come through the subscription
+
+    // Quick check: if robot didn't start moving within 1.5s, assume already there
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted && _navigatingTo == waypoint && robot.status.navStatus != 601) {
+        setState(() => _navigatingTo = null);
+      }
+    });
   }
 
   void _goToCustomWaypoint(RobotConnection robot) {
@@ -292,125 +292,211 @@ class _WaypointGridState extends State<WaypointGrid> {
     _customWaypointController.clear();
   }
 
-  /// Show dialog to configure task for a waypoint
-  Future<void> _showTaskConfigDialog(String waypoint) async {
-    var task = _waypointConfig.getTask(waypoint);
-
-    final result = await showDialog<WaypointTask>(
+  /// Show dialog to configure mode for a waypoint
+  Future<void> _showModeConfigDialog(String waypoint) async {
+    final result = await showDialog<_ModeConfigResult>(
       context: context,
-      builder: (context) => _TaskConfigDialog(
+      builder: (context) => _ModeConfigDialog(
         waypoint: waypoint,
-        initialTask: task,
+        taskEngine: _taskEngine,
+        availableWaypoints: widget.waypoints,
       ),
     );
 
     if (result != null) {
       setState(() {
-        _waypointConfig.setTask(waypoint, result);
+        _taskEngine.assignMode(waypoint, result.modeId, params: result.params);
       });
     }
   }
 }
 
-/// Dialog to configure a waypoint task
-class _TaskConfigDialog extends StatefulWidget {
-  final String waypoint;
-  final WaypointTask initialTask;
+/// Result from mode config dialog
+class _ModeConfigResult {
+  final String? modeId;
+  final Map<String, String> params;
 
-  const _TaskConfigDialog({
+  _ModeConfigResult({this.modeId, this.params = const {}});
+}
+
+/// Dialog to configure mode for a waypoint
+class _ModeConfigDialog extends StatefulWidget {
+  final String waypoint;
+  final TaskEngine taskEngine;
+  final List<String> availableWaypoints;
+
+  const _ModeConfigDialog({
     required this.waypoint,
-    required this.initialTask,
+    required this.taskEngine,
+    required this.availableWaypoints,
   });
 
   @override
-  State<_TaskConfigDialog> createState() => _TaskConfigDialogState();
+  State<_ModeConfigDialog> createState() => _ModeConfigDialogState();
 }
 
-class _TaskConfigDialogState extends State<_TaskConfigDialog> {
-  late TaskType _selectedType;
-  late TextEditingController _dataController;
-  late int _waitSeconds;
+class _ModeConfigDialogState extends State<_ModeConfigDialog> {
+  String? _selectedModeId;
+  final _speakController = TextEditingController();
+  final _displayController = TextEditingController();
+  int _waitSeconds = 30;
+  int _displayDuration = 5;
 
   @override
   void initState() {
     super.initState();
-    _selectedType = widget.initialTask.type;
-    _dataController = TextEditingController(text: widget.initialTask.data);
-    _waitSeconds = widget.initialTask.waitSeconds;
+    final assignment = widget.taskEngine.getAssignment(widget.waypoint);
+    if (assignment != null) {
+      _selectedModeId = assignment.modeId;
+      _speakController.text = assignment.params['speak_text'] ?? '';
+      _displayController.text = assignment.params['display_url'] ?? '';
+      _waitSeconds = int.tryParse(assignment.params['wait_seconds'] ?? '30') ?? 30;
+      _displayDuration = int.tryParse(assignment.params['display_duration'] ?? '5') ?? 5;
+    }
   }
 
   @override
   void dispose() {
-    _dataController.dispose();
+    _speakController.dispose();
+    _displayController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final modes = widget.taskEngine.allModes;
+
     return AlertDialog(
-      title: Text('Task: ${widget.waypoint}'),
+      title: Text('Mode: ${widget.waypoint}'),
       content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Task type selector
-            const Text('Task Type:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            SegmentedButton<TaskType>(
-              segments: TaskType.values.map((t) => ButtonSegment(
-                value: t,
-                label: Text(t.label, style: const TextStyle(fontSize: 11)),
-                icon: Icon(_getTaskIcon(t), size: 16),
-              )).toList(),
-              selected: {_selectedType},
-              onSelectionChanged: (selected) {
-                setState(() => _selectedType = selected.first);
-              },
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _selectedType.description,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 16),
-
-            // Data input (only for non-none types)
-            if (_selectedType != TaskType.none) ...[
-              TextField(
-                controller: _dataController,
-                decoration: InputDecoration(
-                  labelText: _getDataLabel(),
-                  hintText: _getDataHint(),
-                  border: const OutlineInputBorder(),
+        child: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Mode selector
+              const Text('Select Mode:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String?>(
+                value: _selectedModeId,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  isDense: true,
                 ),
-                maxLines: _selectedType == TaskType.speak ? 3 : 1,
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Wait seconds (for deliver)
-            if (_selectedType == TaskType.deliver) ...[
-              Row(
-                children: [
-                  const Text('Wait time: '),
-                  Expanded(
-                    child: Slider(
-                      value: _waitSeconds.toDouble(),
-                      min: 10,
-                      max: 120,
-                      divisions: 11,
-                      label: '$_waitSeconds sec',
-                      onChanged: (value) {
-                        setState(() => _waitSeconds = value.round());
-                      },
-                    ),
+                items: [
+                  const DropdownMenuItem(
+                    value: null,
+                    child: Text('None (just announce arrival)'),
                   ),
-                  Text('$_waitSeconds sec'),
+                  ...modes.map((m) => DropdownMenuItem(
+                    value: m.id,
+                    child: Row(
+                      children: [
+                        Icon(_getModeIcon(m.id), size: 18),
+                        const SizedBox(width: 8),
+                        Text(m.name),
+                      ],
+                    ),
+                  )),
                 ],
+                onChanged: (v) => setState(() => _selectedModeId = v),
               ),
+              if (_selectedModeId != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  modes.firstWhere((m) => m.id == _selectedModeId).description,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ],
+              const Divider(height: 24),
+
+              // Mode-specific parameters
+              if (_selectedModeId == 'delivery' || _selectedModeId == 'announce') ...[
+                // Speak text
+                Row(
+                  children: [
+                    const Icon(Icons.volume_up, size: 20),
+                    const SizedBox(width: 8),
+                    const Text('Speak', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _speakController,
+                  decoration: const InputDecoration(
+                    hintText: 'Your order is ready!',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 16),
+
+                // Display URL
+                Row(
+                  children: [
+                    const Icon(Icons.tv, size: 20),
+                    const SizedBox(width: 8),
+                    const Text('Display', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _displayController,
+                  decoration: const InputDecoration(
+                    hintText: 'https://example.com/video.mp4',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+              ],
+
+              // Delivery-specific options
+              if (_selectedModeId == 'delivery') ...[
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Text('Wait time: '),
+                    Expanded(
+                      child: Slider(
+                        value: _waitSeconds.toDouble(),
+                        min: 10,
+                        max: 120,
+                        divisions: 11,
+                        onChanged: (v) => setState(() => _waitSeconds = v.round()),
+                      ),
+                    ),
+                    Text('${_waitSeconds}s'),
+                  ],
+                ),
+                Text(
+                  'Robot will return to origin after this time',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+
+              // Announce-specific options
+              if (_selectedModeId == 'announce' && _displayController.text.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    const Text('Display duration: '),
+                    Expanded(
+                      child: Slider(
+                        value: _displayDuration.toDouble(),
+                        min: 0,
+                        max: 60,
+                        divisions: 12,
+                        onChanged: (v) => setState(() => _displayDuration = v.round()),
+                      ),
+                    ),
+                    Text(_displayDuration == 0 ? 'Until leave' : '${_displayDuration}s'),
+                  ],
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -418,17 +504,21 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        if (_selectedType != TaskType.none)
+        if (_selectedModeId != null)
           TextButton(
-            onPressed: () => Navigator.pop(context, const WaypointTask()),
-            child: const Text('Clear Task'),
+            onPressed: () => Navigator.pop(context, _ModeConfigResult()),
+            child: const Text('Clear'),
           ),
         FilledButton(
           onPressed: () {
-            Navigator.pop(context, WaypointTask(
-              type: _selectedType,
-              data: _dataController.text,
-              waitSeconds: _waitSeconds,
+            Navigator.pop(context, _ModeConfigResult(
+              modeId: _selectedModeId,
+              params: {
+                if (_speakController.text.isNotEmpty) 'speak_text': _speakController.text,
+                if (_displayController.text.isNotEmpty) 'display_url': _displayController.text,
+                'wait_seconds': _waitSeconds.toString(),
+                'display_duration': _displayDuration.toString(),
+              },
             ));
           },
           child: const Text('Save'),
@@ -437,42 +527,14 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
     );
   }
 
-  String _getDataLabel() {
-    switch (_selectedType) {
-      case TaskType.speak:
-        return 'Speech Text';
-      case TaskType.display:
-        return 'URL';
-      case TaskType.deliver:
-        return 'Arrival Message';
-      case TaskType.none:
-        return '';
-    }
-  }
-
-  String _getDataHint() {
-    switch (_selectedType) {
-      case TaskType.speak:
-        return 'Your order is ready!';
-      case TaskType.display:
-        return 'https://example.com/video.mp4';
-      case TaskType.deliver:
-        return 'Please collect your items';
-      case TaskType.none:
-        return '';
-    }
-  }
-
-  IconData _getTaskIcon(TaskType type) {
-    switch (type) {
-      case TaskType.deliver:
+  IconData _getModeIcon(String modeId) {
+    switch (modeId) {
+      case 'delivery':
         return Icons.delivery_dining;
-      case TaskType.speak:
-        return Icons.volume_up;
-      case TaskType.display:
-        return Icons.tv;
-      case TaskType.none:
-        return Icons.block;
+      case 'announce':
+        return Icons.campaign;
+      default:
+        return Icons.auto_awesome;
     }
   }
 }
