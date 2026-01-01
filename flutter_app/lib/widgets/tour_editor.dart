@@ -543,33 +543,102 @@ class _TourEditorState extends State<TourEditor> {
           ),
         ),
 
-        // Intro/Outro text for tour start/finish
+        // Start waypoint + intro message
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: TextField(
-            controller: _introTextController,
-            decoration: const InputDecoration(
-              labelText: 'Tour Start Message (spoken at beginning)',
-              hintText: 'Welcome to our facility tour...',
-              prefixIcon: Icon(Icons.play_arrow),
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            maxLines: 2,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Start waypoint dropdown
+              SizedBox(
+                width: 150,
+                child: DropdownButtonFormField<String>(
+                  initialValue: tour.startWaypoint,
+                  decoration: const InputDecoration(
+                    labelText: 'Start At',
+                    prefixIcon: Icon(Icons.play_arrow, size: 20),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                  ),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('(None)')),
+                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem(
+                      value: wp,
+                      child: Text(wp, overflow: TextOverflow.ellipsis),
+                    )),
+                  ],
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedTour = _selectedTour!.copyWith(startWaypoint: value ?? '');
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Start message
+              Expanded(
+                child: TextField(
+                  controller: _introTextController,
+                  decoration: const InputDecoration(
+                    labelText: 'Start Message',
+                    hintText: 'Welcome to our facility tour...',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  maxLines: 2,
+                ),
+              ),
+            ],
           ),
         ),
+        // End waypoint + outro message
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: TextField(
-            controller: _outroTextController,
-            decoration: const InputDecoration(
-              labelText: 'Tour End Message (spoken at completion)',
-              hintText: 'Thank you for visiting...',
-              prefixIcon: Icon(Icons.stop),
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            maxLines: 2,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // End waypoint dropdown
+              SizedBox(
+                width: 150,
+                child: DropdownButtonFormField<String>(
+                  initialValue: tour.endWaypoint,
+                  decoration: const InputDecoration(
+                    labelText: 'End At',
+                    prefixIcon: Icon(Icons.stop, size: 20),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                  ),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('(None)')),
+                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem(
+                      value: wp,
+                      child: Text(wp, overflow: TextOverflow.ellipsis),
+                    )),
+                  ],
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedTour = _selectedTour!.copyWith(endWaypoint: value ?? '');
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              // End message
+              Expanded(
+                child: TextField(
+                  controller: _outroTextController,
+                  decoration: const InputDecoration(
+                    labelText: 'End Message',
+                    hintText: 'Thank you for visiting...',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  maxLines: 2,
+                ),
+              ),
+            ],
           ),
         ),
 

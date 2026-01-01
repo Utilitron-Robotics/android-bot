@@ -606,6 +606,10 @@ class RelayWebSocketServer(
         override fun onOpen() {
             Log.i(TAG, "Client connected")
             onConnectionChanged(this, true)
+            // Re-subscribe to /map to ensure Flutter gets map data
+            // This fixes the issue where first Flutter connection after relay start doesn't get map
+            Log.i(TAG, "Triggering /map re-subscribe for new Flutter client")
+            robotClient.send(SmaitProtocol.subscribeMapSimple())
         }
 
         override fun onClose(code: WebSocketFrame.CloseCode, reason: String, initiatedByRemote: Boolean) {

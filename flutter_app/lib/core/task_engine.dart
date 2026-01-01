@@ -390,19 +390,31 @@ class TaskEngine extends ChangeNotifier {
   /// Execute the mode assigned to a waypoint
   Future<void> executeForWaypoint(String waypoint,
       {String? fromWaypoint}) async {
+    debugPrint('TaskEngine: executeForWaypoint($waypoint) called');
+    debugPrint('TaskEngine: callback=${_callback != null ? "set" : "NULL"}, assignments=${_assignments.length}');
+
     final assignment = _assignments[waypoint];
+    debugPrint('TaskEngine: assignment for $waypoint = ${assignment?.modeId ?? "NONE"}, params=${assignment?.params}');
+
     if (assignment == null || assignment.modeId == null) {
       // No mode - announce arrival and show default display
       // NOTE: Display stays until robot leaves (AudioAnnouncer closes it on nav start)
+      debugPrint('TaskEngine: No mode assigned, showing default display');
       if (_callback != null) {
         _callback!.onDisplayDefault(waypoint);
         _callback!.onSpeak('Arrived at $waypoint');
+      } else {
+        debugPrint('TaskEngine: ERROR - callback is null!');
       }
       return;
     }
 
     final mode = getMode(assignment.modeId!, params: assignment.params);
-    if (mode == null) return;
+    debugPrint('TaskEngine: mode=${mode?.name ?? "NULL"}, steps=${mode?.steps.length ?? 0}');
+    if (mode == null) {
+      debugPrint('TaskEngine: ERROR - mode is null for modeId=${assignment.modeId}');
+      return;
+    }
 
     _currentWaypoint = waypoint;
     _currentMode = mode;
@@ -452,6 +464,7 @@ class TaskEngine extends ChangeNotifier {
         break;
 
       case TaskAction.display:
+        debugPrint('TaskEngine: Displaying URL: ${step.data} for ${step.durationSeconds}s');
         _callback?.onDisplay(step.data, step.durationSeconds);
         if (step.parallel && nextStep != null) {
           _currentStepIndex++;

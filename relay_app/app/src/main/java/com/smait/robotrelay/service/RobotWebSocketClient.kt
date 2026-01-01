@@ -160,8 +160,10 @@ class RobotWebSocketClient(
         send(SmaitProtocol.subscribeLaserData())
         // Subscribe to /map so it's always flowing to Flutter clients
         // This ensures map works after Flutter hot restart
-        send(SmaitProtocol.subscribeMapSimple())
-        Log.i(TAG, "Subscribed to /map (throttled 5s)")
+        val mapSubMsg = SmaitProtocol.subscribeMapSimple()
+        val mapSent = send(mapSubMsg)
+        Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
+        Log.i(TAG, ">>> /map subscription sent: $mapSent")
     }
 
     private fun parseStatusUpdate(json: String) {
