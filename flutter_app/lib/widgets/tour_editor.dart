@@ -20,10 +20,53 @@ class _TourEditorState extends State<TourEditor> {
   Tour? _selectedTour;
   bool _isEditing = false;
 
+  // Managed TextEditingControllers to fix input issues
+  final TextEditingController _tourNameController = TextEditingController();
+  final TextEditingController _introTextController = TextEditingController();
+  final TextEditingController _outroTextController = TextEditingController();
+  final Map<String, TextEditingController> _stopControllers = {};
+
   @override
   void initState() {
     super.initState();
     TourManager.instance.load();
+  }
+
+  @override
+  void dispose() {
+    _tourNameController.dispose();
+    _introTextController.dispose();
+    _outroTextController.dispose();
+    for (final c in _stopControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Get or create a controller for a stop field
+  TextEditingController _getStopController(String stopKey, String initialValue) {
+    if (!_stopControllers.containsKey(stopKey)) {
+      _stopControllers[stopKey] = TextEditingController(text: initialValue);
+    }
+    return _stopControllers[stopKey]!;
+  }
+
+  /// Clear controllers for removed stops
+  void _cleanupStopControllers(Tour tour) {
+    final validKeys = <String>{};
+    for (int i = 0; i < tour.stops.length; i++) {
+      validKeys.add('${tour.id}_${i}_speak');
+      validKeys.add('${tour.id}_${i}_url');
+      validKeys.add('${tour.id}_${i}_duration');
+      validKeys.add('${tour.id}_${i}_wait');
+    }
+    _stopControllers.removeWhere((key, controller) {
+      if (!validKeys.contains(key)) {
+        controller.dispose();
+        return true;
+      }
+      return false;
+    });
   }
 
   void _createNewTour() {
@@ -34,6 +77,9 @@ class _TourEditorState extends State<TourEditor> {
       stops: [],
     );
     TourManager.instance.saveTour(newTour);
+    _tourNameController.text = newTour.name;
+    _introTextController.text = '';
+    _outroTextController.text = '';
     setState(() {
       _selectedTour = newTour;
       _isEditing = true;
@@ -41,6 +87,10 @@ class _TourEditorState extends State<TourEditor> {
   }
 
   void _selectTour(Tour tour) {
+    _tourNameController.text = tour.name;
+    _introTextController.text = tour.introText ?? '';
+    _outroTextController.text = tour.outroText ?? '';
+    _cleanupStopControllers(tour);
     setState(() {
       _selectedTour = tour;
       _isEditing = false;
@@ -77,23 +127,102 @@ class _TourEditorState extends State<TourEditor> {
     );
   }
 
-  void _updateTour(Tour tour) {
-    TourManager.instance.saveTour(tour);
+  void _saveTour() {
+    // Build tour from controller values - no model updates during typing!
+    if (_selectedTour == null) return;
+
+    // Read all values from controllers
+    final stops = <TourStop>[];
+    for (int i = 0; i < _selectedTour!.stops.length; i++) {
+      final oldStop = _selectedTour!.stops[i];
+      stops.add(TourStop(
+        waypoint: oldStop.waypoint,
+        speakText: _stopControllers['${_selectedTour!.id}_${i}_speak']?.text,
+        displayUrl: _stopControllers['${_selectedTour!.id}_${i}_url']?.text,
+        displayDuration: int.tryParse(_stopControllers['${_selectedTour!.id}_${i}_duration']?.text ?? '') ?? 0,
+        waitSeconds: int.tryParse(_stopControllers['${_selectedTour!.id}_${i}_wait']?.text ?? '') ?? 0,
+      ));
+    }
+
+    final updatedTour = Tour(
+      id: _selectedTour!.id,
+      name: _tourNameController.text,
+      description: _selectedTour!.description,
+      stops: stops,
+      loop: _selectedTour!.loop,
+      announceArrival: _selectedTour!.announceArrival,
+      introText: _introTextController.text.isEmpty ? null : _introTextController.text,
+      outroText: _outroTextController.text.isEmpty ? null : _outroTextController.text,
+    );
+
+    _selectedTour = updatedTour;
+    TourManager.instance.saveTour(updatedTour);
+  }
+
+  void _updateTourOptions({bool? loop, bool? announceArrival}) {
+    // Only for checkboxes - these need immediate state update
+    if (_selectedTour == null) return;
     setState(() {
-      _selectedTour = tour;
+      _selectedTour = _selectedTour!.copyWith(
+        loop: loop ?? _selectedTour!.loop,
+        announceArrival: announceArrival ?? _selectedTour!.announceArrival,
+      );
+    });
+  }
+
+  void _addStop(TourStop stop) {
+    if (_selectedTour == null) return;
+    setState(() {
+      _selectedTour = _selectedTour!.addStop(stop);
+    });
+  }
+
+  void _removeStop(int index) {
+    if (_selectedTour == null) return;
+    // Dispose the controllers for this stop
+    _stopControllers.remove('${_selectedTour!.id}_${index}_speak')?.dispose();
+    _stopControllers.remove('${_selectedTour!.id}_${index}_url')?.dispose();
+    _stopControllers.remove('${_selectedTour!.id}_${index}_duration')?.dispose();
+    _stopControllers.remove('${_selectedTour!.id}_${index}_wait')?.dispose();
+    setState(() {
+      _selectedTour = _selectedTour!.removeStop(index);
+    });
+  }
+
+  void _reorderStops(int oldIndex, int newIndex) {
+    if (_selectedTour == null) return;
+    if (newIndex > oldIndex) newIndex--;
+    setState(() {
+      _selectedTour = _selectedTour!.reorderStop(oldIndex, newIndex);
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('TourEditor: build() - isEditing=$_isEditing, selectedTour=${_selectedTour?.name}');
+
+    // When editing, DON'T use ListenableBuilder - completely isolate from rebuilds
+    // This prevents the text input chaos caused by rebuilds resetting cursor position
+    if (_isEditing && _selectedTour != null) {
+      debugPrint('TourEditor: Showing edit form');
+      // Return the form directly - don't wrap in Column (causes Expanded layout issues)
+      return _buildTourEditForm(_selectedTour!);
+    }
+
+    // When not editing, use ListenableBuilder for reactive updates
     return ListenableBuilder(
       listenable: TourManager.instance,
       builder: (context, _) {
         final tours = TourManager.instance.tours;
         final status = TourManager.instance.status;
+        debugPrint('TourEditor: ListenableBuilder - ${tours.length} tours, status=$status');
 
         return Column(
           children: [
+            // Show running tour status prominently at top
+            if (status == TourStatus.running)
+              const TourRunnerWidget(),
+
             // Header with tour list
             _buildHeader(tours, status),
 
@@ -101,9 +230,7 @@ class _TourEditorState extends State<TourEditor> {
             Expanded(
               child: _selectedTour == null
                   ? _buildEmptyState()
-                  : _isEditing
-                      ? _buildTourEditForm(_selectedTour!)
-                      : _buildTourPreview(_selectedTour!),
+                  : _buildTourPreview(_selectedTour!),
             ),
           ],
         );
@@ -174,6 +301,13 @@ class _TourEditorState extends State<TourEditor> {
                   }
                 },
               ),
+            // Delete selected tour
+            if (_selectedTour != null)
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                onPressed: () => _deleteTour(_selectedTour!),
+                tooltip: 'Delete Tour',
+              ),
             const SizedBox(width: 8),
             IconButton(
               icon: const Icon(Icons.add),
@@ -187,15 +321,16 @@ class _TourEditorState extends State<TourEditor> {
   }
 
   Widget _buildEmptyState() {
+    debugPrint('TourEditor: Building empty state');
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.tour_outlined, size: 64, color: Colors.grey[600]),
+          const Icon(Icons.tour_outlined, size: 64, color: Colors.white70),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'No tour selected',
-            style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+            style: TextStyle(fontSize: 18, color: Colors.white70),
           ),
           const SizedBox(height: 8),
           ElevatedButton.icon(
@@ -348,27 +483,30 @@ class _TourEditorState extends State<TourEditor> {
             children: [
               IconButton(
                 icon: const Icon(Icons.arrow_back),
-                onPressed: () => setState(() => _isEditing = false),
+                onPressed: () {
+                  _saveTour();
+                  setState(() => _isEditing = false);
+                },
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: TextField(
-                  controller: TextEditingController(text: tour.name),
+                  controller: _tourNameController,
                   decoration: const InputDecoration(
                     labelText: 'Tour Name',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  onChanged: (value) {
-                    _updateTour(tour.copyWith(name: value));
-                  },
                 ),
               ),
               const SizedBox(width: 8),
               TextButton.icon(
                 icon: const Icon(Icons.done),
                 label: const Text('Done'),
-                onPressed: () => setState(() => _isEditing = false),
+                onPressed: () {
+                  _saveTour();
+                  setState(() => _isEditing = false);
+                },
               ),
             ],
           ),
@@ -384,7 +522,7 @@ class _TourEditorState extends State<TourEditor> {
                   title: const Text('Loop', style: TextStyle(fontSize: 14)),
                   value: tour.loop,
                   dense: true,
-                  onChanged: (v) => _updateTour(tour.copyWith(loop: v)),
+                  onChanged: (v) => _updateTourOptions(loop: v),
                 ),
               ),
               Expanded(
@@ -392,10 +530,40 @@ class _TourEditorState extends State<TourEditor> {
                   title: const Text('Announce', style: TextStyle(fontSize: 14)),
                   value: tour.announceArrival,
                   dense: true,
-                  onChanged: (v) => _updateTour(tour.copyWith(announceArrival: v)),
+                  onChanged: (v) => _updateTourOptions(announceArrival: v),
                 ),
               ),
             ],
+          ),
+        ),
+
+        // Intro/Outro text for tour start/finish
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: TextField(
+            controller: _introTextController,
+            decoration: const InputDecoration(
+              labelText: 'Tour Start Message (spoken at beginning)',
+              hintText: 'Welcome to our facility tour...',
+              prefixIcon: Icon(Icons.play_arrow),
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            maxLines: 2,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: TextField(
+            controller: _outroTextController,
+            decoration: const InputDecoration(
+              labelText: 'Tour End Message (spoken at completion)',
+              hintText: 'Thank you for visiting...',
+              prefixIcon: Icon(Icons.stop),
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            maxLines: 2,
           ),
         ),
 
@@ -429,10 +597,7 @@ class _TourEditorState extends State<TourEditor> {
               : ReorderableListView.builder(
                   padding: const EdgeInsets.all(8),
                   itemCount: tour.stops.length,
-                  onReorder: (oldIndex, newIndex) {
-                    if (newIndex > oldIndex) newIndex--;
-                    _updateTour(tour.reorderStop(oldIndex, newIndex));
-                  },
+                  onReorder: _reorderStops,
                   itemBuilder: (ctx, index) {
                     final stop = tour.stops[index];
                     return _buildStopEditCard(tour, stop, index);
@@ -468,7 +633,7 @@ class _TourEditorState extends State<TourEditor> {
             : null,
         trailing: IconButton(
           icon: const Icon(Icons.delete, size: 20),
-          onPressed: () => _updateTour(tour.removeStop(index)),
+          onPressed: () => _removeStop(index),
         ),
         children: [
           Padding(
@@ -476,9 +641,9 @@ class _TourEditorState extends State<TourEditor> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Speak text
+                // Speak text - NO onChanged, read from controller on save
                 TextField(
-                  controller: TextEditingController(text: stop.speakText ?? ''),
+                  controller: _getStopController('${tour.id}_${index}_speak', stop.speakText ?? ''),
                   decoration: const InputDecoration(
                     labelText: 'Speak Text (TTS)',
                     hintText: 'What to say at this stop...',
@@ -487,18 +652,12 @@ class _TourEditorState extends State<TourEditor> {
                     isDense: true,
                   ),
                   maxLines: 3,
-                  onChanged: (value) {
-                    _updateTour(tour.updateStop(
-                      index,
-                      stop.copyWith(speakText: value.isEmpty ? null : value),
-                    ));
-                  },
                 ),
                 const SizedBox(height: 12),
 
-                // Display URL
+                // Display URL - NO onChanged
                 TextField(
-                  controller: TextEditingController(text: stop.displayUrl ?? ''),
+                  controller: _getStopController('${tour.id}_${index}_url', stop.displayUrl ?? ''),
                   decoration: const InputDecoration(
                     labelText: 'Display URL (website/image)',
                     hintText: 'https://...',
@@ -506,51 +665,33 @@ class _TourEditorState extends State<TourEditor> {
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
-                  onChanged: (value) {
-                    _updateTour(tour.updateStop(
-                      index,
-                      stop.copyWith(displayUrl: value.isEmpty ? null : value),
-                    ));
-                  },
                 ),
                 const SizedBox(height: 12),
 
-                // Duration and wait
+                // Duration and wait - NO onChanged
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: TextEditingController(text: stop.displayDuration.toString()),
+                        controller: _getStopController('${tour.id}_${index}_duration', stop.displayDuration.toString()),
                         decoration: const InputDecoration(
                           labelText: 'Display (sec)',
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
                         keyboardType: TextInputType.number,
-                        onChanged: (value) {
-                          _updateTour(tour.updateStop(
-                            index,
-                            stop.copyWith(displayDuration: int.tryParse(value) ?? 0),
-                          ));
-                        },
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextField(
-                        controller: TextEditingController(text: stop.waitSeconds.toString()),
+                        controller: _getStopController('${tour.id}_${index}_wait', stop.waitSeconds.toString()),
                         decoration: const InputDecoration(
                           labelText: 'Extra Wait (sec)',
                           border: OutlineInputBorder(),
                           isDense: true,
                         ),
                         keyboardType: TextInputType.number,
-                        onChanged: (value) {
-                          _updateTour(tour.updateStop(
-                            index,
-                            stop.copyWith(waitSeconds: int.tryParse(value) ?? 0),
-                          ));
-                        },
                       ),
                     ),
                   ],
@@ -592,7 +733,7 @@ class _TourEditorState extends State<TourEditor> {
                 leading: const Icon(Icons.location_on),
                 title: Text(wp),
                 onTap: () {
-                  _updateTour(tour.addStop(TourStop(waypoint: wp)));
+                  _addStop(TourStop(waypoint: wp));
                   Navigator.pop(ctx);
                 },
               );

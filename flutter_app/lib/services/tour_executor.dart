@@ -61,6 +61,29 @@ class TourExecutor implements TourExecutorCallback {
   }
 
   @override
+  void onDisplayDefault(String waypoint) {
+    debugPrint('TourExecutor: Displaying default branding for: $waypoint');
+    // Format waypoint name nicely
+    final displayName = waypoint
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((word) => word.isEmpty ? '' : '${word[0].toUpperCase()}${word.substring(1)}')
+        .join(' ');
+
+    // Show company branding with waypoint name
+    // TODO: Make company name configurable
+    const companyName = 'Welcome';
+    final html = '''data:text/html,<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;background:linear-gradient(135deg,%231a1a2e 0%,%2316213e 100%);">
+  <h1 style="color:white;font-size:48px;font-family:sans-serif;margin-bottom:20px;">$companyName</h1>
+  <h2 style="color:%2300d9ff;font-size:64px;font-family:sans-serif;text-shadow:0 0 20px %2300d9ff;">$displayName</h2>
+</body></html>''';
+
+    _robot?.client.tabletDisplay(html.replaceAll('\n', ''));
+  }
+
+  @override
   void onCloseDisplay() {
     debugPrint('TourExecutor: Closing display');
     _robot?.client.tabletCloseDisplay();

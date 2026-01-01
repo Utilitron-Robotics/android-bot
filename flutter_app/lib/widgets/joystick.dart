@@ -39,8 +39,10 @@ class JoystickControl extends StatefulWidget {
 }
 
 class _JoystickControlState extends State<JoystickControl> {
-  double _linearVel = 0;
+  double _linearVel = 0;       // Target velocity from joystick
   double _angularVel = 0;
+  double _actualLinear = 0;    // Actual velocity being sent (for ramping)
+  double _actualAngular = 0;
   Timer? _sendTimer;
   bool _slamSafe = false; // SLAM-safe mode (slower, stops on obstacles)
   bool _audioEnabled = true;
@@ -62,6 +64,11 @@ class _JoystickControlState extends State<JoystickControl> {
   static const double creepDistance = 0.50;   // meters - creep speed
   static const double warnDistance = 0.80;    // meters - warning only
   static const double creepSpeed = 0.05;      // m/s - very slow creep
+
+  // Acceleration limits for smooth ramping (per 100ms tick)
+  static const double linearAccel = 0.08;     // m/s per tick - accelerate
+  static const double linearDecel = 0.12;     // m/s per tick - decelerate (faster)
+  static const double angularAccel = 0.15;    // rad/s per tick
 
   // SLAM Safe allows full speed - obstacle avoidance handles slowing
   double get _maxLinear => maxLinearFast;
@@ -337,13 +344,13 @@ class _JoystickControlState extends State<JoystickControl> {
             ),
             const SizedBox(height: 16),
 
-            // Velocity and Distance display
+            // Velocity and Distance display (shows actual ramped velocity)
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _VelocityIndicator(
                   label: 'Linear',
-                  value: _linearVel,
+                  value: _actualLinear,  // Show actual velocity being sent
                   max: _maxLinear,
                   unit: 'm/s',
                 ),
@@ -358,7 +365,7 @@ class _JoystickControlState extends State<JoystickControl> {
                 const SizedBox(width: 24),
                 _VelocityIndicator(
                   label: 'Angular',
-                  value: _angularVel,
+                  value: _actualAngular,  // Show actual velocity being sent
                   max: _maxAngular,
                   unit: 'rad/s',
                 ),
@@ -451,51 +458,103 @@ class _JoystickControlState extends State<JoystickControl> {
   }
 
   void _onPanEnd(DragEndDetails details) {
-    _sendTimer?.cancel();
+    // Don't cancel timer immediately - let ramping bring velocity down smoothly
     setState(() {
       _linearVel = 0;
       _angularVel = 0;
     });
-    _sendVelocity(); // Send zero to stop
+
+    // Keep sending until velocities ramp down to zero
+    Future.delayed(const Duration(milliseconds: 100), _rampDownToStop);
+  }
+
+  void _rampDownToStop() {
+    if (_actualLinear.abs() < 0.01 && _actualAngular.abs() < 0.01) {
+      // Fully stopped, cancel timer
+      _sendTimer?.cancel();
+      setState(() {
+        _actualLinear = 0;
+        _actualAngular = 0;
+      });
+      // Send final zero command
+      context.read<RobotConnection>().sendVelocity(0, 0);
+      return;
+    }
+
+    // Continue ramping down
+    _sendVelocity();
+    if (mounted) {
+      setState(() {});  // Update display
+      Future.delayed(const Duration(milliseconds: 100), _rampDownToStop);
+    }
   }
 
   void _sendVelocity() {
     final robot = context.read<RobotConnection>();
 
-    double linear = _linearVel;
-    double angular = _angularVel;
+    // Calculate target velocity based on joystick and obstacles
+    double targetLinear = _linearVel;
+    double targetAngular = _angularVel;
 
     // In SLAM Safe mode, graduated obstacle response
-    if (_slamSafe && linear > 0) {
+    if (_slamSafe && targetLinear > 0) {
       final dist = _minFrontRange;
 
       if (dist < stopDistance) {
         // STOP ZONE: Too close - no forward motion at all
-        linear = 0;
+        targetLinear = 0;
       } else if (dist < creepDistance) {
         // CREEP ZONE: Scale speed based on distance
         // At stopDistance: creepSpeed (0.05), at creepDistance: 0.15 m/s
         final t = (dist - stopDistance) / (creepDistance - stopDistance);
         final maxCreep = creepSpeed + t * (0.15 - creepSpeed);
-        linear = linear.clamp(-maxCreep, maxCreep);
+        targetLinear = targetLinear.clamp(-maxCreep, maxCreep);
       } else if (dist < warnDistance) {
         // WARNING ZONE: Half speed max
-        linear = linear.clamp(-maxLinearFast / 2, maxLinearFast / 2);
+        targetLinear = targetLinear.clamp(-maxLinearFast / 2, maxLinearFast / 2);
       }
       // Beyond warnDistance: full speed allowed
     }
 
     // Reduce turning towards obstacles
     if (_slamSafe) {
-      if (_obstacleLeft && angular > 0) {
-        angular = angular * 0.3;
+      if (_obstacleLeft && targetAngular > 0) {
+        targetAngular = targetAngular * 0.3;
       }
-      if (_obstacleRight && angular < 0) {
-        angular = angular * 0.3;
+      if (_obstacleRight && targetAngular < 0) {
+        targetAngular = targetAngular * 0.3;
       }
     }
 
-    robot.sendVelocity(linear, angular);
+    // Apply velocity ramping for smooth acceleration/deceleration
+    // This prevents lurching when speed limits change suddenly
+    _actualLinear = _rampVelocity(_actualLinear, targetLinear, linearAccel, linearDecel);
+    _actualAngular = _rampVelocity(_actualAngular, targetAngular, angularAccel, angularAccel);
+
+    robot.sendVelocity(_actualLinear, _actualAngular);
+  }
+
+  /// Smoothly ramp velocity towards target with acceleration limits
+  double _rampVelocity(double current, double target, double accel, double decel) {
+    final diff = target - current;
+    if (diff.abs() < 0.01) {
+      // Close enough, snap to target
+      return target;
+    }
+
+    // Determine if accelerating or decelerating
+    // Decelerating = moving towards zero OR reducing magnitude
+    final isDecelerating = target.abs() < current.abs() ||
+                           (current > 0 && target < current) ||
+                           (current < 0 && target > current);
+
+    final rate = isDecelerating ? decel : accel;
+
+    if (diff > 0) {
+      return (current + rate).clamp(current, target);
+    } else {
+      return (current - rate).clamp(target, current);
+    }
   }
 }
 

@@ -21,9 +21,9 @@ enum TaskAction {
 class TaskStep {
   final String id;
   final TaskAction action;
-  final String data;           // Text for speak, URL for display, waypoint for navigate
-  final int durationSeconds;   // How long (for wait, display timeout)
-  final bool parallel;         // Run with next step in parallel?
+  final String data; // Text for speak, URL for display, waypoint for navigate
+  final int durationSeconds; // How long (for wait, display timeout)
+  final bool parallel; // Run with next step in parallel?
 
   const TaskStep({
     required this.id,
@@ -34,23 +34,24 @@ class TaskStep {
   });
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'action': action.name,
-    'data': data,
-    'duration_seconds': durationSeconds,
-    'parallel': parallel,
-  };
+        'id': id,
+        'action': action.name,
+        'data': data,
+        'duration_seconds': durationSeconds,
+        'parallel': parallel,
+      };
 
   factory TaskStep.fromJson(Map<String, dynamic> json) => TaskStep(
-    id: json['id'] as String? ?? DateTime.now().millisecondsSinceEpoch.toString(),
-    action: TaskAction.values.firstWhere(
-      (a) => a.name == json['action'],
-      orElse: () => TaskAction.speak,
-    ),
-    data: json['data'] as String? ?? '',
-    durationSeconds: json['duration_seconds'] as int? ?? 0,
-    parallel: json['parallel'] as bool? ?? false,
-  );
+        id: json['id'] as String? ??
+            DateTime.now().millisecondsSinceEpoch.toString(),
+        action: TaskAction.values.firstWhere(
+          (a) => a.name == json['action'],
+          orElse: () => TaskAction.speak,
+        ),
+        data: json['data'] as String? ?? '',
+        durationSeconds: json['duration_seconds'] as int? ?? 0,
+        parallel: json['parallel'] as bool? ?? false,
+      );
 
   TaskStep copyWith({
     String? id,
@@ -58,13 +59,14 @@ class TaskStep {
     String? data,
     int? durationSeconds,
     bool? parallel,
-  }) => TaskStep(
-    id: id ?? this.id,
-    action: action ?? this.action,
-    data: data ?? this.data,
-    durationSeconds: durationSeconds ?? this.durationSeconds,
-    parallel: parallel ?? this.parallel,
-  );
+  }) =>
+      TaskStep(
+        id: id ?? this.id,
+        action: action ?? this.action,
+        data: data ?? this.data,
+        durationSeconds: durationSeconds ?? this.durationSeconds,
+        parallel: parallel ?? this.parallel,
+      );
 }
 
 /// A mode is a named group of ordered task steps
@@ -73,8 +75,8 @@ class TaskMode {
   final String name;
   final String description;
   final List<TaskStep> steps;
-  final bool announceArrival;   // Say "Arrived at [waypoint]" first
-  final bool isBuiltIn;         // Delivery, Tour are built-in
+  final bool announceArrival; // Say "Arrived at [waypoint]" first
+  final bool isBuiltIn; // Delivery, Tour are built-in
 
   const TaskMode({
     required this.id,
@@ -90,58 +92,79 @@ class TaskMode {
     String speakText = 'Your delivery has arrived',
     String displayUrl = '',
     int waitSeconds = 30,
-  }) => TaskMode(
-    id: 'delivery',
-    name: 'Delivery',
-    description: 'Announce arrival, wait for pickup, return to origin',
-    isBuiltIn: true,
-    steps: [
-      if (speakText.isNotEmpty)
-        TaskStep(id: '1', action: TaskAction.speak, data: speakText, parallel: displayUrl.isNotEmpty),
-      if (displayUrl.isNotEmpty)
-        TaskStep(id: '2', action: TaskAction.display, data: displayUrl, durationSeconds: waitSeconds),
-      TaskStep(id: '3', action: TaskAction.wait, durationSeconds: waitSeconds),
-      TaskStep(id: '4', action: TaskAction.returnOrigin),
-    ],
-  );
+  }) =>
+      TaskMode(
+        id: 'delivery',
+        name: 'Delivery',
+        description: 'Announce arrival, wait for pickup, return to origin',
+        isBuiltIn: true,
+        steps: [
+          if (speakText.isNotEmpty)
+            TaskStep(
+                id: '1',
+                action: TaskAction.speak,
+                data: speakText,
+                parallel: displayUrl.isNotEmpty),
+          if (displayUrl.isNotEmpty)
+            TaskStep(
+                id: '2',
+                action: TaskAction.display,
+                data: displayUrl,
+                durationSeconds: waitSeconds),
+          TaskStep(
+              id: '3', action: TaskAction.wait, durationSeconds: waitSeconds),
+          const TaskStep(id: '4', action: TaskAction.returnOrigin),
+        ],
+      );
 
   /// Built-in Announce mode: just speak + display (no return)
   static TaskMode announce({
     String speakText = '',
     String displayUrl = '',
     int displayDuration = 5,
-  }) => TaskMode(
-    id: 'announce',
-    name: 'Announce',
-    description: 'Speak and/or display content',
-    isBuiltIn: true,
-    steps: [
-      if (speakText.isNotEmpty)
-        TaskStep(id: '1', action: TaskAction.speak, data: speakText, parallel: displayUrl.isNotEmpty),
-      if (displayUrl.isNotEmpty)
-        TaskStep(id: '2', action: TaskAction.display, data: displayUrl, durationSeconds: displayDuration),
-    ],
-  );
+  }) =>
+      TaskMode(
+        id: 'announce',
+        name: 'Announce',
+        description: 'Speak and/or display content',
+        isBuiltIn: true,
+        steps: [
+          if (speakText.isNotEmpty)
+            TaskStep(
+                id: '1',
+                action: TaskAction.speak,
+                data: speakText,
+                parallel: displayUrl.isNotEmpty),
+          if (displayUrl.isNotEmpty)
+            TaskStep(
+                id: '2',
+                action: TaskAction.display,
+                data: displayUrl,
+                durationSeconds: displayDuration),
+        ],
+      );
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'description': description,
-    'steps': steps.map((s) => s.toJson()).toList(),
-    'announce_arrival': announceArrival,
-    'is_built_in': isBuiltIn,
-  };
+        'id': id,
+        'name': name,
+        'description': description,
+        'steps': steps.map((s) => s.toJson()).toList(),
+        'announce_arrival': announceArrival,
+        'is_built_in': isBuiltIn,
+      };
 
   factory TaskMode.fromJson(Map<String, dynamic> json) => TaskMode(
-    id: json['id'] as String? ?? DateTime.now().millisecondsSinceEpoch.toString(),
-    name: json['name'] as String? ?? 'Custom',
-    description: json['description'] as String? ?? '',
-    steps: (json['steps'] as List<dynamic>?)
-        ?.map((s) => TaskStep.fromJson(s as Map<String, dynamic>))
-        .toList() ?? [],
-    announceArrival: json['announce_arrival'] as bool? ?? true,
-    isBuiltIn: json['is_built_in'] as bool? ?? false,
-  );
+        id: json['id'] as String? ??
+            DateTime.now().millisecondsSinceEpoch.toString(),
+        name: json['name'] as String? ?? 'Custom',
+        description: json['description'] as String? ?? '',
+        steps: (json['steps'] as List<dynamic>?)
+                ?.map((s) => TaskStep.fromJson(s as Map<String, dynamic>))
+                .toList() ??
+            [],
+        announceArrival: json['announce_arrival'] as bool? ?? true,
+        isBuiltIn: json['is_built_in'] as bool? ?? false,
+      );
 
   TaskMode copyWith({
     String? id,
@@ -150,21 +173,23 @@ class TaskMode {
     List<TaskStep>? steps,
     bool? announceArrival,
     bool? isBuiltIn,
-  }) => TaskMode(
-    id: id ?? this.id,
-    name: name ?? this.name,
-    description: description ?? this.description,
-    steps: steps ?? this.steps,
-    announceArrival: announceArrival ?? this.announceArrival,
-    isBuiltIn: isBuiltIn ?? this.isBuiltIn,
-  );
+  }) =>
+      TaskMode(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        description: description ?? this.description,
+        steps: steps ?? this.steps,
+        announceArrival: announceArrival ?? this.announceArrival,
+        isBuiltIn: isBuiltIn ?? this.isBuiltIn,
+      );
 }
 
 /// Waypoint task assignment - links a waypoint to a mode
 class WaypointModeAssignment {
   final String waypointId;
-  final String? modeId;           // null = no task (just announce arrival)
-  final Map<String, String> params; // Mode-specific params (speakText, displayUrl, etc)
+  final String? modeId; // null = no task (just announce arrival)
+  final Map<String, String>
+      params; // Mode-specific params (speakText, displayUrl, etc)
 
   const WaypointModeAssignment({
     required this.waypointId,
@@ -173,18 +198,20 @@ class WaypointModeAssignment {
   });
 
   Map<String, dynamic> toJson() => {
-    'waypoint_id': waypointId,
-    if (modeId != null) 'mode_id': modeId,
-    if (params.isNotEmpty) 'params': params,
-  };
+        'waypoint_id': waypointId,
+        if (modeId != null) 'mode_id': modeId,
+        if (params.isNotEmpty) 'params': params,
+      };
 
-  factory WaypointModeAssignment.fromJson(Map<String, dynamic> json) => WaypointModeAssignment(
-    waypointId: json['waypoint_id'] as String? ?? '',
-    modeId: json['mode_id'] as String?,
-    params: (json['params'] as Map<String, dynamic>?)?.map(
-      (k, v) => MapEntry(k, v.toString()),
-    ) ?? {},
-  );
+  factory WaypointModeAssignment.fromJson(Map<String, dynamic> json) =>
+      WaypointModeAssignment(
+        waypointId: json['waypoint_id'] as String? ?? '',
+        modeId: json['mode_id'] as String?,
+        params: (json['params'] as Map<String, dynamic>?)?.map(
+              (k, v) => MapEntry(k, v.toString()),
+            ) ??
+            {},
+      );
 }
 
 /// Callback interface for task execution
@@ -211,7 +238,7 @@ class TaskEngine extends ChangeNotifier {
   TaskMode? _currentMode;
   int _currentStepIndex = 0;
   bool _isExecuting = false;
-  String? _originWaypoint;  // For return-to-origin
+  String? _originWaypoint; // For return-to-origin
   Timer? _waitTimer;
   TaskExecutorCallback? _callback;
 
@@ -252,12 +279,14 @@ class TaskEngine extends ChangeNotifier {
       if (assignJson != null) {
         final assigns = jsonDecode(assignJson) as Map<String, dynamic>;
         assigns.forEach((wp, data) {
-          _assignments[wp] = WaypointModeAssignment.fromJson(data as Map<String, dynamic>);
+          _assignments[wp] =
+              WaypointModeAssignment.fromJson(data as Map<String, dynamic>);
         });
       }
 
       _loaded = true;
-      debugPrint('TaskEngine: Loaded ${_modes.length} modes, ${_assignments.length} assignments');
+      debugPrint(
+          'TaskEngine: Loaded ${_modes.length} modes, ${_assignments.length} assignments');
     } catch (e) {
       debugPrint('TaskEngine: Failed to load: $e');
     }
@@ -270,7 +299,8 @@ class TaskEngine extends ChangeNotifier {
 
       // Save custom modes (not built-in)
       final modesJson = jsonEncode(
-        Map.fromEntries(_modes.entries.where((e) => !e.value.isBuiltIn)
+        Map.fromEntries(_modes.entries
+            .where((e) => !e.value.isBuiltIn)
             .map((e) => MapEntry(e.key, e.value.toJson()))),
       );
       await prefs.setString(_modesKey, modesJson);
@@ -281,7 +311,8 @@ class TaskEngine extends ChangeNotifier {
       );
       await prefs.setString(_assignmentsKey, assignJson);
 
-      debugPrint('TaskEngine: Saved ${_modes.length} modes, ${_assignments.length} assignments');
+      debugPrint(
+          'TaskEngine: Saved ${_modes.length} modes, ${_assignments.length} assignments');
     } catch (e) {
       debugPrint('TaskEngine: Failed to save: $e');
     }
@@ -313,7 +344,8 @@ class TaskEngine extends ChangeNotifier {
   }
 
   /// Assign a mode to a waypoint
-  void assignMode(String waypoint, String? modeId, {Map<String, String> params = const {}}) {
+  void assignMode(String waypoint, String? modeId,
+      {Map<String, String> params = const {}}) {
     if (modeId == null) {
       _assignments.remove(waypoint);
     } else {
@@ -328,7 +360,8 @@ class TaskEngine extends ChangeNotifier {
   }
 
   /// Get the mode assignment for a waypoint
-  WaypointModeAssignment? getAssignment(String waypoint) => _assignments[waypoint];
+  WaypointModeAssignment? getAssignment(String waypoint) =>
+      _assignments[waypoint];
 
   /// Get a mode by ID (with parameter substitution)
   TaskMode? getMode(String modeId, {Map<String, String> params = const {}}) {
@@ -354,7 +387,8 @@ class TaskEngine extends ChangeNotifier {
   bool hasMode(String waypoint) => _assignments.containsKey(waypoint);
 
   /// Execute the mode assigned to a waypoint
-  Future<void> executeForWaypoint(String waypoint, {String? fromWaypoint}) async {
+  Future<void> executeForWaypoint(String waypoint,
+      {String? fromWaypoint}) async {
     final assignment = _assignments[waypoint];
     if (assignment == null || assignment.modeId == null) {
       // No mode - just announce arrival if callback set
@@ -397,7 +431,8 @@ class TaskEngine extends ChangeNotifier {
         ? _currentMode!.steps[_currentStepIndex + 1]
         : null;
 
-    debugPrint('TaskEngine: Executing step ${_currentStepIndex + 1}/${_currentMode!.steps.length}: ${step.action.name}');
+    debugPrint(
+        'TaskEngine: Executing step ${_currentStepIndex + 1}/${_currentMode!.steps.length}: ${step.action.name}');
 
     switch (step.action) {
       case TaskAction.speak:
@@ -406,7 +441,8 @@ class TaskEngine extends ChangeNotifier {
           _currentStepIndex++;
           _executeNextStep(); // Run next in parallel
         } else {
-          await Future.delayed(const Duration(seconds: 2)); // Rough TTS duration
+          await Future.delayed(
+              const Duration(seconds: 2)); // Rough TTS duration
           _currentStepIndex++;
           _executeNextStep();
         }
@@ -479,7 +515,9 @@ class TaskEngine extends ChangeNotifier {
   Future<bool> syncFromRelay(String relayUrl) async {
     try {
       final response = await http.get(Uri.parse('$relayUrl/config'));
-      if (response.statusCode == 200 && response.body.isNotEmpty && response.body != '{}') {
+      if (response.statusCode == 200 &&
+          response.body.isNotEmpty &&
+          response.body != '{}') {
         final json = jsonDecode(response.body) as Map<String, dynamic>;
 
         // Load assignments
@@ -487,7 +525,8 @@ class TaskEngine extends ChangeNotifier {
           _assignments.clear();
           final assigns = json['assignments'] as Map<String, dynamic>;
           assigns.forEach((wp, data) {
-            _assignments[wp] = WaypointModeAssignment.fromJson(data as Map<String, dynamic>);
+            _assignments[wp] =
+                WaypointModeAssignment.fromJson(data as Map<String, dynamic>);
           });
         }
 
@@ -504,7 +543,8 @@ class TaskEngine extends ChangeNotifier {
 
         await save();
         notifyListeners();
-        debugPrint('TaskEngine: Synced ${_assignments.length} assignments from relay');
+        debugPrint(
+            'TaskEngine: Synced ${_assignments.length} assignments from relay');
         return true;
       }
       return false;
@@ -519,7 +559,8 @@ class TaskEngine extends ChangeNotifier {
     try {
       final config = {
         'assignments': _assignments.map((k, v) => MapEntry(k, v.toJson())),
-        'modes': Map.fromEntries(_modes.entries.where((e) => !e.value.isBuiltIn)
+        'modes': Map.fromEntries(_modes.entries
+            .where((e) => !e.value.isBuiltIn)
             .map((e) => MapEntry(e.key, e.value.toJson()))),
       };
 
@@ -530,7 +571,8 @@ class TaskEngine extends ChangeNotifier {
       );
 
       if (response.statusCode == 200) {
-        debugPrint('TaskEngine: Synced ${_assignments.length} assignments to relay');
+        debugPrint(
+            'TaskEngine: Synced ${_assignments.length} assignments to relay');
         return true;
       }
       return false;
@@ -544,7 +586,8 @@ class TaskEngine extends ChangeNotifier {
   String exportConfig() {
     return jsonEncode({
       'assignments': _assignments.map((k, v) => MapEntry(k, v.toJson())),
-      'modes': Map.fromEntries(_modes.entries.where((e) => !e.value.isBuiltIn)
+      'modes': Map.fromEntries(_modes.entries
+          .where((e) => !e.value.isBuiltIn)
           .map((e) => MapEntry(e.key, e.value.toJson()))),
     });
   }
@@ -558,7 +601,8 @@ class TaskEngine extends ChangeNotifier {
         _assignments.clear();
         final assigns = data['assignments'] as Map<String, dynamic>;
         assigns.forEach((wp, d) {
-          _assignments[wp] = WaypointModeAssignment.fromJson(d as Map<String, dynamic>);
+          _assignments[wp] =
+              WaypointModeAssignment.fromJson(d as Map<String, dynamic>);
         });
       }
 
