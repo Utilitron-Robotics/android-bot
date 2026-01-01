@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RobotRelay" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#00ff88</item>
+        <item name="colorPrimaryVariant">#00aa55</item>
+        <item name="colorOnPrimary">#000000</item>
+        <item name="colorSecondary">#446688</item>
+        <item name="colorSecondaryVariant">#334455</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="android:statusBarColor">#1a1a2e</item>
+        <item name="android:navigationBarColor">#1a1a2e</item>
+        <item name="android:windowBackground">#1a1a2e</item>
+    </style>
+</resources>

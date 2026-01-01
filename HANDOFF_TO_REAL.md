@@ -13,7 +13,7 @@ To deploy this application to control a **real robot**, you must reconfigure the
 We need to swap the data source implementation from the fake simulation to the real network repository.
 
 1.  Open the following file:
-    [`android/app/src/main/java/com/opendroids/tourbot/di/RepositoryModule.kt`](app/src/main/java/com/opendroids/tourbot/di/RepositoryModule.kt)
+    [`app/src/main/java/com/opendroids/tourbot/di/RepositoryModule.kt`](app/src/main/java/com/opendroids/tourbot/di/RepositoryModule.kt)
 
 2.  **Comment out** the `FakeTourRepository` binding.
 3.  **Uncomment** the `RealTourRepository` binding.
@@ -59,7 +59,7 @@ Ensure the application points to the correct WebSocket URL for your physical rob
 *Note: The network configuration is managed by `SettingsManager`, not `TourManager`.*
 
 1.  Open the settings manager:
-    [`android/app/src/main/java/com/opendroids/tourbot/data/settings/SettingsManager.kt`](app/src/main/java/com/opendroids/tourbot/data/settings/SettingsManager.kt)
+    [`app/src/main/java/com/opendroids/tourbot/data/settings/SettingsManager.kt`](app/src/main/java/com/opendroids/tourbot/data/settings/SettingsManager.kt)
 
 2.  Locate the default value in the `robotUrl` flow mapping.
 
@@ -85,7 +85,7 @@ val robotUrl: Flow<String> = settingsDataStore.data
 The `TourManager` contains a safety check that auto-completes navigation when using the fake repository. While safe to keep (as it checks `is FakeTourRepository`), removing it keeps the code clean.
 
 1.  Open `TourManager`:
-    [`android/app/src/main/java/com/opendroids/tourbot/logic/TourManager.kt`](app/src/main/java/com/opendroids/tourbot/logic/TourManager.kt)
+    [`app/src/main/java/com/opendroids/tourbot/logic/TourManager.kt`](app/src/main/java/com/opendroids/tourbot/logic/TourManager.kt)
 
 2.  Locate the `waitForArrival` function and the following block:
 
@@ -108,10 +108,9 @@ Use the included deployment script to build and install the application on your 
 
 1.  Connect your Android device via USB.
 2.  Ensure USB Debugging is enabled on the device.
-3.  Run the deployment script from the `android/` directory:
+3.  Run the deployment script from the project root:
 
 ```bash
-cd android
 ./deploy.sh
 ```
 

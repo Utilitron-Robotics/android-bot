@@ -1,0 +1,47 @@
+name: droid_controller
+description: Universal robot control app with dynamic UI from rosbridge introspection
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # WebSocket for rosbridge
+  web_socket_channel: ^2.4.0
+
+  # State management (simple)
+  provider: ^6.1.1
+
+  # JSON serialization
+  json_annotation: ^4.8.1
+
+  # Local storage for robot IP
+  shared_preferences: ^2.2.2
+
+  # Speech recognition (voice commands) - disabled due to Kotlin compat issue
+  # speech_to_text: ^6.6.0
+
+  # Permissions - disabled with speech
+  # permission_handler: ^11.1.0
+
+  # HTTP client for relay
+  http: ^1.1.0
+
+  # Text-to-speech for announcements
+  flutter_tts: ^4.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  build_runner: ^2.4.7
+  json_serializable: ^6.7.1
+
+flutter:
+  uses-material-design: true
