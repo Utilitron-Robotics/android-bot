@@ -53,6 +53,15 @@ class RobotWebSocketClient(
     private val _incomingMessages = MutableSharedFlow<String>(extraBufferCapacity = 500)
     val incomingMessages: SharedFlow<String> = _incomingMessages
 
+    // Cache the latest map message for HTTP transport (more reliable than WS for big payloads)
+    @Volatile
+    private var _cachedMapMessage: String? = null
+    val cachedMapMessage: String? get() = _cachedMapMessage
+
+    @Volatile
+    private var _mapLastUpdated: Long = 0
+    val mapLastUpdated: Long get() = _mapLastUpdated
+
     private val _robotStatus = MutableStateFlow<RobotStatusData?>(null)
     val robotStatus: StateFlow<RobotStatusData?> = _robotStatus
 
@@ -89,6 +98,10 @@ class RobotWebSocketClient(
             val isMapMsg = text.contains("\"/map\"") || text.contains("\"topic\":\"/map\"")
             if (isMapMsg) {
                 Log.i(TAG, ">>> RECEIVED /map message (${text.length} bytes)")
+                // Cache the map for HTTP transport - more reliable than WS for big payloads
+                _cachedMapMessage = text
+                _mapLastUpdated = System.currentTimeMillis()
+                Log.i(TAG, ">>> Map cached for HTTP transport")
             } else {
                 Log.d(TAG, text.take(200)) // Truncate other messages
             }
@@ -164,6 +177,44 @@ class RobotWebSocketClient(
         val mapSent = send(mapSubMsg)
         Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
         Log.i(TAG, ">>> /map subscription sent: $mapSent")
+    }
+
+    /**
+     * Force a map refresh by unsubscribing and resubscribing.
+     * This triggers the robot to resend the current map data.
+     * Uses a more aggressive retry pattern to ensure we get the map.
+     */
+    fun refreshMap() {
+        if (_connectionState.value != ConnectionState.CONNECTED) {
+            Log.w(TAG, "Cannot refresh map - not connected to robot")
+            return
+        }
+
+        scope.launch {
+            Log.i(TAG, ">>> MAP REFRESH: Starting aggressive refresh sequence")
+
+            // Step 1: Unsubscribe first to clear any stale state
+            val unsubMsg = SmaitProtocol.unsubscribe(SmaitProtocol.TOPIC_MAP, "get_map_simple")
+            send(unsubMsg)
+            Log.i(TAG, ">>> MAP REFRESH: Sent unsubscribe")
+
+            // Wait for unsubscribe to process
+            delay(300)
+
+            // Step 2: Subscribe again
+            val subMsg = SmaitProtocol.subscribeMapSimple()
+            val sent = send(subMsg)
+            Log.i(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
+
+            // Step 3: If first subscribe didn't work, try again after a delay
+            delay(2000)
+            if (_connectionState.value == ConnectionState.CONNECTED) {
+                Log.i(TAG, ">>> MAP REFRESH: Retry subscribe just in case")
+                send(subMsg)
+            }
+
+            Log.i(TAG, ">>> MAP REFRESH: Sequence complete")
+        }
     }
 
     private fun parseStatusUpdate(json: String) {

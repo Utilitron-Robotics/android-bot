@@ -153,6 +153,8 @@ class _TourEditorState extends State<TourEditor> {
       announceArrival: _selectedTour!.announceArrival,
       introText: _introTextController.text.isEmpty ? null : _introTextController.text,
       outroText: _outroTextController.text.isEmpty ? null : _outroTextController.text,
+      startWaypoint: _selectedTour!.startWaypoint,
+      endWaypoint: _selectedTour!.endWaypoint,
     );
 
     _selectedTour = updatedTour;
@@ -218,21 +220,50 @@ class _TourEditorState extends State<TourEditor> {
         final runningTour = TourManager.instance.currentTour;
         debugPrint('TourEditor: ListenableBuilder - ${tours.length} tours, status=$status, running=${runningTour?.name}');
 
-        // When a tour is running, show that tour's info (not local _selectedTour)
-        final displayTour = (status == TourStatus.running && runningTour != null)
-            ? runningTour
-            : _selectedTour;
+        // When a tour is running, show prominent status and collapse editor
+        if (status == TourStatus.running && runningTour != null) {
+          return Column(
+            children: [
+              // Running tour takes center stage
+              const Expanded(
+                child: TourRunnerWidget(),
+              ),
+              // Collapsed header - just show we have tours available
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[900],
+                  border: Border(top: BorderSide(color: Colors.grey[700]!)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.folder, size: 16, color: Colors.grey[500]),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${tours.length} tour${tours.length == 1 ? '' : 's'} available',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                    ),
+                    const Spacer(),
+                    Text(
+                      'Stop tour to edit',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        }
+
+        // When not running, show full editor
+        final displayTour = _selectedTour;
 
         return Column(
           children: [
-            // Show running tour status prominently at top
-            if (status == TourStatus.running)
-              const TourRunnerWidget(),
-
             // Header with tour list
             _buildHeader(tours, status),
 
-            // Tour content - show running tour or selected tour
+            // Tour content - show selected tour or empty state
             Expanded(
               child: displayTour == null
                   ? _buildEmptyState()
@@ -826,7 +857,7 @@ class _TourEditorState extends State<TourEditor> {
   }
 }
 
-/// Compact tour runner widget for showing during tour execution
+/// Tour runner widget - expands to fill space when tour is active
 class TourRunnerWidget extends StatelessWidget {
   const TourRunnerWidget({super.key});
 
@@ -839,58 +870,241 @@ class TourRunnerWidget extends StatelessWidget {
         final status = TourManager.instance.status;
         final stopIndex = TourManager.instance.currentStopIndex;
         final stop = TourManager.instance.currentStop;
+        final phase = TourManager.instance.currentPhase;
+        final countdown = TourManager.instance.countdownSeconds;
+        final phaseDuration = TourManager.instance.phaseDurationSeconds;
 
         if (status != TourStatus.running || tour == null) {
           return const SizedBox.shrink();
         }
 
         return Container(
-          margin: const EdgeInsets.all(8),
-          padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.green.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.green),
+            color: Colors.green.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.green, width: 2),
           ),
-          child: Row(
+          child: Column(
             children: [
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+              // Header with tour name and controls
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.2),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                ),
+                child: Row(
                   children: [
-                    Text(
-                      tour.name,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    if (stop != null)
-                      Text(
-                        'Stop ${stopIndex + 1}/${tour.stops.length}: ${stop.waypoint}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                    const Icon(Icons.play_circle, color: Colors.green, size: 28),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            tour.name,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Stop ${stopIndex + 1} of ${tour.stops.length}${tour.loop ? ' (looping)' : ''}',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                          ),
+                        ],
                       ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.skip_next, size: 28),
+                      onPressed: TourManager.instance.skipToNextStop,
+                      tooltip: 'Skip to next stop',
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      icon: const Icon(Icons.stop, size: 18),
+                      label: const Text('Stop'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: TourManager.instance.stopTour,
+                    ),
                   ],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.skip_next),
-                onPressed: TourManager.instance.skipToNextStop,
-                tooltip: 'Skip to next',
-              ),
-              IconButton(
-                icon: const Icon(Icons.stop, color: Colors.red),
-                onPressed: TourManager.instance.stopTour,
-                tooltip: 'Stop tour',
+
+              // Main content area
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      // Large countdown/phase display
+                      Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          color: _getPhaseColor(phase).withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: _getPhaseColor(phase), width: 3),
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            if (countdown > 0 && phaseDuration > 0)
+                              SizedBox(
+                                width: 100,
+                                height: 100,
+                                child: CircularProgressIndicator(
+                                  value: countdown / phaseDuration,
+                                  strokeWidth: 8,
+                                  backgroundColor: Colors.grey[800],
+                                  color: _getPhaseColor(phase),
+                                ),
+                              ),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(phase.icon, size: 32, color: _getPhaseColor(phase)),
+                                if (countdown > 0)
+                                  Text(
+                                    '${countdown}s',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: _getPhaseColor(phase),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+
+                      // Current stop details
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Phase badge
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _getPhaseColor(phase),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(phase.icon, size: 16, color: Colors.white),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    phase.label,
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Current waypoint
+                            if (stop != null) ...[
+                              Row(
+                                children: [
+                                  const Icon(Icons.location_on, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    stop.waypoint,
+                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+
+                              // What's happening at this stop
+                              if (stop.speakText != null && stop.speakText!.isNotEmpty)
+                                _buildDetailRow(Icons.volume_up, 'Speech', stop.speakText!),
+                              if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty)
+                                _buildDetailRow(Icons.web, 'Display', stop.displayUrl!),
+                              if (stop.waitSeconds > 0)
+                                _buildDetailRow(Icons.timer, 'Wait', '${stop.waitSeconds} seconds'),
+                            ],
+
+                            const Spacer(),
+
+                            // Stop progress indicator
+                            _buildStopProgress(tour, stopIndex),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
         );
       },
     );
+  }
+
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: Colors.grey[500]),
+          const SizedBox(width: 8),
+          Text('$label: ', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontSize: 12),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStopProgress(Tour tour, int currentIndex) {
+    return Row(
+      children: List.generate(tour.stops.length, (index) {
+        final isCompleted = index < currentIndex;
+        final isCurrent = index == currentIndex;
+        return Expanded(
+          child: Container(
+            height: 6,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              color: isCompleted
+                  ? Colors.green
+                  : isCurrent
+                      ? Colors.green.withValues(alpha: 0.5)
+                      : Colors.grey[700],
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  Color _getPhaseColor(TourPhase phase) {
+    switch (phase) {
+      case TourPhase.navigating:
+        return Colors.blue;
+      case TourPhase.arriving:
+        return Colors.green;
+      case TourPhase.speaking:
+        return Colors.orange;
+      case TourPhase.displaying:
+        return Colors.purple;
+      case TourPhase.waiting:
+        return Colors.teal;
+    }
   }
 }

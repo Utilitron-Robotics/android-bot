@@ -3,6 +3,7 @@ package com.smait.robotrelay.service
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.smait.robotrelay.protocol.SmaitProtocol
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
 import kotlinx.coroutines.*
@@ -35,6 +36,7 @@ class RelayServer(
         fun closeDisplay()
         fun runTask(type: String, data: String, waitSeconds: Int)
         fun cancelTask()
+        fun playAlertSound(soundType: String)
         fun setTtsApiKey(apiKey: String?)
         fun hasTtsApiKey(): Boolean
     }
@@ -243,6 +245,9 @@ class RelayHttpServer(
             uri == "/estop" && method == Method.POST -> handleEStop(session)
             uri == "/cancel" && method == Method.POST -> handleCancel()
             uri == "/info" && method == Method.GET -> handleGetInfo()
+            // Map endpoint - HTTP transport for large map data (more reliable than WS)
+            uri == "/map" && method == Method.GET -> handleGetMap()
+            uri == "/map/refresh" && method == Method.POST -> handleRefreshMap()
             // Task endpoints
             uri == "/speak" && method == Method.POST -> handleSpeak(session)
             uri == "/display" && method == Method.POST -> handleDisplay(session)
@@ -398,6 +403,40 @@ class RelayHttpServer(
         robotClient.cancelNavigation()
         return newFixedLengthResponse(Response.Status.OK, "application/json",
             gson.toJson(mapOf("cancelled" to true)))
+    }
+
+    // === Map HTTP Transport ===
+    // More reliable than WebSocket for large payloads
+
+    private fun handleGetMap(): Response {
+        val mapJson = robotClient.cachedMapMessage
+        if (mapJson == null) {
+            Log.w(TAG, "GET /map - no cached map available")
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json",
+                gson.toJson(mapOf(
+                    "error" to "No map data available",
+                    "hint" to "Robot may not be publishing /map or relay just started"
+                )))
+        }
+
+        val age = System.currentTimeMillis() - robotClient.mapLastUpdated
+        Log.i(TAG, "GET /map - serving cached map (${mapJson.length} bytes, ${age}ms old)")
+
+        // Return the raw rosbridge message (contains topic and msg)
+        return newFixedLengthResponse(Response.Status.OK, "application/json", mapJson).apply {
+            addHeader("X-Map-Age-Ms", age.toString())
+            addHeader("X-Map-Size", mapJson.length.toString())
+        }
+    }
+
+    private fun handleRefreshMap(): Response {
+        Log.i(TAG, "POST /map/refresh - triggering map refresh")
+        robotClient.refreshMap()
+        return newFixedLengthResponse(Response.Status.OK, "application/json",
+            gson.toJson(mapOf(
+                "refreshing" to true,
+                "message" to "Map refresh initiated, GET /map in a few seconds"
+            )))
     }
 
     // === Task Endpoints ===
@@ -606,10 +645,9 @@ class RelayWebSocketServer(
         override fun onOpen() {
             Log.i(TAG, "Client connected")
             onConnectionChanged(this, true)
-            // Re-subscribe to /map to ensure Flutter gets map data
-            // This fixes the issue where first Flutter connection after relay start doesn't get map
-            Log.i(TAG, "Triggering /map re-subscribe for new Flutter client")
-            robotClient.send(SmaitProtocol.subscribeMapSimple())
+            // Force /map refresh using the robust refreshMap method
+            Log.i(TAG, "Triggering map refresh for new Flutter client")
+            robotClient.refreshMap()
         }
 
         override fun onClose(code: WebSocketFrame.CloseCode, reason: String, initiatedByRemote: Boolean) {
@@ -675,6 +713,17 @@ class RelayWebSocketServer(
                     "tablet_cancel" -> {
                         Log.i(TAG, "Tablet cancel task")
                         taskExecutor?.cancelTask()
+                        return
+                    }
+                    "tablet_play_sound" -> {
+                        val sound = json.get("sound")?.asString ?: "beep"
+                        Log.i(TAG, "Tablet play sound: $sound")
+                        taskExecutor?.playAlertSound(sound)
+                        return
+                    }
+                    "tablet_refresh_map" -> {
+                        Log.i(TAG, ">>> Manual map refresh requested by Flutter")
+                        robotClient.refreshMap()
                         return
                     }
                     // Handle rosbridge ping - respond with pong to keep connection alive

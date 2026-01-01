@@ -106,6 +106,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private val _taskStatus = MutableStateFlow("")
     val taskStatus: StateFlow<String> = _taskStatus
 
+    // Alert sound tracking - prevent stacking
+    private var alertSoundPlayer: android.media.MediaPlayer? = null
+    private var pendingSoundRunnables = mutableListOf<Runnable>()
+
     // Robot connection settings - defaults to wired (USB) connection
     private var robotIp = ROBOT_WIRED_IP
     private var robotPort = 9090
@@ -602,6 +606,9 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
     override fun speakText(text: String) {
         Log.i(TAG, ">>> speakText() called from TaskExecutor: '$text'")
+        // Stop any current speech to prevent queuing (for blocked path warnings)
+        cloudTts?.stop()
+        tts?.stop()
         speak(text, null)
     }
 
@@ -618,6 +625,121 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             return
         }
         executeTask(WaypointTask(taskType, data, waitSeconds))
+    }
+
+    override fun playAlertSound(soundType: String) {
+        Log.i(TAG, ">>> playAlertSound() called: '$soundType'")
+        // Run sound generation on background thread to avoid blocking
+        scope.launch(Dispatchers.Default) {
+            try {
+                // Cancel any pending sounds first to prevent stacking
+                withContext(Dispatchers.Main) { cancelPendingSounds() }
+
+                when (soundType.lowercase()) {
+                    "horn", "alarm" -> {
+                        // Generate loud horn sound: 3 descending tones
+                        Log.i(TAG, "Generating horn sound...")
+                        generateTone(440.0, 300)  // A4
+                        delay(100)
+                        generateTone(349.23, 300) // F4
+                        delay(100)
+                        generateTone(293.66, 400) // D4
+                        Log.i(TAG, "Horn sound complete")
+                    }
+                    "beep" -> {
+                        // Single attention beep
+                        Log.i(TAG, "Generating beep sound...")
+                        generateTone(880.0, 200)  // A5 - high pitched beep
+                        Log.i(TAG, "Beep sound complete")
+                    }
+                    else -> {
+                        Log.i(TAG, "Generating default beep...")
+                        generateTone(660.0, 150)  // E5
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to play alert sound: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Generate a pure tone using AudioTrack - works on all devices
+     */
+    private fun generateTone(frequencyHz: Double, durationMs: Int) {
+        val sampleRate = 44100
+        val numSamples = (sampleRate * durationMs / 1000.0).toInt()
+        val samples = ShortArray(numSamples)
+
+        // Generate sine wave with fade in/out to avoid clicks
+        val fadeLength = (numSamples * 0.1).toInt() // 10% fade
+        for (i in 0 until numSamples) {
+            val angle = 2.0 * Math.PI * i / (sampleRate / frequencyHz)
+            var amplitude = 32767.0 * 0.8 // 80% volume to avoid clipping
+
+            // Fade in
+            if (i < fadeLength) {
+                amplitude *= i.toDouble() / fadeLength
+            }
+            // Fade out
+            if (i > numSamples - fadeLength) {
+                amplitude *= (numSamples - i).toDouble() / fadeLength
+            }
+
+            samples[i] = (Math.sin(angle) * amplitude).toInt().toShort()
+        }
+
+        // Create and play AudioTrack
+        val bufferSize = android.media.AudioTrack.getMinBufferSize(
+            sampleRate,
+            android.media.AudioFormat.CHANNEL_OUT_MONO,
+            android.media.AudioFormat.ENCODING_PCM_16BIT
+        )
+
+        val audioTrack = android.media.AudioTrack.Builder()
+            .setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .setAudioFormat(
+                android.media.AudioFormat.Builder()
+                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(maxOf(bufferSize, samples.size * 2))
+            .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+            .build()
+
+        audioTrack.write(samples, 0, samples.size)
+        audioTrack.play()
+
+        // Wait for playback to complete
+        Thread.sleep(durationMs.toLong() + 50)
+        audioTrack.stop()
+        audioTrack.release()
+    }
+
+    private fun cancelPendingSounds() {
+        // Cancel any pending sound handlers
+        pendingSoundRunnables.forEach { mainHandler.removeCallbacks(it) }
+        pendingSoundRunnables.clear()
+
+        // Stop and release current player
+        alertSoundPlayer?.let { player ->
+            try {
+                if (player.isPlaying) {
+                    player.stop()
+                }
+                player.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing alert player: ${e.message}")
+            }
+        }
+        alertSoundPlayer = null
     }
 
     // === ConfigStore Interface Methods ===

@@ -8,7 +8,9 @@ import 'voice_control.dart';
 import 'map_view.dart';
 import 'tablet_control_panel.dart';
 import 'tour_editor.dart';
+import 'mode_editor.dart';
 import 'announcement_presets.dart';
+import 'crowd_logic_settings.dart';
 
 /// Dynamically generates UI widgets based on discovered robot capabilities
 class WidgetFactory {
@@ -35,6 +37,8 @@ class WidgetFactory {
       ));
       // Voice control (uses waypoints for matching)
       widgets.add(VoiceControl(availableWaypoints: capabilities.waypoints));
+      // Task modes editor (for waypoint arrival actions)
+      widgets.add(_buildModeSection(capabilities.waypoints));
       // Tour mode editor
       widgets.add(_buildTourSection(capabilities.waypoints));
     }
@@ -90,18 +94,58 @@ class WidgetFactory {
   }
 
   Widget _buildAnnouncementsSection() {
-    return const Card(
-      key: ValueKey('announcements_section'),
-      margin: EdgeInsets.only(bottom: 16),
+    return Card(
+      key: const ValueKey('announcements_section'),
+      margin: const EdgeInsets.only(bottom: 16),
       child: ExpansionTile(
-        key: ValueKey('announcements_expansion'),
-        title: Text('Announcements'),
-        leading: Icon(Icons.campaign),
-        subtitle: Text('Configure blocked path and custom announcements'),
+        key: const ValueKey('announcements_expansion'),
+        title: const Text('Crowd Logic & Announcements'),
+        leading: const Icon(Icons.campaign),
+        subtitle: const Text('Configure blocked path behavior and announcements'),
         children: [
           SizedBox(
-            height: 350,
-            child: AnnouncementPresetsEditor(),
+            height: 500,
+            child: DefaultTabController(
+              length: 2,
+              child: Column(
+                children: [
+                  const TabBar(
+                    tabs: [
+                      Tab(icon: Icon(Icons.people), text: 'Crowd Logic'),
+                      Tab(icon: Icon(Icons.volume_up), text: 'Announcements'),
+                    ],
+                  ),
+                  const Expanded(
+                    child: TabBarView(
+                      children: [
+                        CrowdLogicSettings(),
+                        AnnouncementPresetsEditor(),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModeSection(List<String> waypoints) {
+    return Card(
+      key: const ValueKey('mode_section'),
+      margin: const EdgeInsets.only(bottom: 16),
+      child: ExpansionTile(
+        key: const ValueKey('mode_expansion'),
+        title: const Text('Task Modes'),
+        leading: const Icon(Icons.auto_fix_high),
+        subtitle: const Text('Define actions when robot arrives at waypoints'),
+        initiallyExpanded: false,
+        children: [
+          SizedBox(
+            height: 550,
+            child: ModeEditor(availableWaypoints: waypoints),
           ),
         ],
       ),
@@ -117,7 +161,7 @@ class WidgetFactory {
         title: const Text('Tour Mode'),
         leading: const Icon(Icons.tour),
         subtitle: const Text('Create guided tours with waypoint sequences'),
-        initiallyExpanded: true, // Start expanded for debugging
+        initiallyExpanded: false,
         children: [
           SizedBox(
             height: 600, // Increased height for better editing
