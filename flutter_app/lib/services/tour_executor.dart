@@ -27,6 +27,9 @@ class TourExecutor implements TourExecutorCallback {
     _lastNavStatus = navStatus;
     _lastGoal = goalName;
 
+    // Only process tour-related nav changes if a tour is actually running
+    if (TourManager.instance.status != TourStatus.running) return;
+
     // Check if we arrived at a waypoint (status 603)
     if (navStatus == 603 && goalName.isNotEmpty) {
       debugPrint('TourExecutor: Detected arrival at $goalName');
@@ -34,15 +37,13 @@ class TourExecutor implements TourExecutorCallback {
     }
 
     // Handle tour interruptions
-    if (TourManager.instance.status == TourStatus.running) {
-      if (navStatus == 602) {
-        // Navigation cancelled
-        debugPrint('TourExecutor: Navigation cancelled during tour');
-      } else if (navStatus == 604) {
-        // Navigation failed
-        debugPrint('TourExecutor: Navigation failed during tour');
-        onTourFailed('Navigation failed - path blocked');
-      }
+    if (navStatus == 602) {
+      // Navigation cancelled
+      debugPrint('TourExecutor: Navigation cancelled during tour');
+    } else if (navStatus == 604) {
+      // Navigation failed
+      debugPrint('TourExecutor: Navigation failed during tour');
+      onTourFailed('Navigation failed - path blocked');
     }
   }
 

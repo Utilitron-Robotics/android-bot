@@ -105,9 +105,13 @@ class _WaypointGridState extends State<WaypointGrid>
     final previousStatus = _lastNavStatus;
     _lastNavStatus = navStatus;
 
+    debugPrint('WaypointGrid: navStatus $previousStatus -> $navStatus, navigatingTo=$_navigatingTo, goal=$goalName');
+
     // Execute task on arrival (603 = Success/Arrived)
-    if (_navigatingTo != null && navStatus == 603 && previousStatus == 601) {
+    // Allow from any moving/transitional status, not just 601
+    if (_navigatingTo != null && navStatus == 603) {
       final arrivedAt = _navigatingTo!;
+      debugPrint('WaypointGrid: Arrival detected at $arrivedAt, executing task...');
       _taskEngine.executeForWaypoint(arrivedAt, fromWaypoint: _lastWaypoint);
       _lastWaypoint = arrivedAt;
     }

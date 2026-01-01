@@ -67,6 +67,8 @@ class Tour {
   final bool announceArrival;   // Say "Arrived at [waypoint]" before custom text
   final String? introText;      // Speak before starting tour
   final String? outroText;      // Speak after completing tour
+  final String? startWaypoint;  // Navigate here before starting tour
+  final String? endWaypoint;    // Navigate here after completing tour
 
   const Tour({
     required this.id,
@@ -77,6 +79,8 @@ class Tour {
     this.announceArrival = false,
     this.introText,
     this.outroText,
+    this.startWaypoint,
+    this.endWaypoint,
   });
 
   /// Create tour from waypoint list with auto-loaded scripts
@@ -107,6 +111,8 @@ class Tour {
     'announce_arrival': announceArrival,
     if (introText != null) 'intro_text': introText,
     if (outroText != null) 'outro_text': outroText,
+    if (startWaypoint != null) 'start_waypoint': startWaypoint,
+    if (endWaypoint != null) 'end_waypoint': endWaypoint,
   };
 
   factory Tour.fromJson(Map<String, dynamic> json) => Tour(
@@ -120,6 +126,8 @@ class Tour {
     announceArrival: json['announce_arrival'] as bool? ?? false,
     introText: json['intro_text'] as String?,
     outroText: json['outro_text'] as String?,
+    startWaypoint: json['start_waypoint'] as String?,
+    endWaypoint: json['end_waypoint'] as String?,
   );
 
   Tour copyWith({
@@ -131,6 +139,8 @@ class Tour {
     bool? announceArrival,
     String? introText,
     String? outroText,
+    String? startWaypoint,
+    String? endWaypoint,
   }) => Tour(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -140,6 +150,8 @@ class Tour {
     announceArrival: announceArrival ?? this.announceArrival,
     introText: introText ?? this.introText,
     outroText: outroText ?? this.outroText,
+    startWaypoint: startWaypoint ?? this.startWaypoint,
+    endWaypoint: endWaypoint ?? this.endWaypoint,
   );
 
   /// Add a stop
@@ -306,15 +318,29 @@ class TourManager extends ChangeNotifier {
 
   /// Called when robot arrives at a waypoint
   void onArrived(String waypoint) {
-    if (_status != TourStatus.running) return;
-    if (_currentTour == null) return;
+    debugPrint('TourManager: onArrived($waypoint) - status=$_status, tour=${_currentTour?.name}, stopIndex=$_currentStopIndex');
+
+    if (_status != TourStatus.running) {
+      debugPrint('TourManager: Ignoring arrival - tour not running');
+      return;
+    }
+    if (_currentTour == null) {
+      debugPrint('TourManager: Ignoring arrival - no current tour');
+      return;
+    }
 
     final stop = currentStop;
-    if (stop == null) return;
+    if (stop == null) {
+      debugPrint('TourManager: Ignoring arrival - no current stop (index=$_currentStopIndex, stops=${_currentTour!.stops.length})');
+      return;
+    }
 
+    debugPrint('TourManager: Checking arrival - expected="${stop.waypoint}", got="$waypoint"');
     if (stop.waypoint == waypoint) {
       debugPrint('TourManager: Arrived at ${stop.waypoint}');
       _executeStopActions();
+    } else {
+      debugPrint('TourManager: Waypoint mismatch - ignoring');
     }
   }
 
@@ -418,6 +444,12 @@ class TourManager extends ChangeNotifier {
     // Play outro if configured
     if (_currentTour?.outroText != null && _currentTour!.outroText!.isNotEmpty) {
       _callback?.onSpeak(_currentTour!.outroText!);
+    }
+
+    // Navigate to end waypoint if configured (e.g., return to charging station)
+    if (_currentTour?.endWaypoint != null && _currentTour!.endWaypoint!.isNotEmpty) {
+      debugPrint('TourManager: Navigating to end waypoint: ${_currentTour!.endWaypoint}');
+      _callback?.onNavigate(_currentTour!.endWaypoint!);
     }
 
     _status = TourStatus.completed;
