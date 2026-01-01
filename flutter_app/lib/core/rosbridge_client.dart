@@ -442,6 +442,11 @@ class RosbridgeClient {
     send({'op': 'tablet_close_display'});
   }
 
+  /// Play an alert sound on the tablet (beep, horn, alarm)
+  void tabletPlaySound(String soundType) {
+    send({'op': 'tablet_play_sound', 'sound': soundType});
+  }
+
   /// Run a task on the tablet (SPEAK, DISPLAY, DELIVER)
   void tabletTask(String type, String data, int waitSeconds) {
     send({
@@ -455,5 +460,12 @@ class RosbridgeClient {
   /// Cancel current tablet task
   void tabletCancelTask() {
     send({'op': 'tablet_cancel'});
+  }
+
+  /// Request map refresh from tablet
+  /// This triggers the relay to re-subscribe to /map and get fresh data
+  void tabletRefreshMap() {
+    debugPrint('RosbridgeClient: Requesting map refresh');
+    send({'op': 'tablet_refresh_map'});
   }
 }

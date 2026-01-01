@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
 import '../core/rosbridge_client.dart';
@@ -24,17 +26,17 @@ class _MapCache {
 }
 
 class _MapViewState extends State<MapView> {
-  StreamSubscription? _mapSubscription;
+  StreamSubscription? _poseSubscription;
   StreamSubscription? _wsStateSubscription;
   ui.Image? _mapImage;
   MapInfo? _mapInfo;
-  bool _isLoading = false; // Start false - use cached data if available
-  bool _subscribed = false;
+  bool _isLoading = false;
   String? _error;
-  Timer? _timeoutTimer;
+  Timer? _pollTimer;
   RobotConnection? _robot;
   bool _lastKnownConnected = false;
   WsConnectionState? _lastWsState;
+  String? _httpBaseUrl;  // HTTP endpoint for map (e.g., http://192.168.1.100:8765)
 
   // Robot pose on map
   double _robotX = 0;
@@ -44,10 +46,9 @@ class _MapViewState extends State<MapView> {
   @override
   void initState() {
     super.initState();
-    debugPrint('MapView: initState called - new widget instance created');
+    debugPrint('MapView: initState - using HTTP transport for map');
 
-    // CRITICAL: Restore from static cache IMMEDIATELY to prevent "loading" flash
-    // This is the fix for map going to loading after waypoint navigation
+    // Restore from static cache IMMEDIATELY to prevent "loading" flash
     if (_MapCache.image != null) {
       debugPrint('MapView: Restoring map from static cache!');
       _mapImage = _MapCache.image;
@@ -55,47 +56,64 @@ class _MapViewState extends State<MapView> {
       _robotX = _MapCache.robotX;
       _robotY = _MapCache.robotY;
       _robotTheta = _MapCache.robotTheta;
-      _isLoading = false;  // We have cached data, no loading needed
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      debugPrint('MapView: postFrameCallback - setting up subscriptions');
       _robot = context.read<RobotConnection>();
       _lastKnownConnected = _robot?.isConnected ?? false;
       _lastWsState = _robot?.client.state;
-      _subscribeToMap();
 
-      // Listen for RobotConnection changes (for high-level state)
+      // Extract HTTP base URL from WebSocket URL
+      _updateHttpBaseUrl();
+
+      // Start HTTP polling for map
+      _startMapPolling();
+
+      // Subscribe to robot pose via WebSocket (small messages, WS is fine)
+      _subscribeToPose();
+
       _robot?.addListener(_onConnectionChanged);
-
-      // CRITICAL: Also listen to WebSocket state stream to detect reconnections
-      // When rosbridge reconnects, it creates NEW stream controllers, so we must
-      // re-subscribe to the new message stream
       _wsStateSubscription = _robot?.client.connectionState.listen(_onWsStateChanged);
     });
   }
 
-  /// Handle WebSocket connection state changes (detect reconnection)
+  void _updateHttpBaseUrl() {
+    // Convert ws://host:port to http://host:(port-1) for HTTP API
+    // WS is on 8766, HTTP is on 8765
+    final robot = _robot;
+    if (robot == null) return;
+
+    // Get the URL from the connection
+    final wsUrl = robot.robotUrl;
+    if (wsUrl.isNotEmpty) {
+      try {
+        final uri = Uri.parse(wsUrl);
+        // If connecting to relay WS (8766), HTTP is on 8765
+        // If connecting direct to robot (9090), no HTTP map endpoint available
+        if (uri.port == 8766) {
+          _httpBaseUrl = 'http://${uri.host}:8765';
+          debugPrint('MapView: HTTP base URL: $_httpBaseUrl');
+        } else {
+          debugPrint('MapView: Direct robot connection, HTTP map not available');
+          _httpBaseUrl = null;
+        }
+      } catch (e) {
+        debugPrint('MapView: Failed to parse WS URL: $e');
+      }
+    }
+  }
+
   void _onWsStateChanged(WsConnectionState newState) {
     debugPrint('MapView: WS state changed: $_lastWsState -> $newState');
 
     final wasConnected = _lastWsState == WsConnectionState.connected;
     final isNowConnected = newState == WsConnectionState.connected;
 
-    // Detect reconnection: was connected -> lost connection -> connected again
-    if (isNowConnected && !wasConnected && _lastWsState != null) {
-      debugPrint('MapView: WebSocket reconnected, re-subscribing to map stream');
-      // Force re-subscription since the stream controller was recreated
-      _subscribed = false;
-      _mapSubscription?.cancel();
-      _mapSubscription = null;
-      _subscribeToMap();
-    } else if (isNowConnected && _lastWsState == null) {
-      // First connection - subscribe if not already
-      debugPrint('MapView: First connection detected, subscribing');
-      if (!_subscribed) {
-        _subscribeToMap();
-      }
+    if (isNowConnected && !wasConnected) {
+      debugPrint('MapView: Connection restored, restarting map polling');
+      _updateHttpBaseUrl();
+      _startMapPolling();
+      _subscribeToPose();
     }
 
     _lastWsState = newState;
@@ -106,159 +124,165 @@ class _MapViewState extends State<MapView> {
     if (robot == null) return;
 
     final isConnected = robot.isConnected;
-
-    // Only react when connection state actually changes
     if (isConnected == _lastKnownConnected) return;
 
     if (isConnected && !_lastKnownConnected) {
-      debugPrint('MapView: Connection restored, re-subscribing to map');
-      _subscribed = false;  // Reset so we can re-subscribe
-      _subscribeToMap();
+      debugPrint('MapView: Connection restored');
+      _updateHttpBaseUrl();
+      _startMapPolling();
+      _subscribeToPose();
     } else if (!isConnected && _lastKnownConnected) {
       debugPrint('MapView: Connection lost');
-      // Don't clear the map image - keep showing last known state
-      // Just mark as not subscribed so we re-subscribe on reconnect
-      if (mounted) {
-        setState(() {
-          _subscribed = false;
-        });
-      }
+      _pollTimer?.cancel();
     }
     _lastKnownConnected = isConnected;
   }
 
   @override
   void dispose() {
-    debugPrint('MapView: DISPOSE called! Widget is being destroyed.');
+    debugPrint('MapView: DISPOSE called');
     _robot?.removeListener(_onConnectionChanged);
     _wsStateSubscription?.cancel();
-    _mapSubscription?.cancel();
-    _timeoutTimer?.cancel();
-    // CRITICAL: Do NOT dispose the image if it's in the static cache!
-    // The cache survives widget recreation, so disposing would break the cached image.
-    // Only dispose if this is a different image than what's cached.
+    _poseSubscription?.cancel();
+    _pollTimer?.cancel();
     if (_mapImage != null && _mapImage != _MapCache.image) {
-      debugPrint('MapView: Disposing non-cached image');
       _mapImage?.dispose();
     }
     super.dispose();
   }
 
-  void _subscribeToMap() {
-    final robot = _robot ?? context.read<RobotConnection>();
-    if (!robot.isConnected) {
-      // Only update state if we don't have a map - keep showing last known map
-      if (_mapImage == null) {
-        setState(() {
-          _error = 'Not connected';
-          _isLoading = false;
-          _subscribed = false;
-        });
-      }
+  /// Start HTTP polling for map data - much more reliable than WebSocket for large payloads
+  void _startMapPolling() {
+    _pollTimer?.cancel();
+
+    if (_httpBaseUrl == null) {
+      debugPrint('MapView: No HTTP base URL, falling back to WebSocket subscription');
+      _subscribeToMapViaWebSocket();
       return;
     }
 
-    // If already subscribed with an active listener, don't re-subscribe
-    if (_subscribed && _mapSubscription != null) {
-      debugPrint('MapView: Already subscribed, skipping');
-      return;
-    }
+    // Fetch map immediately
+    _fetchMapViaHttp();
 
-    debugPrint('MapView: Subscribing to map topics');
+    // Then poll every 5 seconds (matches the robot's /map throttle rate)
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _fetchMapViaHttp();
+    });
 
-    // Cancel any existing subscription first (important for reconnection!)
-    _mapSubscription?.cancel();
-    _mapSubscription = null;
+    debugPrint('MapView: Started HTTP map polling');
+  }
 
-    // Only show loading if we don't have a map image yet
-    if (_mapImage == null) {
-      setState(() {
-        _isLoading = true;
-        _error = null;
-      });
-    }
+  /// Fallback: Subscribe to map via WebSocket (for direct robot connections)
+  void _subscribeToMapViaWebSocket() {
+    final robot = _robot;
+    if (robot == null || !robot.isConnected) return;
 
-    // The relay now subscribes to /map itself, so we just need to listen.
-    // For direct connection mode, send subscribe to ensure map is flowing.
     robot.client.send({
       'op': 'subscribe',
       'topic': '/map',
       'type': 'nav_msgs/OccupancyGrid',
-      'throttle_rate': 5000, // Only get map updates every 5 seconds
+      'throttle_rate': 5000,
       'queue_length': 1,
     });
-    debugPrint('MapView: Sent /map subscribe');
 
-    // Subscribe to robot pose for showing position on map
+    // Listen for map messages
+    _poseSubscription?.cancel();
+    _poseSubscription = robot.client.messages.listen((msg) {
+      final topic = msg['topic'] as String?;
+      if (topic == '/map') {
+        _handleMapMessage(msg['msg']);
+      } else if (topic == '/robot_pose') {
+        _handlePoseMessage(msg['msg']);
+      }
+    });
+
+    debugPrint('MapView: Subscribed to /map via WebSocket (fallback mode)');
+  }
+
+  /// Fetch map via HTTP - single request/response, no subscription issues
+  Future<void> _fetchMapViaHttp() async {
+    if (_httpBaseUrl == null) return;
+
+    final robot = _robot;
+    if (robot == null || !robot.isConnected) return;
+
+    try {
+      final response = await http.get(
+        Uri.parse('$_httpBaseUrl/map'),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        // The response is the raw rosbridge message: {topic: "/map", msg: {...}}
+        final msg = data['msg'];
+        if (msg != null) {
+          _handleMapMessage(msg);
+        }
+      } else if (response.statusCode == 404) {
+        // No map cached yet - this is normal on startup
+        debugPrint('MapView: No map cached on relay yet');
+      } else {
+        debugPrint('MapView: HTTP map fetch failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      // Don't spam errors - just log once
+      debugPrint('MapView: HTTP map fetch error: $e');
+    }
+  }
+
+  /// Subscribe to robot pose via WebSocket (small messages, WS is fine for this)
+  void _subscribeToPose() {
+    final robot = _robot;
+    if (robot == null || !robot.isConnected) return;
+
+    _poseSubscription?.cancel();
+
     robot.client.subscribe(
       topic: '/robot_pose',
       type: 'geometry_msgs/Pose2D',
     );
 
-    // Create NEW subscription to the current message stream FIRST
-    // This ensures we're listening before any messages arrive
-    var msgCount = 0;
-    var mapMsgCount = 0;
-    final topicCounts = <String, int>{};
-
-    _mapSubscription = robot.client.messages.listen((msg) {
-      msgCount++;
+    _poseSubscription = robot.client.messages.listen((msg) {
       final topic = msg['topic'] as String?;
-
-      // Track topic counts for debugging
-      if (topic != null) {
-        topicCounts[topic] = (topicCounts[topic] ?? 0) + 1;
-      }
-
-      if (topic == '/map') {
-        mapMsgCount++;
-        debugPrint('MapView: Received /map message #$mapMsgCount (total msgs: $msgCount)');
-        _handleMapMessage(msg['msg']);
-      } else if (topic == '/robot_pose') {
+      if (topic == '/robot_pose') {
         _handlePoseMessage(msg['msg']);
       }
-      // Log every 50 messages to show stream is alive and what topics we're getting
-      if (msgCount % 50 == 0) {
-        debugPrint('MapView: Stream alive, $msgCount msgs, /map count: $mapMsgCount, topics: $topicCounts');
-      }
-    }, onError: (e) {
-      debugPrint('MapView: Stream error: $e');
+    });
+
+    debugPrint('MapView: Subscribed to robot pose');
+  }
+
+  /// Force a map refresh via HTTP
+  void _forceMapRefresh() {
+    if (_httpBaseUrl == null) {
+      debugPrint('MapView: Cannot refresh - no HTTP URL');
+      return;
+    }
+
+    debugPrint('MapView: Force refresh triggered');
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    // Tell relay to refresh its map subscription
+    http.post(Uri.parse('$_httpBaseUrl/map/refresh')).then((_) {
+      // Wait a bit for the relay to get fresh map, then fetch
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _fetchMapViaHttp();
+        }
+      });
+    }).catchError((e) {
+      debugPrint('MapView: Refresh request failed: $e');
       if (mounted) {
         setState(() {
-          _subscribed = false;
-          // Only show error if we don't have a map - keep showing last valid map
-          if (_mapImage == null) {
-            _error = 'Stream error';
-          }
-        });
-      }
-    }, onDone: () {
-      debugPrint('MapView: Stream closed (will re-subscribe on reconnect)');
-      if (mounted) {
-        setState(() {
-          _subscribed = false;
-          // Clear error on stream close - we'll get a new stream on reconnect
-          // but keep showing any existing map
-          if (_mapImage == null) {
-            _error = null;
-            _isLoading = false;
-          }
+          _isLoading = false;
+          _error = 'Refresh failed';
         });
       }
     });
-
-    setState(() => _subscribed = true);
-
-    // Set timeout - stop spinner after 8 seconds if no data
-    _timeoutTimer?.cancel();
-    _timeoutTimer = Timer(const Duration(seconds: 8), () {
-      if (mounted && _isLoading && _mapImage == null) {
-        debugPrint('MapView: Timeout - no map data received in 8 seconds');
-        setState(() => _isLoading = false);
-      }
-    });
-
-    debugPrint('MapView: Listener set up, waiting for /map messages');
   }
 
   void _handleMapMessage(dynamic data) async {
@@ -398,7 +422,7 @@ class _MapViewState extends State<MapView> {
                 ),
               IconButton(
                 icon: const Icon(Icons.refresh, size: 20),
-                onPressed: _subscribeToMap,
+                onPressed: _forceMapRefresh,
                 tooltip: 'Refresh map',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
@@ -460,12 +484,12 @@ class _MapViewState extends State<MapView> {
             const SizedBox(height: 8),
             const Text('No map data'),
             Text(
-              _subscribed ? 'Subscribed to /map - waiting for data...' : 'Not subscribed',
+              _httpBaseUrl != null ? 'Polling via HTTP...' : 'Not connected',
               style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 4),
             const Text(
-              'Robot may not be publishing map',
+              'Tap refresh or wait for map data',
               style: TextStyle(color: Colors.grey, fontSize: 11),
             ),
           ],

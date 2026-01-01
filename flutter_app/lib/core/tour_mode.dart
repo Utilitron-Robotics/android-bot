@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -189,6 +189,19 @@ enum TourStatus {
   failed,
 }
 
+/// Tour execution phase (what it's currently doing)
+enum TourPhase {
+  navigating('Navigating...', Icons.navigation),
+  arriving('Arriving...', Icons.location_on),
+  speaking('Speaking...', Icons.volume_up),
+  displaying('Displaying...', Icons.tv),
+  waiting('Waiting...', Icons.timer);
+
+  final String label;
+  final IconData icon;
+  const TourPhase(this.label, this.icon);
+}
+
 /// Callback interface for tour execution
 abstract class TourExecutorCallback {
   void onSpeak(String text);
@@ -218,6 +231,13 @@ class TourManager extends ChangeNotifier {
   Timer? _waitTimer;
   TourExecutorCallback? _callback;
 
+  // Phase tracking for UI countdown
+  TourPhase _currentPhase = TourPhase.navigating;
+  int _countdownSeconds = 0;
+  DateTime? _phaseStartTime;
+  int _phaseDurationSeconds = 0;
+  Timer? _countdownTimer;
+
   static TourManager get instance {
     _instance ??= TourManager._();
     return _instance!;
@@ -234,6 +254,43 @@ class TourManager extends ChangeNotifier {
           ? _currentTour!.stops[_currentStopIndex]
           : null;
   List<Tour> get tours => _tours.values.toList();
+
+  // Phase tracking getters
+  TourPhase get currentPhase => _currentPhase;
+  int get countdownSeconds => _countdownSeconds;
+  int get phaseDurationSeconds => _phaseDurationSeconds;
+
+  /// Update the current phase and start countdown
+  void _setPhase(TourPhase phase, int durationSeconds) {
+    _currentPhase = phase;
+    _phaseDurationSeconds = durationSeconds;
+    _countdownSeconds = durationSeconds;
+    _phaseStartTime = DateTime.now();
+
+    // Cancel existing countdown timer
+    _countdownTimer?.cancel();
+
+    // Start countdown timer that ticks every second
+    if (durationSeconds > 0) {
+      _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (_countdownSeconds > 0) {
+          _countdownSeconds--;
+          notifyListeners();
+        } else {
+          timer.cancel();
+        }
+      });
+    }
+    notifyListeners();
+  }
+
+  /// Stop countdown timer
+  void _stopCountdown() {
+    _countdownTimer?.cancel();
+    _countdownTimer = null;
+    _countdownSeconds = 0;
+    _phaseDurationSeconds = 0;
+  }
 
   /// Set the callback for tour execution
   void setCallback(TourExecutorCallback callback) {
@@ -365,11 +422,14 @@ class TourManager extends ChangeNotifier {
     debugPrint('  - displayUrl: ${stop.displayUrl}');
     debugPrint('  - announceArrival: ${_currentTour?.announceArrival}');
 
+    // Set phase to arriving
+    _setPhase(TourPhase.arriving, 1);
     _callback?.onStopArrived(stop, _currentStopIndex);
 
     // Step 1: Display content FIRST (so user sees it while TTS plays)
     if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
       debugPrint('TourManager: Showing display URL: ${stop.displayUrl}');
+      _setPhase(TourPhase.displaying, stop.displayDuration > 0 ? stop.displayDuration : 10);
       _callback?.onDisplay(stop.displayUrl!, stop.displayDuration);
     } else {
       // Default: Show company name when no media configured
@@ -384,8 +444,9 @@ class TourManager extends ChangeNotifier {
     if (_currentTour?.announceArrival == true) {
       final arrivalText = 'Arrived at ${stop.waypoint}';
       debugPrint('TourManager: Speaking arrival: $arrivalText');
-      _callback?.onSpeak(arrivalText);
       final arrivalDuration = _estimateTtsDuration(arrivalText);
+      _setPhase(TourPhase.speaking, arrivalDuration.inSeconds);
+      _callback?.onSpeak(arrivalText);
       debugPrint('TourManager: Waiting ${arrivalDuration.inSeconds}s for arrival TTS');
       await Future.delayed(arrivalDuration + const Duration(milliseconds: 500));
     }
@@ -393,8 +454,9 @@ class TourManager extends ChangeNotifier {
     // Step 3: Speak custom text (wait for it to finish)
     if (stop.speakText != null && stop.speakText!.isNotEmpty) {
       debugPrint('TourManager: Speaking tour text (${stop.speakText!.split(' ').length} words)');
-      _callback?.onSpeak(stop.speakText!);
       final ttsDuration = _estimateTtsDuration(stop.speakText!);
+      _setPhase(TourPhase.speaking, ttsDuration.inSeconds);
+      _callback?.onSpeak(stop.speakText!);
       debugPrint('TourManager: Waiting ${ttsDuration.inSeconds}s for tour TTS');
       await Future.delayed(ttsDuration);
     }
@@ -408,6 +470,7 @@ class TourManager extends ChangeNotifier {
         : (stop.displayDuration > 0 ? stop.displayDuration : minMediaTime);
 
     debugPrint('TourManager: Extra wait time: ${waitTime}s before next stop (media plays until departure)');
+    _setPhase(TourPhase.waiting, waitTime);
     _waitTimer = Timer(Duration(seconds: waitTime), () {
       debugPrint('TourManager: Wait complete, navigating to next stop (display stays until departure)');
       // NOTE: Do NOT close display here - it stays until robot leaves (AudioAnnouncer handles that)
@@ -434,6 +497,7 @@ class TourManager extends ChangeNotifier {
     final stop = currentStop;
     if (stop != null) {
       debugPrint('TourManager: Navigating to ${stop.waypoint}');
+      _setPhase(TourPhase.navigating, 0); // No countdown while navigating
       _callback?.onNavigate(stop.waypoint);
       notifyListeners();
     }
@@ -441,6 +505,8 @@ class TourManager extends ChangeNotifier {
 
   /// Complete the tour
   void _completeTour() {
+    _stopCountdown();
+
     // Play outro if configured
     if (_currentTour?.outroText != null && _currentTour!.outroText!.isNotEmpty) {
       _callback?.onSpeak(_currentTour!.outroText!);
@@ -471,6 +537,7 @@ class TourManager extends ChangeNotifier {
 
     _waitTimer?.cancel();
     _waitTimer = null;
+    _stopCountdown();
     _callback?.onCloseDisplay();
     _callback?.onTourStopped(currentStop, _currentStopIndex);
 
