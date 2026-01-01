@@ -215,7 +215,13 @@ class _TourEditorState extends State<TourEditor> {
       builder: (context, _) {
         final tours = TourManager.instance.tours;
         final status = TourManager.instance.status;
-        debugPrint('TourEditor: ListenableBuilder - ${tours.length} tours, status=$status');
+        final runningTour = TourManager.instance.currentTour;
+        debugPrint('TourEditor: ListenableBuilder - ${tours.length} tours, status=$status, running=${runningTour?.name}');
+
+        // When a tour is running, show that tour's info (not local _selectedTour)
+        final displayTour = (status == TourStatus.running && runningTour != null)
+            ? runningTour
+            : _selectedTour;
 
         return Column(
           children: [
@@ -226,11 +232,11 @@ class _TourEditorState extends State<TourEditor> {
             // Header with tour list
             _buildHeader(tours, status),
 
-            // Tour content
+            // Tour content - show running tour or selected tour
             Expanded(
-              child: _selectedTour == null
+              child: displayTour == null
                   ? _buildEmptyState()
-                  : _buildTourPreview(_selectedTour!),
+                  : _buildTourPreview(displayTour),
             ),
           ],
         );

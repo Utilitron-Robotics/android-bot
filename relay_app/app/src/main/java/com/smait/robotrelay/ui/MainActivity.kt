@@ -221,7 +221,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun speak(text: String) {
-        lifecycleScope.launch {
+        lifecycleScope.launch {6
             // Wait until TTS is ready before trying to speak
             service?.ttsReady?.filter { it }?.first()
             if (binding.switchAudio.isChecked) {

@@ -23,6 +23,12 @@ class RobotConnection extends ChangeNotifier {
   StreamSubscription? _statusSubscription;
   RobotStatus _status = RobotStatus();
 
+  // Connection health tracking
+  DateTime? _lastStatusUpdate;
+  DateTime? get lastStatusUpdate => _lastStatusUpdate;
+  bool get isStale => _lastStatusUpdate != null &&
+      DateTime.now().difference(_lastStatusUpdate!) > const Duration(seconds: 5);
+
   // Getters
   RobotConnectionState get state => _state;
   String get robotUrl => _robotUrl;
@@ -150,6 +156,7 @@ class RobotConnection extends ChangeNotifier {
           );
 
           _status = newStatus;
+          _lastStatusUpdate = DateTime.now();
           notifyListeners();
         }
       }
@@ -223,6 +230,7 @@ class RobotConnection extends ChangeNotifier {
     _state = RobotConnectionState.disconnected;
     _capabilities = null;
     _status = RobotStatus();
+    _lastStatusUpdate = null;
     notifyListeners();
   }
 

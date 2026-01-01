@@ -44,6 +44,10 @@ class RosbridgeClient {
   int _callId = 0;
   bool _isConnected = false;
 
+  // Subscription tracking to prevent duplicate subscribes
+  final Set<String> _subscribedTopics = {};
+  final Set<String> _advertisedTopics = {};
+
   // Keepalive and reconnect
   Timer? _pingTimer;
   Timer? _reconnectTimer;
@@ -142,6 +146,10 @@ class RosbridgeClient {
     _isConnected = false;
     _stopTimers();
     _closeConnection();
+
+    // Clear subscription tracking (server forgets on disconnect)
+    _subscribedTopics.clear();
+    _advertisedTopics.clear();
 
     // Attempt to reconnect if we have a URL
     if (_lastUrl != null && _reconnectAttempts < _maxReconnectAttempts) {
@@ -270,6 +278,10 @@ class RosbridgeClient {
     _lastUrl = null; // Clear URL to prevent auto-reconnect
     _reconnectAttempts = 0;
 
+    // Clear subscription tracking (server forgets on disconnect)
+    _subscribedTopics.clear();
+    _advertisedTopics.clear();
+
     // Cancel any pending service calls
     for (final completer in _pendingCalls.values) {
       if (!completer.isCompleted) {
@@ -313,12 +325,19 @@ class RosbridgeClient {
     }
   }
 
-  /// Subscribe to a topic
+  /// Subscribe to a topic (skips if already subscribed)
   void subscribe({
     required String topic,
     required String type,
     String? id,
+    bool force = false,
   }) {
+    // Skip if already subscribed (unless forced)
+    if (!force && _subscribedTopics.contains(topic)) {
+      debugPrint('RosbridgeClient: Already subscribed to $topic, skipping');
+      return;
+    }
+    _subscribedTopics.add(topic);
     send({
       'op': 'subscribe',
       'topic': topic,
@@ -329,6 +348,7 @@ class RosbridgeClient {
 
   /// Unsubscribe from a topic
   void unsubscribe({required String topic, String? id}) {
+    _subscribedTopics.remove(topic);
     send({
       'op': 'unsubscribe',
       'topic': topic,
@@ -371,11 +391,16 @@ class RosbridgeClient {
     });
   }
 
-  /// Advertise a topic for publishing
+  /// Advertise a topic for publishing (skips if already advertised)
   void advertise({
     required String topic,
     required String type,
   }) {
+    // Skip if already advertised
+    if (_advertisedTopics.contains(topic)) {
+      return;
+    }
+    _advertisedTopics.add(topic);
     send({
       'op': 'advertise',
       'topic': topic,
@@ -385,6 +410,7 @@ class RosbridgeClient {
 
   /// Unadvertise a topic
   void unadvertise({required String topic}) {
+    _advertisedTopics.remove(topic);
     send({
       'op': 'unadvertise',
       'topic': topic,

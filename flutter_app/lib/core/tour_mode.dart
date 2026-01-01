@@ -243,7 +243,7 @@ class TourManager extends ChangeNotifier {
       }
       _loaded = true;
       debugPrint('TourManager: Loaded ${_tours.length} tours');
-      notifyListeners(); // Notify UI of loaded tours
+      notifyListeners();
     } catch (e) {
       debugPrint('TourManager: Failed to load: $e');
     }
@@ -318,49 +318,73 @@ class TourManager extends ChangeNotifier {
     }
   }
 
-  /// Estimate TTS duration based on text length (roughly 150 words/min)
+  /// Estimate TTS duration based on text length
+  /// Uses conservative estimate: ~2 words/sec (120 words/min) to account for pauses
   Duration _estimateTtsDuration(String text) {
-    final words = text.split(' ').length;
-    final seconds = (words / 2.5).ceil(); // ~150 words/min = 2.5 words/sec
-    return Duration(seconds: seconds.clamp(1, 30));
+    final words = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    final seconds = (words / 2.0).ceil(); // ~120 words/min = 2 words/sec (conservative)
+    return Duration(seconds: seconds.clamp(2, 60)); // Min 2 sec, max 60 sec
   }
 
   /// Execute actions at current stop - properly sequenced to avoid race conditions
   Future<void> _executeStopActions() async {
     final stop = currentStop;
-    if (stop == null) return;
+    if (stop == null) {
+      debugPrint('TourManager: _executeStopActions - no current stop!');
+      return;
+    }
+
+    debugPrint('TourManager: Executing actions at ${stop.waypoint}');
+    debugPrint('  - speakText: ${stop.speakText?.substring(0, (stop.speakText?.length ?? 0).clamp(0, 50))}...');
+    debugPrint('  - displayUrl: ${stop.displayUrl}');
+    debugPrint('  - announceArrival: ${_currentTour?.announceArrival}');
 
     _callback?.onStopArrived(stop, _currentStopIndex);
 
-    // Step 1: Announce arrival if enabled (wait for TTS to finish)
-    if (_currentTour?.announceArrival == true) {
-      final arrivalText = 'Arrived at ${stop.waypoint}';
-      _callback?.onSpeak(arrivalText);
-      await Future.delayed(_estimateTtsDuration(arrivalText) + const Duration(milliseconds: 500));
-    }
-
-    // Step 2: Display content FIRST (so user sees it while TTS plays)
+    // Step 1: Display content FIRST (so user sees it while TTS plays)
     if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
+      debugPrint('TourManager: Showing display URL: ${stop.displayUrl}');
       _callback?.onDisplay(stop.displayUrl!, stop.displayDuration);
     } else {
       // Default: Show company name when no media configured
+      debugPrint('TourManager: Showing default branding for ${stop.waypoint}');
       _callback?.onDisplayDefault(stop.waypoint);
+    }
+
+    // Brief pause for display to render
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    // Step 2: Announce arrival if enabled (wait for TTS to finish)
+    if (_currentTour?.announceArrival == true) {
+      final arrivalText = 'Arrived at ${stop.waypoint}';
+      debugPrint('TourManager: Speaking arrival: $arrivalText');
+      _callback?.onSpeak(arrivalText);
+      final arrivalDuration = _estimateTtsDuration(arrivalText);
+      debugPrint('TourManager: Waiting ${arrivalDuration.inSeconds}s for arrival TTS');
+      await Future.delayed(arrivalDuration + const Duration(milliseconds: 500));
     }
 
     // Step 3: Speak custom text (wait for it to finish)
     if (stop.speakText != null && stop.speakText!.isNotEmpty) {
-      await Future.delayed(const Duration(milliseconds: 300)); // Brief pause before speaking
+      debugPrint('TourManager: Speaking tour text (${stop.speakText!.split(' ').length} words)');
       _callback?.onSpeak(stop.speakText!);
-      await Future.delayed(_estimateTtsDuration(stop.speakText!));
+      final ttsDuration = _estimateTtsDuration(stop.speakText!);
+      debugPrint('TourManager: Waiting ${ttsDuration.inSeconds}s for tour TTS');
+      await Future.delayed(ttsDuration);
     }
 
     // Step 4: Wait at stop then continue
+    // Wait time is ADDITIONAL time after TTS - media stays until robot leaves
+    // Minimum wait: 10 seconds for media to play, or displayDuration if specified
+    final minMediaTime = (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) ? 10 : 0;
     final waitTime = stop.waitSeconds > 0
         ? stop.waitSeconds
-        : (stop.displayDuration > 0 ? stop.displayDuration : 3);
+        : (stop.displayDuration > 0 ? stop.displayDuration : minMediaTime);
 
+    debugPrint('TourManager: Extra wait time: ${waitTime}s before next stop (media plays until departure)');
     _waitTimer = Timer(Duration(seconds: waitTime), () {
-      _callback?.onCloseDisplay();
+      debugPrint('TourManager: Wait complete, navigating to next stop (display stays until departure)');
+      // NOTE: Do NOT close display here - it stays until robot leaves (AudioAnnouncer handles that)
       _navigateToNextStop();
     });
   }

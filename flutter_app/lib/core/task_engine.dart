@@ -218,6 +218,7 @@ class WaypointModeAssignment {
 abstract class TaskExecutorCallback {
   void onSpeak(String text);
   void onDisplay(String url, int durationSeconds);
+  void onDisplayDefault(String waypoint); // Show default waypoint display
   void onCloseDisplay();
   void onNavigate(String waypoint);
   void onWait(int seconds);
@@ -391,8 +392,10 @@ class TaskEngine extends ChangeNotifier {
       {String? fromWaypoint}) async {
     final assignment = _assignments[waypoint];
     if (assignment == null || assignment.modeId == null) {
-      // No mode - just announce arrival if callback set
+      // No mode - announce arrival and show default display
+      // NOTE: Display stays until robot leaves (AudioAnnouncer closes it on nav start)
       if (_callback != null) {
+        _callback!.onDisplayDefault(waypoint);
         _callback!.onSpeak('Arrived at $waypoint');
       }
       return;

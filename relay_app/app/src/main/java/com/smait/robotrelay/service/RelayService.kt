@@ -97,6 +97,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         private set
     lateinit var relayServer: RelayServer
         private set
+    private var discoveryService: DiscoveryService? = null
 
     // Current task execution state
     private val _currentTask = MutableStateFlow<WaypointTask?>(null)
@@ -262,6 +263,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         // Start relay server
         relayServer.start()
 
+        // Start UDP discovery service for auto-discovery
+        discoveryService = DiscoveryService(relayPort, robotClient)
+        discoveryService?.start()
+
         // Update notification with status
         scope.launch {
             robotClient.connectionState.collect { state ->
@@ -276,6 +281,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         Log.i(TAG, "Service destroying")
         fleetSyncJob?.cancel()
         fleetClient.destroy()
+        discoveryService?.destroy()
         cloudTts?.destroy()
         tts?.stop()
         tts?.shutdown()
