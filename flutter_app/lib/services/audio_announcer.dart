@@ -130,9 +130,17 @@ class AudioAnnouncer {
   /// Initialize TTS engine and load presets
   Future<void> init() async {
     if (kIsWeb) {
-      // Web TTS has limited support
+      // Web TTS has limited support and requires user interaction
       _tts = FlutterTts();
-      await _tts!.setLanguage('en-US');
+      try {
+        await _tts!.setLanguage('en-US');
+        // Web TTS may fail silently or throw - we handle errors in speak()
+        _tts!.setErrorHandler((msg) {
+          debugPrint('AudioAnnouncer: Web TTS error: $msg');
+        });
+      } catch (e) {
+        debugPrint('AudioAnnouncer: Web TTS init error: $e');
+      }
       await _loadPresets();
       return;
     }
@@ -201,6 +209,21 @@ class AudioAnnouncer {
   Future<void> speak(String text) async {
     if (!_enabled) return;
 
+    debugPrint('Announcing: $text');
+
+    // Forward to tablet if connected - this is the PRIMARY TTS for web
+    // since browser TTS often fails due to user interaction requirements
+    final robot = _robotConnection;
+    if (robot != null && robot.isConnected) {
+      try {
+        robot.client.tabletSpeak(text);
+        // On web, tablet TTS is preferred - skip local TTS attempt
+        if (kIsWeb) return;
+      } catch (e) {
+        debugPrint('AudioAnnouncer: Failed to forward to tablet: $e');
+      }
+    }
+
     // Reinitialize TTS if needed
     if (_tts == null) {
       try {
@@ -208,18 +231,6 @@ class AudioAnnouncer {
       } catch (e) {
         debugPrint('AudioAnnouncer: Failed to reinit TTS: $e');
         return;
-      }
-    }
-
-    debugPrint('Announcing: $text');
-
-    // Forward to tablet if connected (check before async operations)
-    final robot = _robotConnection;
-    if (robot != null && robot.isConnected) {
-      try {
-        robot.client.tabletSpeak(text);
-      } catch (e) {
-        debugPrint('AudioAnnouncer: Failed to forward to tablet: $e');
       }
     }
 
