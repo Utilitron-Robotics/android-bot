@@ -18,7 +18,8 @@ class WaypointGrid extends StatefulWidget {
   State<WaypointGrid> createState() => _WaypointGridState();
 }
 
-class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCallback {
+class _WaypointGridState extends State<WaypointGrid>
+    implements TaskExecutorCallback {
   String? _navigatingTo;
   String? _lastWaypoint;
   int? _lastNavStatus;
@@ -135,8 +136,7 @@ class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCall
                       Tooltip(
                         message: 'Task running',
                         child: Icon(Icons.play_circle,
-                          size: 20,
-                          color: Colors.green.shade600),
+                            size: 20, color: Colors.green.shade600),
                       ),
                     const SizedBox(width: 8),
                     // Cancel button
@@ -199,7 +199,9 @@ class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCall
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: widget.waypoints.map((wp) => _buildWaypointButton(robot, wp)).toList(),
+      children: widget.waypoints
+          .map((wp) => _buildWaypointButton(robot, wp))
+          .toList(),
     );
   }
 
@@ -210,9 +212,8 @@ class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCall
     return GestureDetector(
       onLongPress: () => _showModeConfigDialog(waypoint),
       child: FilledButton.tonal(
-        onPressed: robot.status.isMoving
-            ? null
-            : () => _goToWaypoint(robot, waypoint),
+        onPressed:
+            robot.status.isMoving ? null : () => _goToWaypoint(robot, waypoint),
         style: FilledButton.styleFrom(
           backgroundColor: isNavigating ? Colors.green.shade700 : null,
         ),
@@ -255,7 +256,8 @@ class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCall
         ),
         const SizedBox(width: 8),
         IconButton.filled(
-          onPressed: robot.status.isMoving ? null : () => _goToCustomWaypoint(robot),
+          onPressed:
+              robot.status.isMoving ? null : () => _goToCustomWaypoint(robot),
           icon: const Icon(Icons.send),
         ),
       ],
@@ -266,9 +268,8 @@ class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCall
     return name
         .replaceAll('_', ' ')
         .split(' ')
-        .map((word) => word.isEmpty
-            ? ''
-            : '${word[0].toUpperCase()}${word.substring(1)}')
+        .map((word) =>
+            word.isEmpty ? '' : '${word[0].toUpperCase()}${word.substring(1)}')
         .join(' ');
   }
 
@@ -278,7 +279,9 @@ class _WaypointGridState extends State<WaypointGrid> implements TaskExecutorCall
 
     // Quick check: if robot didn't start moving within 1.5s, assume already there
     Future.delayed(const Duration(milliseconds: 1500), () {
-      if (mounted && _navigatingTo == waypoint && robot.status.navStatus != 601) {
+      if (mounted &&
+          _navigatingTo == waypoint &&
+          robot.status.navStatus != 601) {
         setState(() => _navigatingTo = null);
       }
     });
@@ -350,8 +353,10 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
       _selectedModeId = assignment.modeId;
       _speakController.text = assignment.params['speak_text'] ?? '';
       _displayController.text = assignment.params['display_url'] ?? '';
-      _waitSeconds = int.tryParse(assignment.params['wait_seconds'] ?? '30') ?? 30;
-      _displayDuration = int.tryParse(assignment.params['display_duration'] ?? '5') ?? 5;
+      _waitSeconds =
+          int.tryParse(assignment.params['wait_seconds'] ?? '30') ?? 30;
+      _displayDuration =
+          int.tryParse(assignment.params['display_duration'] ?? '5') ?? 5;
     }
   }
 
@@ -376,10 +381,11 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Mode selector
-              const Text('Select Mode:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('Select Mode:',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               DropdownButtonFormField<String?>(
-                value: _selectedModeId,
+                initialValue: _selectedModeId,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   isDense: true,
@@ -390,15 +396,15 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
                     child: Text('None (just announce arrival)'),
                   ),
                   ...modes.map((m) => DropdownMenuItem(
-                    value: m.id,
-                    child: Row(
-                      children: [
-                        Icon(_getModeIcon(m.id), size: 18),
-                        const SizedBox(width: 8),
-                        Text(m.name),
-                      ],
-                    ),
-                  )),
+                        value: m.id,
+                        child: Row(
+                          children: [
+                            Icon(_getModeIcon(m.id), size: 18),
+                            const SizedBox(width: 8),
+                            Text(m.name),
+                          ],
+                        ),
+                      )),
                 ],
                 onChanged: (v) => setState(() => _selectedModeId = v),
               ),
@@ -412,13 +418,15 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
               const Divider(height: 24),
 
               // Mode-specific parameters
-              if (_selectedModeId == 'delivery' || _selectedModeId == 'announce') ...[
+              if (_selectedModeId == 'delivery' ||
+                  _selectedModeId == 'announce') ...[
                 // Speak text
-                Row(
+                const Row(
                   children: [
-                    const Icon(Icons.volume_up, size: 20),
-                    const SizedBox(width: 8),
-                    const Text('Speak', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Icon(Icons.volume_up, size: 20),
+                    SizedBox(width: 8),
+                    Text('Speak',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -434,11 +442,12 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
                 const SizedBox(height: 16),
 
                 // Display URL
-                Row(
+                const Row(
                   children: [
-                    const Icon(Icons.tv, size: 20),
-                    const SizedBox(width: 8),
-                    const Text('Display', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Icon(Icons.tv, size: 20),
+                    SizedBox(width: 8),
+                    Text('Display',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -464,7 +473,8 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
                         min: 10,
                         max: 120,
                         divisions: 11,
-                        onChanged: (v) => setState(() => _waitSeconds = v.round()),
+                        onChanged: (v) =>
+                            setState(() => _waitSeconds = v.round()),
                       ),
                     ),
                     Text('${_waitSeconds}s'),
@@ -477,7 +487,8 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
               ],
 
               // Announce-specific options
-              if (_selectedModeId == 'announce' && _displayController.text.isNotEmpty) ...[
+              if (_selectedModeId == 'announce' &&
+                  _displayController.text.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -488,10 +499,13 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
                         min: 0,
                         max: 60,
                         divisions: 12,
-                        onChanged: (v) => setState(() => _displayDuration = v.round()),
+                        onChanged: (v) =>
+                            setState(() => _displayDuration = v.round()),
                       ),
                     ),
-                    Text(_displayDuration == 0 ? 'Until leave' : '${_displayDuration}s'),
+                    Text(_displayDuration == 0
+                        ? 'Until leave'
+                        : '${_displayDuration}s'),
                   ],
                 ),
               ],
@@ -511,15 +525,19 @@ class _ModeConfigDialogState extends State<_ModeConfigDialog> {
           ),
         FilledButton(
           onPressed: () {
-            Navigator.pop(context, _ModeConfigResult(
-              modeId: _selectedModeId,
-              params: {
-                if (_speakController.text.isNotEmpty) 'speak_text': _speakController.text,
-                if (_displayController.text.isNotEmpty) 'display_url': _displayController.text,
-                'wait_seconds': _waitSeconds.toString(),
-                'display_duration': _displayDuration.toString(),
-              },
-            ));
+            Navigator.pop(
+                context,
+                _ModeConfigResult(
+                  modeId: _selectedModeId,
+                  params: {
+                    if (_speakController.text.isNotEmpty)
+                      'speak_text': _speakController.text,
+                    if (_displayController.text.isNotEmpty)
+                      'display_url': _displayController.text,
+                    'wait_seconds': _waitSeconds.toString(),
+                    'display_duration': _displayDuration.toString(),
+                  },
+                ));
           },
           child: const Text('Save'),
         ),

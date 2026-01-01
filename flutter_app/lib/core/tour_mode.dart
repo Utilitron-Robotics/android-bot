@@ -181,6 +181,7 @@ enum TourStatus {
 abstract class TourExecutorCallback {
   void onSpeak(String text);
   void onDisplay(String url, int durationSeconds);
+  void onDisplayDefault(String waypoint);  // Show company branding when no media
   void onCloseDisplay();
   void onNavigate(String waypoint);
   void onTourStarted(Tour tour);
@@ -242,6 +243,7 @@ class TourManager extends ChangeNotifier {
       }
       _loaded = true;
       debugPrint('TourManager: Loaded ${_tours.length} tours');
+      notifyListeners(); // Notify UI of loaded tours
     } catch (e) {
       debugPrint('TourManager: Failed to load: $e');
     }
@@ -316,41 +318,51 @@ class TourManager extends ChangeNotifier {
     }
   }
 
-  /// Execute actions at current stop
+  /// Estimate TTS duration based on text length (roughly 150 words/min)
+  Duration _estimateTtsDuration(String text) {
+    final words = text.split(' ').length;
+    final seconds = (words / 2.5).ceil(); // ~150 words/min = 2.5 words/sec
+    return Duration(seconds: seconds.clamp(1, 30));
+  }
+
+  /// Execute actions at current stop - properly sequenced to avoid race conditions
   Future<void> _executeStopActions() async {
     final stop = currentStop;
     if (stop == null) return;
 
     _callback?.onStopArrived(stop, _currentStopIndex);
 
-    // Announce arrival if enabled
+    // Step 1: Announce arrival if enabled (wait for TTS to finish)
     if (_currentTour?.announceArrival == true) {
-      _callback?.onSpeak('Arrived at ${stop.waypoint}');
-      await Future.delayed(const Duration(milliseconds: 500));
+      final arrivalText = 'Arrived at ${stop.waypoint}';
+      _callback?.onSpeak(arrivalText);
+      await Future.delayed(_estimateTtsDuration(arrivalText) + const Duration(milliseconds: 500));
     }
 
-    // Speak text
-    if (stop.speakText != null && stop.speakText!.isNotEmpty) {
-      _callback?.onSpeak(stop.speakText!);
-    }
-
-    // Display URL
+    // Step 2: Display content FIRST (so user sees it while TTS plays)
     if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
       _callback?.onDisplay(stop.displayUrl!, stop.displayDuration);
+    } else {
+      // Default: Show company name when no media configured
+      _callback?.onDisplayDefault(stop.waypoint);
     }
 
-    // Wait if configured
-    if (stop.waitSeconds > 0 || stop.displayDuration > 0) {
-      final waitTime = stop.waitSeconds > 0 ? stop.waitSeconds : stop.displayDuration;
-      _waitTimer = Timer(Duration(seconds: waitTime), () {
-        _callback?.onCloseDisplay();
-        _navigateToNextStop();
-      });
-    } else {
-      // Brief pause then continue
-      await Future.delayed(const Duration(seconds: 3));
-      _navigateToNextStop();
+    // Step 3: Speak custom text (wait for it to finish)
+    if (stop.speakText != null && stop.speakText!.isNotEmpty) {
+      await Future.delayed(const Duration(milliseconds: 300)); // Brief pause before speaking
+      _callback?.onSpeak(stop.speakText!);
+      await Future.delayed(_estimateTtsDuration(stop.speakText!));
     }
+
+    // Step 4: Wait at stop then continue
+    final waitTime = stop.waitSeconds > 0
+        ? stop.waitSeconds
+        : (stop.displayDuration > 0 ? stop.displayDuration : 3);
+
+    _waitTimer = Timer(Duration(seconds: waitTime), () {
+      _callback?.onCloseDisplay();
+      _navigateToNextStop();
+    });
   }
 
   /// Navigate to next stop

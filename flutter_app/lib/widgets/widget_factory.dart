@@ -8,6 +8,7 @@ import 'voice_control.dart';
 import 'map_view.dart';
 import 'tablet_control_panel.dart';
 import 'tour_editor.dart';
+import 'announcement_presets.dart';
 
 /// Dynamically generates UI widgets based on discovered robot capabilities
 class WidgetFactory {
@@ -55,10 +56,30 @@ class WidgetFactory {
       widgets.add(ParameterList(parameters: capabilities.parameters));
     }
 
+    // Announcement presets editor
+    widgets.add(_buildAnnouncementsSection());
+
     // Discovery summary (collapsible)
     widgets.add(_buildDiscoverySummary());
 
     return widgets;
+  }
+
+  Widget _buildAnnouncementsSection() {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: ExpansionTile(
+        title: const Text('Announcements'),
+        leading: const Icon(Icons.campaign),
+        subtitle: const Text('Configure blocked path and custom announcements'),
+        children: [
+          const SizedBox(
+            height: 350,
+            child: AnnouncementPresetsEditor(),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildTourSection(List<String> waypoints) {
@@ -68,6 +89,7 @@ class WidgetFactory {
         title: const Text('Tour Mode'),
         leading: const Icon(Icons.tour),
         subtitle: const Text('Create guided tours with waypoint sequences'),
+        initiallyExpanded: true,  // Start expanded for debugging
         children: [
           SizedBox(
             height: 400,
