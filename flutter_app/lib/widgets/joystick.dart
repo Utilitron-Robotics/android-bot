@@ -228,42 +228,48 @@ class _JoystickControlState extends State<JoystickControl> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Header with title
+            // Header with title (compact for narrow layouts)
             Row(
               children: [
-                Icon(Icons.gamepad,
+                Icon(Icons.gamepad, size: 18,
                   color: _slamSafe ? Colors.orange : null),
-                const SizedBox(width: 8),
-                Text(
-                  'Manual Control',
-                  style: Theme.of(context).textTheme.titleLarge,
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    'Control',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 if (_slamSafe)
                   Container(
-                    margin: const EdgeInsets.only(left: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    margin: const EdgeInsets.only(left: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.orange,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text('SAFE',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
                   ),
               ],
             ),
             const SizedBox(height: 12),
 
-            // Control toggles row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Control toggles - compact for narrow layouts
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 4,
               children: [
-                // SLAM Safe toggle
+                // SLAM Safe toggle (compact)
                 FilterChip(
-                  label: const Text('SLAM Safe'),
+                  label: const Text('Safe', style: TextStyle(fontSize: 11)),
                   avatar: Icon(_slamSafe ? Icons.shield : Icons.shield_outlined,
-                    size: 18),
+                    size: 16),
                   selected: _slamSafe,
                   selectedColor: Colors.orange.shade700,
+                  visualDensity: VisualDensity.compact,
                   onSelected: (value) {
                     setState(() => _slamSafe = value);
                     if (_audioEnabled) {
@@ -272,14 +278,14 @@ class _JoystickControlState extends State<JoystickControl> {
                     }
                   },
                 ),
-                const SizedBox(width: 12),
-                // Audio toggle
+                // Audio toggle (compact)
                 FilterChip(
-                  label: const Text('Audio'),
+                  label: const Text('Audio', style: TextStyle(fontSize: 11)),
                   avatar: Icon(_audioEnabled ? Icons.volume_up : Icons.volume_off,
-                    size: 18),
+                    size: 16),
                   selected: _audioEnabled,
                   selectedColor: Colors.blue.shade700,
+                  visualDensity: VisualDensity.compact,
                   onSelected: (value) {
                     setState(() => _audioEnabled = value);
                     AudioAnnouncer().enabled = value;
@@ -290,18 +296,18 @@ class _JoystickControlState extends State<JoystickControl> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
-            // Robot base speed mode selector
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Robot base speed mode selector (compact)
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
               children: [
-                const Icon(Icons.speed, size: 16),
-                const SizedBox(width: 8),
-                const Text('Base Mode: ', style: TextStyle(fontSize: 12)),
+                const Icon(Icons.speed, size: 14),
                 if (_speedModeLoading)
                   const SizedBox(
-                    width: 16, height: 16,
+                    width: 14, height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else
@@ -312,7 +318,7 @@ class _JoystickControlState extends State<JoystickControl> {
                     items: RobotSpeedMode.values.map((mode) {
                       return DropdownMenuItem(
                         value: mode,
-                        child: Text(mode.label, style: const TextStyle(fontSize: 12)),
+                        child: Text(mode.label, style: const TextStyle(fontSize: 11)),
                       );
                     }).toList(),
                     onChanged: (mode) {
@@ -345,16 +351,17 @@ class _JoystickControlState extends State<JoystickControl> {
             const SizedBox(height: 16),
 
             // Velocity and Distance display (shows actual ramped velocity)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 8,
               children: [
                 _VelocityIndicator(
-                  label: 'Linear',
+                  label: 'Lin',
                   value: _actualLinear,  // Show actual velocity being sent
                   max: _maxLinear,
                   unit: 'm/s',
                 ),
-                const SizedBox(width: 24),
                 // Distance gauge
                 _DistanceGauge(
                   distance: _minFrontRange,
@@ -362,28 +369,27 @@ class _JoystickControlState extends State<JoystickControl> {
                   creepDist: creepDistance,
                   warnDist: warnDistance,
                 ),
-                const SizedBox(width: 24),
                 _VelocityIndicator(
-                  label: 'Angular',
+                  label: 'Ang',
                   value: _actualAngular,  // Show actual velocity being sent
                   max: _maxAngular,
-                  unit: 'rad/s',
+                  unit: 'r/s',
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            // Obstacle zone indicator in safe mode
+            // Obstacle zone indicator in safe mode (compact)
             if (_slamSafe && _minFrontRange < warnDistance)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                margin: const EdgeInsets.only(bottom: 6),
                 decoration: BoxDecoration(
                   color: _minFrontRange < stopDistance
                       ? Colors.red.shade900
                       : _minFrontRange < creepDistance
                           ? Colors.orange.shade900
                           : Colors.yellow.shade900,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: _minFrontRange < stopDistance
                         ? Colors.red
@@ -402,15 +408,15 @@ class _JoystickControlState extends State<JoystickControl> {
                           : _minFrontRange < creepDistance
                               ? Colors.orange
                               : Colors.yellow,
-                      size: 16,
+                      size: 14,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     Text(
                       _minFrontRange < stopDistance
-                          ? 'STOPPED - ${_minFrontRange.toStringAsFixed(2)}m'
+                          ? 'STOP ${_minFrontRange.toStringAsFixed(1)}m'
                           : _minFrontRange < creepDistance
-                              ? 'CREEPING - ${_minFrontRange.toStringAsFixed(2)}m'
-                              : 'WARNING - ${_minFrontRange.toStringAsFixed(2)}m',
+                              ? 'CREEP ${_minFrontRange.toStringAsFixed(1)}m'
+                              : 'WARN ${_minFrontRange.toStringAsFixed(1)}m',
                       style: TextStyle(
                         color: _minFrontRange < stopDistance
                             ? Colors.red
@@ -418,7 +424,7 @@ class _JoystickControlState extends State<JoystickControl> {
                                 ? Colors.orange
                                 : Colors.yellow,
                         fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                        fontSize: 10,
                       ),
                     ),
                   ],
@@ -426,11 +432,13 @@ class _JoystickControlState extends State<JoystickControl> {
               ),
             Text(
               _slamSafe
-                ? 'Safe: Stop<${stopDistance}m • Creep<${creepDistance}m • Warn<${warnDistance}m'
-                : 'Drag to control • Full speed (${maxLinearFast}m/s)',
+                ? 'Stop<${stopDistance}m Creep<${creepDistance}m'
+                : 'Drag • ${maxLinearFast}m/s max',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: _slamSafe ? Colors.orange : Colors.grey,
+                fontSize: 10,
               ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),

@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/robot_connection.dart';
 import 'core/fleet_discovery.dart';
-import 'screens/home_screen.dart';
+import 'core/tour_mode.dart';
+import 'screens/hud_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Load saved tours before app starts
+  await TourManager.instance.load();
   runApp(const DroidControllerApp());
 }
 
@@ -17,18 +21,19 @@ class DroidControllerApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => RobotConnection()),
         ChangeNotifierProvider(create: (_) => FleetDiscovery()),
+        ChangeNotifierProvider.value(value: TourManager.instance),
       ],
       child: MaterialApp(
         title: 'Droid Controller',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
-            seedColor: Colors.blue,
+            seedColor: const Color(0xFF00D4FF), // Cyberpunk cyan
             brightness: Brightness.dark,
           ),
           useMaterial3: true,
         ),
-        home: const HomeScreen(),
+        home: const HudScreen(),
       ),
     );
   }
