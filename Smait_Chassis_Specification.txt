@@ -1,0 +1,134 @@
+# Smait Chassis Specification
+## Intelligent Mobile Robot Platform - smBaseD
+
+## 1. Product Overview
+smBaseD, our intelligent mobile robot platform is built to serve the needs of our robots, forming the core structure for all robotic solutions in the Smait product line. Designed for durability, adaptability, and precision, this chassis is integral to the development, scalability, and deployment of Smait technologies across various applications. Featuring advanced mobility systems, modular compatibility, and robust materials, smBaseD seamlessly integrates cutting-edge technologies, including multi-sensor fusion, SLAM-based positioning and mapping, multiple operational modes, and coordinated multi-robot operation. Enhanced by cloud-based management, IoT control systems, automated charging, and flexible motion control, it ensures exceptional adaptability, precision, and efficiency while minimizing operational complexity and costs in dynamic environments.
+
+## 3. Product Specifications
+
+### 3.1 Basic Information
+| Parameter | Specs |
+|-----------|-------|
+| Dimensions | 500mmL * 500mmW * 310mmH |
+| Weight | 35kg |
+| Max Load | 59kg |
+| No-load Battery Life | 12h |
+| Charging Time | 4h |
+| Maximum Load Capacity | 50kg |
+| Battery Capacity | 24V/20AH = 480Wh |
+| Chassis Form | 2* Drive Wheels + 4* Omni-directional + 1* Fixed Wheel |
+| Maximum Navigation Speed | 0.8m/s (Adjustable Speed) |
+| Obstacle Avoidance Distance | 80cm |
+| Chassis Inclination | 5° |
+| Obstacle Clearance Height | 10mm |
+| Minimum Obstacle Clearance | 40mm |
+| Turning Radius | 0mm |
+| Maximum Rotation Speed | 60°/s |
+| Positioning Accuracy | ±5cm |
+| Mapping Area | 10000m² (Up to 30000m²) |
+| Repeat Positioning Accuracy | ±5cm |
+
+### Expansion Interface
+| Parameter | Specs |
+|-----------|-------|
+| Power Input Interface | 24V (200W Power) |
+| USB Ports | 2 Ports, Expandable |
+| Network Interface | RJ45, Optional Wireless Network |
+| Physical Expansion Interface | Structural Accessories |
+| Other Interfaces | System Switch, Thermal Switch |
+
+### Charging Parameters
+| Parameter | Specs |
+|-----------|-------|
+| Input Voltage | AC 110-240V |
+| Output Voltage | 29.4V |
+| Maximum Charging Current | 7A |
+| Protection Mechanism | Short Circuit, Overcurrent, etc. |
+
+### Environmental Requirements
+| Parameter | Specs |
+|-----------|-------|
+| Storage Temperature | -10°C~60°C |
+| Operating Temperature | 5°C~40°C |
+
+## 3.2 API Port Interface
+| No. | Function | Description |
+|-----|----------|-------------|
+| 1 | Network Connection | Web socket server connection/disconnection |
+| 2 | Robot Position | Coordinates of the robot on the map |
+| 3 | Full Status Information | Full status (battery level, navigation status, software/hardware emergency stop, floor name) |
+| 4 | Complete Map Data | Display map |
+| 5 | Radar Data | Display radar data |
+| 6 | Navigation Path Planning | Display the planned navigation path |
+| 7 | Navigation Status | The current navigation status returned |
+| 8 | Detailed Recharge Status | Return status information for recharging |
+| 9 | Speed Control | Manual remote control of the robot |
+| 10 | Publish Target Point (Coordinate Mode) | Select a point on the map for navigation |
+| 11 | Cancel Navigation | Cancel current navigation |
+| 12 | Set Initial Position (Coordinate Mode) | Select a point on the map to set as the initial position |
+| 13 | Set Recharge Dock Position | Select a point on the map to set as the recharge dock position |
+| 14 | Soft Emergency Stop | Enable/disable soft emergency stop |
+| 15 | Virtual Wall Setting (Overlay Mode) | Set virtual wall information in one go |
+| 16 | Virtual Wall Setting (Append Mode) | Append virtual wall information to system cache |
+| 17 | Mark Point (Overlay Mode) | Set mark point information in one go |
+| 18 | Mark Point (Append Mode) | Append mark point information to system cache |
+| 19 | Insert Current Position as Mark Point | Set the current robot position as a mark point |
+| 20 | Map Editing Function | Interface for map editing functionality |
+| 21 | Recharge Dock Alignment | Start recharge alignment independently (infrared alignment only, no navigation) |
+| 22 | Program Control Framework | Control overall robot state, switch between mapping, navigation, and map modes |
+| 23 | List System Map | List all available maps in the current system |
+| 24 | Delete Map | Delete a specified map and its information |
+| 25 | Get Current Mark Point List | Retrieve the list of mark points associated with the current map |
+| 26 | Delete All Mark Points | Delete all mark points associated with the current map |
+| 27 | Delete Single Mark Point (By Name) | Delete a specific mark point by name |
+| 28 | Get Current Virtual Wall List | Retrieve the list of virtual walls associated with the current map |
+| 29 | Delete All Virtual Walls | Delete all virtual walls associated with the current map |
+| 30 | Delete Single Virtual Wall (By Name) | Delete a specific virtual wall by name |
+| 31 | Publish Single Navigation (By Name) | Navigate to a specific point by its name |
+| 32 | Set Initial Position (By Name) | Set the initial position by its name |
+| 33 | Multi-Point Navigation Control (By Name) | Start or stop multi-point navigation |
+| 34 | Recharge Control Interface | Start or stop recharging |
+| 35 | Get Current Map Metadata | Retrieve the map's coordinate origin and dimensions |
+| 36 | Modify Navigation Speed | Adjust the robot's movement speed during navigation |
+| 37 | Version Update | Update code via USB or network |
+
+## 3.3 Product Functions
+| No. | Function | Description |
+|-----|----------|-------------|
+| 1 | Mapping | Uses SLAM algorithm and sensor data for incremental mapping in unknown areas, with loop closure functionality |
+| 2 | High-Precision Localization | Performs high-precision localization using sensor data in known maps |
+| 3 | Path Planning | Plans a reasonable and efficient path for the robot to follow after setting a target point |
+| 4 | Autonomous Obstacle Avoidance | Avoids unknown obstacles during navigation based on the global path |
+| 5 | Autonomous Charging | Returns to the charging dock when the battery is low or on user command |
+| 6 | Multi-Point Navigation | Executes tasks with multi-point navigation programs on the robot |
+| 7 | Ultrasonic-Assisted Obstacle Avoidance | Optional feature for detecting special obstacles like glass |
+| 8 | Floor Map Management | Saves and loads maps by building floor names for easy switching |
+| 9 | Map Management | Saves mapping information, loads maps for localization and navigation |
+| 10 | Map Editing | Edits created maps to optimize display, mark additional obstacles |
+| 11 | Wireless Remote Control | Controls the robot's movement via a mobile app |
+| 12 | Virtual Wall | Allows users to set virtual walls to restrict robot from entering specific areas |
+| 13 | Upper-Level Communication | Enables interaction with the robot via network communication |
+| 14 | Depth Camera Stereo Obstacle Avoidance | Uses a depth camera to detect obstacles in three-dimensional space |
+| 15 | Software/Hardware Emergency Stop | Supports emergency stop via software or hardware |
+| 16 | Manual Relocation | Allows manual setting of the robot's position on the map |
+| 17 | Remote/Local Code Updates | Supports algorithm and code updates via network or USB |
+| 18 | Dynamic Navigation Speed Adjustment | Enables setting of different speed modes for robot navigation |
+| 19 | Multi-Attribute Mark Point Management | Supports setting attributes for marked points |
+| 20 | Global Self-Localization | Automatically calibrates the robot's position on the map |
+
+## 3.4 Product External Connection Interface
+1: Power Port: 24V/10A with overcurrent and short circuit protection, and current monitoring.
+   - 1.1: Positive
+   - 1.3: Negative
+
+2: USB Expansion Interface: USB 2.0 expansion port x2.
+
+3: Network Port: Used for chassis communication, TCP/IP protocol.
+   - Upper Port: Upper Computer Camera
+   - Lower Port: External USB
+
+4: Switch Interface: Used to connect emergency stop devices.
+   - 4.2 and 4.3 ports are for emergency stop
+   - 4.5 and 4.6 are for system startup
+
+PIN Pitch Connector: 5.08mm and 3.81mm

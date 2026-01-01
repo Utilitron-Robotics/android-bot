@@ -12,7 +12,7 @@ This is the native Android implementation of the TourBot application, migrated f
 1.  **Open the Project:**
     *   Launch Android Studio.
     *   Select **Open**.
-    *   Navigate to the `android` folder inside the `tour-bot-main` repository (e.g., `/Users/crackerjack/dev/GitHub/tour-bot-main/android`).
+    *   Navigate to the project root folder (e.g., `/Users/crackerjack/dev/GitHub/android-bot`).
     *   Click **Open**.
 
 2.  **Sync Gradle:**
