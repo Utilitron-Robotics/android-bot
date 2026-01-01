@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
+import '../services/robot_introspection.dart';
 import '../widgets/widget_factory.dart';
 import '../widgets/fleet_picker.dart';
 import '../widgets/message_log.dart';
@@ -29,6 +30,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final _urlController = TextEditingController();
   ConnectionMode _connectionMode = ConnectionMode.direct;
 
+  // Cache generated widgets to prevent recreation on every robot status update
+  List<Widget>? _cachedWidgets;
+  RobotCapabilities? _cachedCapabilities;
+  String? _cachedRelayUrl;
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +45,23 @@ class _HomeScreenState extends State<HomeScreen> {
       // Detect mode from saved URL
       _detectModeFromUrl(robot.robotUrl);
     });
+  }
+
+  /// Get cached widgets, regenerating only when capabilities or relay URL changes
+  List<Widget> _getWidgets(RobotCapabilities capabilities, String? relayUrl) {
+    // Only regenerate if capabilities or relay URL changed
+    if (_cachedWidgets == null ||
+        _cachedCapabilities != capabilities ||
+        _cachedRelayUrl != relayUrl) {
+      debugPrint('HomeScreen: Regenerating widgets (capabilities changed)');
+      _cachedCapabilities = capabilities;
+      _cachedRelayUrl = relayUrl;
+      _cachedWidgets = WidgetFactory(
+        capabilities,
+        relayHttpUrl: relayUrl,
+      ).generateWidgets(context);
+    }
+    return _cachedWidgets!;
   }
 
   void _detectModeFromUrl(String url) {
@@ -138,10 +161,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.all(16),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate(
-                      WidgetFactory(
-                        robot.capabilities!,
-                        relayHttpUrl: _getRelayHttpUrl(),
-                      ).generateWidgets(context),
+                      // Use cached widgets to prevent recreation on every status update
+                      _getWidgets(robot.capabilities!, _getRelayHttpUrl()),
                     ),
                   ),
                 )
@@ -267,10 +288,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _connect(RobotConnection robot) {
-    final url = _urlController.text.trim();
-    if (url.isNotEmpty) {
-      robot.connect(url);
+    var url = _urlController.text.trim();
+    if (url.isEmpty) return;
+
+    // Convert HTTP URL to WebSocket URL for rosbridge connection
+    // HTTP is only for REST API calls (tablet tasks), not for rosbridge protocol
+    if (url.startsWith('http://')) {
+      final uri = Uri.tryParse(url);
+      if (uri != null) {
+        // Use WebSocket on port 8766 for rosbridge
+        url = 'ws://${uri.host}:8766';
+        debugPrint('HomeScreen: Converted HTTP URL to WebSocket: $url');
+      }
     }
+
+    robot.connect(url);
   }
 
   /// Get the HTTP relay URL for tablet tasks (if using relay mode)

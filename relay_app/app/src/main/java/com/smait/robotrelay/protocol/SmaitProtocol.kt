@@ -102,6 +102,19 @@ object SmaitProtocol {
         compression = "png"
     ))
 
+    /**
+     * Subscribe to map WITHOUT fragmentation/compression.
+     * Returns raw OccupancyGrid that Flutter can parse directly.
+     * Uses throttle_rate to limit map updates to every 5 seconds.
+     */
+    fun subscribeMapSimple(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_map_simple",
+        topic = TOPIC_MAP,
+        type = "nav_msgs/OccupancyGrid",
+        throttleRate = 5000
+    ))
+
     fun unsubscribe(topic: String, id: String): String = toJson(UnsubscribeMsg(
         op = OP_UNSUBSCRIBE,
         id = id,

@@ -54,6 +54,10 @@ class RelayServer(
     private val _connectedClients = MutableStateFlow(0)
     val connectedClients: StateFlow<Int> = _connectedClients
 
+    private var messageForwarderJob: Job? = null
+    private var connectionWatcherJob: Job? = null
+    private var lastRobotConnectedState = false
+
     fun start() {
         try {
             // Start HTTP server on port
@@ -70,18 +74,114 @@ class RelayServer(
             Log.i(TAG, "Relay server started on HTTP:$port, WS:${port + 1}")
 
             // Forward robot messages to connected WebSocket clients
-            scope.launch {
-                robotClient.incomingMessages.collect { message ->
-                    wsServer?.broadcast(message)
-                }
-            }
+            // Use SupervisorJob and restart on failure to handle client disconnects gracefully
+            startMessageForwarder()
+
+            // CRITICAL: Watch robot connection state and restart forwarder on reconnect
+            startConnectionWatcher()
         } catch (e: IOException) {
             Log.e(TAG, "Failed to start server: ${e.message}")
             _isRunning.value = false
         }
     }
 
+    /**
+     * Watch robot connection state and restart the message forwarder when robot reconnects.
+     * This is critical because the SharedFlow collect() can get stuck when robot disconnects.
+     */
+    private fun startConnectionWatcher() {
+        connectionWatcherJob?.cancel()
+        connectionWatcherJob = scope.launch {
+            robotClient.connectionState.collect { state ->
+                val isConnected = state == ConnectionState.CONNECTED
+                Log.i(TAG, "Robot connection state: $state (was connected: $lastRobotConnectedState)")
+
+                // Detect reconnection: was disconnected/error, now connected
+                if (isConnected && !lastRobotConnectedState) {
+                    Log.i(TAG, ">>> Robot reconnected! Restarting message forwarder...")
+                    // Give robot time to establish subscriptions
+                    delay(1000)
+                    startMessageForwarder()
+                }
+
+                lastRobotConnectedState = isConnected
+            }
+        }
+    }
+
+    /**
+     * Start the message forwarder coroutine with auto-restart on failure.
+     * This is critical for resilience - if a client disconnects abruptly (e.g., Flutter hot reload),
+     * the forwarder should continue working for other clients.
+     */
+    private fun startMessageForwarder() {
+        messageForwarderJob?.cancel()
+        messageForwarderJob = scope.launch {
+            var restartCount = 0
+            var mapMsgCount = 0
+            var lastMapTime = 0L
+            var lastMessageTime = System.currentTimeMillis()
+            var totalMessageCount = 0L
+
+            // Start liveness monitor that logs heartbeat every 10 seconds
+            val livenessJob = launch {
+                while (isActive) {
+                    delay(10_000)
+                    val timeSinceLastMsg = System.currentTimeMillis() - lastMessageTime
+                    val robotConnected = robotClient.connectionState.value == ConnectionState.CONNECTED
+                    Log.i(TAG, "Forwarder heartbeat: ${totalMessageCount} msgs, last msg ${timeSinceLastMsg}ms ago, robot=$robotConnected")
+
+                    // If robot is connected but we haven't received messages in 30 seconds, log warning
+                    if (robotConnected && timeSinceLastMsg > 30_000) {
+                        Log.w(TAG, ">>> WARNING: No messages in ${timeSinceLastMsg}ms despite robot being connected!")
+                    }
+                }
+            }
+
+            while (isActive && _isRunning.value) {
+                try {
+                    Log.i(TAG, "Message forwarder starting (restart #$restartCount)")
+                    robotClient.incomingMessages.collect { message ->
+                        try {
+                            lastMessageTime = System.currentTimeMillis()
+                            totalMessageCount++
+
+                            // Track /map messages specifically
+                            val isMapMsg = message.contains("\"/map\"") || message.contains("\"topic\":\"/map\"")
+                            if (isMapMsg) {
+                                mapMsgCount++
+                                Log.i(TAG, ">>> FORWARDING /map #$mapMsgCount (${message.length} bytes, ${lastMessageTime - lastMapTime}ms since last)")
+                                lastMapTime = lastMessageTime
+                            }
+
+                            wsServer?.broadcast(message)
+
+                            if (isMapMsg) {
+                                Log.i(TAG, ">>> /map #$mapMsgCount broadcast complete")
+                            }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Broadcast error (continuing): ${t.javaClass.simpleName}: ${t.message}")
+                        }
+                    }
+                    Log.i(TAG, "Message forwarder flow completed, will restart...")
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Message forwarder error: ${t.javaClass.simpleName}: ${t.message}")
+                    t.printStackTrace()
+                }
+                // Minimal delay before restart - speed is critical for safety
+                if (isActive && _isRunning.value) {
+                    restartCount++
+                    delay(100)  // Reduced from 500ms for faster recovery
+                }
+            }
+            livenessJob.cancel()
+            Log.i(TAG, "Message forwarder stopped")
+        }
+    }
+
     fun stop() {
+        connectionWatcherJob?.cancel()
+        messageForwarderJob?.cancel()
         httpServer?.stop()
         wsServer?.stop()
         _isRunning.value = false
@@ -134,6 +234,7 @@ class RelayHttpServer(
         }
 
         val response = when {
+            uri == "/discovery" && method == Method.GET -> handleDiscovery()
             uri == "/status" && method == Method.GET -> handleGetStatus()
             uri == "/cmd" && method == Method.POST -> handleRawCommand(session)
             uri == "/velocity" && method == Method.POST -> handleVelocity(session)
@@ -203,6 +304,22 @@ class RelayHttpServer(
             </html>
         """.trimIndent()
         return newFixedLengthResponse(Response.Status.OK, "text/html", html)
+    }
+
+    private fun handleDiscovery(): Response {
+        val status = robotClient.robotStatus.value
+        val data = mapOf(
+            "type" to "SMAIT_RELAY",
+            "version" to "1.0",
+            "relayHttpPort" to (this as NanoHTTPD).listeningPort,
+            "relayWsPort" to (this as NanoHTTPD).listeningPort + 1,
+            "robotConnected" to (robotClient.connectionState.value == ConnectionState.CONNECTED),
+            "robotIp" to robotClient.robotIp,
+            "deviceName" to android.os.Build.MODEL,
+            "battery" to (status?.battery ?: 0),
+            "navStatus" to (status?.navStatus ?: 0)
+        )
+        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(data))
     }
 
     private fun handleGetStatus(): Response {
@@ -458,13 +575,20 @@ class RelayWebSocketServer(
     }
 
     fun broadcast(message: String) {
+        val deadClients = mutableListOf<WebSocket>()
         synchronized(clients) {
             clients.forEach { client ->
                 try {
                     client.send(message)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Broadcast error: ${e.message}")
+                    Log.e(TAG, "Broadcast error, removing dead client: ${e.message}")
+                    deadClients.add(client)
                 }
+            }
+            // Remove dead clients
+            if (deadClients.isNotEmpty()) {
+                clients.removeAll(deadClients)
+                onClientCountChanged(clients.size)
             }
         }
     }

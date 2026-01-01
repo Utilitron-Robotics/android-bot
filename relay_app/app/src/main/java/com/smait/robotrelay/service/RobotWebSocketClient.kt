@@ -26,13 +26,13 @@ enum class SafetyZone {
  * allowing WiFi to remain connected for internet access.
  */
 class RobotWebSocketClient(
-    private val robotIp: String = "192.168.20.22",  // Wired IP, not WiFi hotspot
+    val robotIp: String = "192.168.20.22",  // Wired IP, not WiFi hotspot
     private val robotPort: Int = 9090,
     private val socketFactory: SocketFactory? = null
 ) {
     companion object {
         private const val TAG = "RobotWSClient"
-        private const val RECONNECT_DELAY_MS = 3000L
+        private const val RECONNECT_DELAY_MS = 1000L  // Reduced from 3000ms for faster recovery
 
         // Zone constants from Flutter app
         private const val STOP_DISTANCE = 0.20f
@@ -49,7 +49,8 @@ class RobotWebSocketClient(
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
-    private val _incomingMessages = MutableSharedFlow<String>(extraBufferCapacity = 100)
+    // Large buffer for message bursts - map messages are huge and frequent during nav
+    private val _incomingMessages = MutableSharedFlow<String>(extraBufferCapacity = 500)
     val incomingMessages: SharedFlow<String> = _incomingMessages
 
     private val _robotStatus = MutableStateFlow<RobotStatusData?>(null)
@@ -84,9 +85,23 @@ class RobotWebSocketClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            Log.d(TAG, text) // Log all raw messages
+            // Log map messages specially - they're huge and might be the issue
+            val isMapMsg = text.contains("\"/map\"") || text.contains("\"topic\":\"/map\"")
+            if (isMapMsg) {
+                Log.i(TAG, ">>> RECEIVED /map message (${text.length} bytes)")
+            } else {
+                Log.d(TAG, text.take(200)) // Truncate other messages
+            }
+
+            // Use tryEmit (non-blocking) instead of emit (suspending)
+            val emitted = _incomingMessages.tryEmit(text)
+            if (!emitted) {
+                Log.w(TAG, "Message buffer full, dropped: ${if (isMapMsg) "/map" else text.take(50)}")
+            } else if (isMapMsg) {
+                Log.i(TAG, ">>> /map message emitted to SharedFlow")
+            }
+
             scope.launch {
-                _incomingMessages.emit(text)
                 parseStatusUpdate(text)
             }
         }
@@ -143,6 +158,10 @@ class RobotWebSocketClient(
         send(SmaitProtocol.subscribeNaviStatus())
         send(SmaitProtocol.subscribeSensorsCore())
         send(SmaitProtocol.subscribeLaserData())
+        // Subscribe to /map so it's always flowing to Flutter clients
+        // This ensures map works after Flutter hot restart
+        send(SmaitProtocol.subscribeMapSimple())
+        Log.i(TAG, "Subscribed to /map (throttled 5s)")
     }
 
     private fun parseStatusUpdate(json: String) {

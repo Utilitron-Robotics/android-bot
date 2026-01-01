@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/robot_connection.dart';
+import '../core/tour_mode.dart';
 
 /// Preset announcement categories
 enum AnnouncementCategory {
@@ -238,12 +239,17 @@ class AudioAnnouncer {
   }
 
   /// Handle navigation status change
+  /// NOTE: Arrival announcements are handled by TaskEngine/WaypointGrid to avoid duplicates
+  /// This method only handles: navigation start, blocked path detection, cancellation, failure
   void onNavStatusChanged(int navStatus, String goalName) {
     if (navStatus == _lastNavStatus && goalName == _lastGoal) return;
 
     final previousStatus = _lastNavStatus;
     _lastNavStatus = navStatus;
     _lastGoal = goalName;
+
+    // Check if a tour is running - if so, let TourManager handle most announcements
+    final tourRunning = TourManager.instance.status == TourStatus.running;
 
     switch (navStatus) {
       case 601: // Moving
@@ -252,37 +258,36 @@ class AudioAnnouncer {
           _closeTabletDisplay();
         }
         if (previousStatus != 601 && goalName.isNotEmpty) {
-          speak('Navigating to $goalName');
-          // Start blocked path detection
+          // Only announce navigation start if not in tour mode
+          if (!tourRunning) {
+            speak('Navigating to $goalName');
+          }
+          // Start blocked path detection (always, even during tours)
           _startBlockedDetection();
         }
         break;
       case 603: // Arrived
         _stopBlockedDetection();  // Successfully arrived, stop checking
-        if (goalName.isNotEmpty) {
-          speak('Arrived at $goalName');
-          // Display waypoint name on tablet screen
-          _displayWaypointOnTablet(goalName);
-        } else {
-          speak('Destination reached');
-        }
+        // NOTE: Arrival announcements are now handled by TaskEngine via WaypointGrid callback
+        // to avoid duplicate announcements. Don't announce here.
         break;
       case 602: // Cancelled
         _stopBlockedDetection();  // Navigation cancelled
         _closeTabletDisplay(); // Close display on cancel
-        speak('Navigation cancelled');
+        if (!tourRunning) {
+          speak('Navigation cancelled');
+        }
         break;
       case 604: // Failed
         _stopBlockedDetection();  // Navigation failed
         _closeTabletDisplay(); // Close display on failure
-        speak('Navigation failed. Path blocked.');
+        if (!tourRunning) {
+          speak('Navigation failed. Path blocked.');
+        }
         break;
       case 600: // Idle
         _stopBlockedDetection();  // No longer navigating
-        // Don't announce idle unless we were moving
-        if (previousStatus == 601) {
-          speak('Stopped');
-        }
+        // Don't announce idle - too noisy
         break;
     }
   }
@@ -354,37 +359,6 @@ class AudioAnnouncer {
       robot.client.tabletCloseDisplay();
     } catch (e) {
       debugPrint('AudioAnnouncer: Failed to close tablet display: $e');
-    }
-  }
-
-  /// Display waypoint name on tablet screen when arrived
-  void _displayWaypointOnTablet(String goalName) {
-    final robot = _robotConnection;
-    if (robot == null || !robot.isConnected) return;
-
-    // Format the name nicely (convert snake_case to Title Case)
-    final displayName = goalName
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map((word) => word.isEmpty
-            ? ''
-            : '${word[0].toUpperCase()}${word.substring(1)}')
-        .join(' ');
-
-    // Show waypoint name on tablet with dark background
-    final html = 'data:text/html,<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:%23222;"><h1 style="color:white;font-size:72px;font-family:sans-serif;">$displayName</h1></body></html>';
-
-    try {
-      robot.client.tabletDisplay(html);
-
-      // Auto-close after 5 seconds
-      Future.delayed(const Duration(seconds: 5), () {
-        if (_robotConnection?.isConnected == true) {
-          _robotConnection!.client.tabletCloseDisplay();
-        }
-      });
-    } catch (e) {
-      debugPrint('AudioAnnouncer: Failed to display on tablet: $e');
     }
   }
 
