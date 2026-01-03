@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/robot_connection.dart';
-import '../core/tour_mode.dart';
+import '../core/sequence_mode.dart';
 
 /// Preset announcement categories
 enum AnnouncementCategory {
@@ -500,8 +500,8 @@ class AudioAnnouncer {
 
     debugPrint('AudioAnnouncer: Nav status $previousStatus -> $navStatus, goal: $previousGoal -> $goalName');
 
-    // Check if a tour is running - if so, let TourManager handle most announcements
-    final tourRunning = TourManager.instance.status == TourStatus.running;
+    // Check if a sequence is running - if so, let SequenceManager handle most announcements
+    final tourRunning = SequenceManager.instance.status == SequenceStatus.running;
 
     switch (navStatus) {
       case 601: // Moving

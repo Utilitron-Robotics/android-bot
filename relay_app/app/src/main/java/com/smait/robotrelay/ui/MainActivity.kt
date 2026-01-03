@@ -35,8 +35,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        // Robot base IP via USB wired connection (NOT the WiFi hotspot IP!)
-        // WiFi hotspot: 10.42.0.1 | Wired/USB: 192.168.20.22
+        // Robot IP via WIRED USB connection (tablet is physically connected to robot)
+        // See NETWORKING.md for architecture details
         private const val ROBOT_WIRED_IP = "192.168.20.22"
     }
 
@@ -131,7 +131,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun getRobotIp(): String {
         val prefs = getSharedPreferences("relay_prefs", Context.MODE_PRIVATE)
-        // Default to wired connection IP (robot base via USB/ethernet)
+        // Default to wired connection (tablet is USB connected to robot)
         return prefs.getString("robot_ip", ROBOT_WIRED_IP) ?: ROBOT_WIRED_IP
     }
 

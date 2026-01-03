@@ -427,8 +427,14 @@ class RosbridgeClient {
 
   // === Tablet Commands (intercepted by relay, not forwarded to robot) ===
 
-  /// Speak text on the tablet via TTS
+  /// Stop any current TTS on the tablet
+  void tabletStopSpeak() {
+    send({'op': 'tablet_stop_speak'});
+  }
+
+  /// Speak text on the tablet via TTS (stops current speech first)
   void tabletSpeak(String text) {
+    send({'op': 'tablet_stop_speak'}); // Stop current speech to prevent queue buildup
     send({'op': 'tablet_speak', 'text': text});
   }
 

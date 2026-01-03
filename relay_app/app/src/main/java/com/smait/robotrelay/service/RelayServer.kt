@@ -32,6 +32,7 @@ class RelayServer(
 
     interface TaskExecutor {
         fun speakText(text: String)
+        fun stopSpeak()  // Stop current TTS to prevent queue buildup
         fun displayUrl(url: String)
         fun closeDisplay()
         fun runTask(type: String, data: String, waitSeconds: Int)
@@ -148,19 +149,16 @@ class RelayServer(
                             lastMessageTime = System.currentTimeMillis()
                             totalMessageCount++
 
-                            // Track /map messages specifically
+                            // Track /map messages - they're large but needed for Flutter clients
                             val isMapMsg = message.contains("\"/map\"") || message.contains("\"topic\":\"/map\"")
                             if (isMapMsg) {
                                 mapMsgCount++
-                                Log.i(TAG, ">>> FORWARDING /map #$mapMsgCount (${message.length} bytes, ${lastMessageTime - lastMapTime}ms since last)")
+                                val timeSinceLast = lastMessageTime - lastMapTime
+                                Log.i(TAG, ">>> /map #$mapMsgCount (${message.length} bytes, ${timeSinceLast}ms since last)")
                                 lastMapTime = lastMessageTime
                             }
 
                             wsServer?.broadcast(message)
-
-                            if (isMapMsg) {
-                                Log.i(TAG, ">>> /map #$mapMsgCount broadcast complete")
-                            }
                         } catch (t: Throwable) {
                             Log.w(TAG, "Broadcast error (continuing): ${t.javaClass.simpleName}: ${t.message}")
                         }
@@ -669,6 +667,11 @@ class RelayWebSocketServer(
                 }
 
                 when (op) {
+                    "tablet_stop_speak" -> {
+                        Log.i(TAG, "Tablet stop speak")
+                        taskExecutor?.stopSpeak()
+                        return
+                    }
                     "tablet_speak" -> {
                         val text = json.get("text")?.asString
                         if (text == null) {

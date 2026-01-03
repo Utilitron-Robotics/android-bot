@@ -1,23 +1,23 @@
 import 'package:flutter/material.dart';
-import '../core/tour_mode.dart';
+import '../core/sequence_mode.dart';
 
-/// Tour Editor widget for creating and managing tours
-class TourEditor extends StatefulWidget {
+/// Sequence Editor widget for creating and managing sequences
+class SequenceEditor extends StatefulWidget {
   final List<String> availableWaypoints;
-  final void Function(Tour tour)? onStartTour;
+  final void Function(Sequence seq)? onStartSequence;
 
-  const TourEditor({
+  const SequenceEditor({
     super.key,
     required this.availableWaypoints,
-    this.onStartTour,
+    this.onStartSequence,
   });
 
   @override
-  State<TourEditor> createState() => _TourEditorState();
+  State<SequenceEditor> createState() => _SequenceEditorState();
 }
 
-class _TourEditorState extends State<TourEditor> {
-  Tour? _selectedTour;
+class _SequenceEditorState extends State<SequenceEditor> {
+  Sequence? _selectedSequence;
   bool _isEditing = false;
 
   // Managed TextEditingControllers to fix input issues
@@ -29,7 +29,7 @@ class _TourEditorState extends State<TourEditor> {
   @override
   void initState() {
     super.initState();
-    TourManager.instance.load();
+    SequenceManager.instance.load();
   }
 
   @override
@@ -51,58 +51,47 @@ class _TourEditorState extends State<TourEditor> {
     return _stopControllers[stopKey]!;
   }
 
-  /// Clear controllers for removed stops
-  void _cleanupStopControllers(Tour tour) {
-    final validKeys = <String>{};
-    for (int i = 0; i < tour.stops.length; i++) {
-      validKeys.add('${tour.id}_${i}_speak');
-      validKeys.add('${tour.id}_${i}_url');
-      validKeys.add('${tour.id}_${i}_duration');
-      validKeys.add('${tour.id}_${i}_wait');
-    }
-    _stopControllers.removeWhere((key, controller) {
-      if (!validKeys.contains(key)) {
-        controller.dispose();
-        return true;
-      }
-      return false;
-    });
-  }
-
-  void _createNewTour() {
-    final newTour = Tour(
+  void _createNewSequence() {
+    final newTour = Sequence(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: 'New Tour',
       description: '',
       stops: [],
     );
-    TourManager.instance.saveTour(newTour);
+    SequenceManager.instance.saveSequence(newTour);
     _tourNameController.text = newTour.name;
     _introTextController.text = '';
     _outroTextController.text = '';
     setState(() {
-      _selectedTour = newTour;
+      _selectedSequence = newTour;
       _isEditing = true;
     });
   }
 
-  void _selectTour(Tour tour) {
-    _tourNameController.text = tour.name;
-    _introTextController.text = tour.introText ?? '';
-    _outroTextController.text = tour.outroText ?? '';
-    _cleanupStopControllers(tour);
+  void _selectSequence(Sequence seq) {
+    // Clear ALL stop controllers when switching tours to ensure fresh state
+    for (final controller in _stopControllers.values) {
+      controller.dispose();
+    }
+    _stopControllers.clear();
+
+    // Update tour name/intro/outro controllers
+    _tourNameController.text = seq.name;
+    _introTextController.text = seq.introText ?? '';
+    _outroTextController.text = seq.outroText ?? '';
+
     setState(() {
-      _selectedTour = tour;
+      _selectedSequence = seq;
       _isEditing = false;
     });
   }
 
-  void _deleteTour(Tour tour) {
+  void _deleteSequence(Sequence seq) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Tour'),
-        content: Text('Delete "${tour.name}"?'),
+        content: Text('Delete "${seq.name}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -110,10 +99,10 @@ class _TourEditorState extends State<TourEditor> {
           ),
           TextButton(
             onPressed: () {
-              TourManager.instance.deleteTour(tour.id);
-              if (_selectedTour?.id == tour.id) {
+              SequenceManager.instance.deleteSequence(seq.id);
+              if (_selectedSequence?.id == seq.id) {
                 setState(() {
-                  _selectedTour = null;
+                  _selectedSequence = null;
                   _isEditing = false;
                 });
               }
@@ -127,101 +116,288 @@ class _TourEditorState extends State<TourEditor> {
     );
   }
 
-  void _saveTour() {
+  void _saveSequence() {
     // Build tour from controller values - no model updates during typing!
-    if (_selectedTour == null) return;
+    if (_selectedSequence == null) return;
 
     // Read all values from controllers
-    final stops = <TourStop>[];
-    for (int i = 0; i < _selectedTour!.stops.length; i++) {
-      final oldStop = _selectedTour!.stops[i];
-      stops.add(TourStop(
+    final stops = <SequenceStop>[];
+    for (int i = 0; i < _selectedSequence!.stops.length; i++) {
+      final oldStop = _selectedSequence!.stops[i];
+      stops.add(SequenceStop(
         waypoint: oldStop.waypoint,
-        speakText: _stopControllers['${_selectedTour!.id}_${i}_speak']?.text,
-        displayUrl: _stopControllers['${_selectedTour!.id}_${i}_url']?.text,
-        displayDuration: int.tryParse(_stopControllers['${_selectedTour!.id}_${i}_duration']?.text ?? '') ?? 0,
-        waitSeconds: int.tryParse(_stopControllers['${_selectedTour!.id}_${i}_wait']?.text ?? '') ?? 0,
+        speakText: _stopControllers['${_selectedSequence!.id}_${i}_speak']?.text,
+        displayUrl: _stopControllers['${_selectedSequence!.id}_${i}_url']?.text,
+        displayDuration: int.tryParse(_stopControllers['${_selectedSequence!.id}_${i}_duration']?.text ?? '') ?? 0,
+        waitSeconds: int.tryParse(_stopControllers['${_selectedSequence!.id}_${i}_wait']?.text ?? '') ?? 0,
       ));
     }
 
-    final updatedTour = Tour(
-      id: _selectedTour!.id,
+    final updatedTour = Sequence(
+      id: _selectedSequence!.id,
       name: _tourNameController.text,
-      description: _selectedTour!.description,
+      description: _selectedSequence!.description,
       stops: stops,
-      loop: _selectedTour!.loop,
-      announceArrival: _selectedTour!.announceArrival,
+      loop: _selectedSequence!.loop,
+      announceArrival: _selectedSequence!.announceArrival,
       introText: _introTextController.text.isEmpty ? null : _introTextController.text,
       outroText: _outroTextController.text.isEmpty ? null : _outroTextController.text,
-      startWaypoint: _selectedTour!.startWaypoint,
-      endWaypoint: _selectedTour!.endWaypoint,
+      startWaypoint: _selectedSequence!.startWaypoint,
+      endWaypoint: _selectedSequence!.endWaypoint,
     );
 
-    _selectedTour = updatedTour;
-    TourManager.instance.saveTour(updatedTour);
+    _selectedSequence = updatedTour;
+    SequenceManager.instance.saveSequence(updatedTour);
   }
 
   void _updateTourOptions({bool? loop, bool? announceArrival}) {
     // Only for checkboxes - these need immediate state update
-    if (_selectedTour == null) return;
+    if (_selectedSequence == null) return;
     setState(() {
-      _selectedTour = _selectedTour!.copyWith(
-        loop: loop ?? _selectedTour!.loop,
-        announceArrival: announceArrival ?? _selectedTour!.announceArrival,
+      _selectedSequence = _selectedSequence!.copyWith(
+        loop: loop ?? _selectedSequence!.loop,
+        announceArrival: announceArrival ?? _selectedSequence!.announceArrival,
       );
     });
   }
 
-  void _addStop(TourStop stop) {
-    if (_selectedTour == null) return;
+  void _addStop(SequenceStop stop) {
+    if (_selectedSequence == null) return;
     setState(() {
-      _selectedTour = _selectedTour!.addStop(stop);
+      _selectedSequence = _selectedSequence!.addStop(stop);
     });
   }
 
   void _removeStop(int index) {
-    if (_selectedTour == null) return;
-    // Dispose the controllers for this stop
-    _stopControllers.remove('${_selectedTour!.id}_${index}_speak')?.dispose();
-    _stopControllers.remove('${_selectedTour!.id}_${index}_url')?.dispose();
-    _stopControllers.remove('${_selectedTour!.id}_${index}_duration')?.dispose();
-    _stopControllers.remove('${_selectedTour!.id}_${index}_wait')?.dispose();
+    if (_selectedSequence == null) return;
+
+    // CRITICAL: First, save ALL current controller values to the SequenceStop data
+    // This ensures we don't lose edits when we clear controllers
+    _saveSequence();
+
+    // Clear ALL stop controllers - indices shift after removal
+    // They will be recreated from the (updated) SequenceStop data
+    for (final controller in _stopControllers.values) {
+      controller.dispose();
+    }
+    _stopControllers.clear();
+
     setState(() {
-      _selectedTour = _selectedTour!.removeStop(index);
+      _selectedSequence = _selectedSequence!.removeStop(index);
     });
   }
 
   void _reorderStops(int oldIndex, int newIndex) {
-    if (_selectedTour == null) return;
+    if (_selectedSequence == null) return;
     if (newIndex > oldIndex) newIndex--;
+
+    // CRITICAL: First, save ALL current controller values to the SequenceStop data
+    // This ensures we don't lose any edits when we clear controllers
+    _saveSequence();
+
+    // Clear ALL stop controllers - they will be recreated from the reordered SequenceStop data
+    for (final controller in _stopControllers.values) {
+      controller.dispose();
+    }
+    _stopControllers.clear();
+
+    // Now reorder the (already saved) SequenceStops
     setState(() {
-      _selectedTour = _selectedTour!.reorderStop(oldIndex, newIndex);
+      _selectedSequence = _selectedSequence!.reorderStop(oldIndex, newIndex);
     });
+  }
+
+  void _showCloudSyncDialog() {
+    final apiUrlController = TextEditingController(
+      text: SequenceManager.instance.cloudApiUrl ?? '',
+    );
+    final mapIdController = TextEditingController(
+      text: SequenceManager.instance.currentMapId ?? '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.cloud_sync),
+            SizedBox(width: 8),
+            Text('Cloud Sync'),
+          ],
+        ),
+        content: SizedBox(
+          width: 400,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Status indicator
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: SequenceManager.instance.cloudSyncEnabled
+                      ? Colors.green.withValues(alpha: 0.1)
+                      : Colors.grey.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: SequenceManager.instance.cloudSyncEnabled
+                        ? Colors.green
+                        : Colors.grey,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      SequenceManager.instance.cloudSyncEnabled
+                          ? Icons.cloud_done
+                          : Icons.cloud_off,
+                      color: SequenceManager.instance.cloudSyncEnabled
+                          ? Colors.green
+                          : Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      SequenceManager.instance.cloudSyncEnabled
+                          ? 'Connected to cloud'
+                          : 'Not connected',
+                      style: TextStyle(
+                        color: SequenceManager.instance.cloudSyncEnabled
+                            ? Colors.green
+                            : Colors.grey,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Help text explaining where to get the URL
+              Container(
+                padding: const EdgeInsets.all(8),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: Colors.blue[300]),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Get API URL from CloudFormation stack output: ApiEndpoint',
+                        style: TextStyle(fontSize: 11, color: Colors.blue[300]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // API URL
+              TextField(
+                controller: apiUrlController,
+                decoration: const InputDecoration(
+                  labelText: 'API Gateway URL',
+                  hintText: 'https://{api-id}.execute-api.{region}.amazonaws.com/{env}',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.link),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Map ID
+              TextField(
+                controller: mapIdController,
+                decoration: const InputDecoration(
+                  labelText: 'Map ID (for tour filtering)',
+                  hintText: 'Leave blank for all tours',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.map),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Tours are shared between robots on the same map',
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          if (SequenceManager.instance.cloudSyncEnabled)
+            TextButton.icon(
+              icon: const Icon(Icons.sync),
+              label: const Text('Sync Now'),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await SequenceManager.instance.syncWithCloud();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Tours synced with cloud')),
+                  );
+                  setState(() {}); // Refresh UI
+                }
+              },
+            ),
+          FilledButton.icon(
+            icon: const Icon(Icons.save),
+            label: const Text('Save & Connect'),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await SequenceManager.instance.configureCloud(
+                apiUrl: apiUrlController.text.trim(),
+                mapId: mapIdController.text.trim().isEmpty
+                    ? null
+                    : mapIdController.text.trim(),
+              );
+              // Auto-sync after connecting
+              if (SequenceManager.instance.cloudSyncEnabled) {
+                await SequenceManager.instance.loadFromCloud();
+              }
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      SequenceManager.instance.cloudSyncEnabled
+                          ? 'Connected! Tours loaded from cloud.'
+                          : 'Cloud sync disabled',
+                    ),
+                  ),
+                );
+                setState(() {}); // Refresh UI
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('TourEditor: build() - isEditing=$_isEditing, selectedTour=${_selectedTour?.name}');
+    debugPrint('TourEditor: build() - isEditing=$_isEditing, selectedTour=${_selectedSequence?.name}');
 
     // When editing, DON'T use ListenableBuilder - completely isolate from rebuilds
     // This prevents the text input chaos caused by rebuilds resetting cursor position
-    if (_isEditing && _selectedTour != null) {
+    if (_isEditing && _selectedSequence != null) {
       debugPrint('TourEditor: Showing edit form');
       // Return the form directly - don't wrap in Column (causes Expanded layout issues)
-      return _buildTourEditForm(_selectedTour!);
+      return _buildTourEditForm(_selectedSequence!);
     }
 
     // When not editing, use ListenableBuilder for reactive updates
     return ListenableBuilder(
-      listenable: TourManager.instance,
+      listenable: SequenceManager.instance,
       builder: (context, _) {
-        final tours = TourManager.instance.tours;
-        final status = TourManager.instance.status;
-        final runningTour = TourManager.instance.currentTour;
-        debugPrint('TourEditor: ListenableBuilder - ${tours.length} tours, status=$status, running=${runningTour?.name}');
+        final tours = SequenceManager.instance.sequences;
+        final status = SequenceManager.instance.status;
+        final runningSequence = SequenceManager.instance.currentSequence;
+        debugPrint('TourEditor: ListenableBuilder - ${tours.length} tours, status=$status, running=${runningSequence?.name}');
 
         // When a tour is running, show prominent status and collapse editor
-        if (status == TourStatus.running && runningTour != null) {
+        if (status == SequenceStatus.running && runningSequence != null) {
           return Column(
             children: [
               // Running tour takes center stage
@@ -256,7 +432,7 @@ class _TourEditorState extends State<TourEditor> {
         }
 
         // When not running, show full editor
-        final displayTour = _selectedTour;
+        final displayTour = _selectedSequence;
 
         return Column(
           children: [
@@ -275,7 +451,7 @@ class _TourEditorState extends State<TourEditor> {
     );
   }
 
-  Widget _buildHeader(List<Tour> tours, TourStatus status) {
+  Widget _buildHeader(List<Sequence> tours, SequenceStatus status) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -284,72 +460,114 @@ class _TourEditorState extends State<TourEditor> {
           bottom: BorderSide(color: Theme.of(context).dividerColor),
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.tour, size: 24),
-          const SizedBox(width: 8),
-          const Text(
-            'Tour Mode',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const Spacer(),
-          if (status == TourStatus.running) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.green,
-                borderRadius: BorderRadius.circular(12),
+          // Title row
+          Row(
+            children: [
+              const Icon(Icons.tour, size: 18),
+              const SizedBox(width: 6),
+              const Text(
+                'Tour',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
+              const Spacer(),
+              if (status == SequenceStatus.running) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  SizedBox(width: 6),
-                  Text('Running', style: TextStyle(color: Colors.white, fontSize: 12)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.stop, color: Colors.red),
-              onPressed: () => TourManager.instance.stopTour(),
-              tooltip: 'Stop Tour',
-            ),
-          ] else ...[
-            // Tour selector dropdown
-            if (tours.isNotEmpty)
-              DropdownButton<String>(
-                value: _selectedTour?.id,
-                hint: const Text('Select Tour'),
-                items: tours.map((t) => DropdownMenuItem(
-                  value: t.id,
-                  child: Text(t.name),
-                )).toList(),
-                onChanged: (id) {
-                  if (id != null) {
-                    _selectTour(tours.firstWhere((t) => t.id == id));
-                  }
-                },
-              ),
-            // Delete selected tour
-            if (_selectedTour != null)
-              IconButton(
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
-                onPressed: () => _deleteTour(_selectedTour!),
-                tooltip: 'Delete Tour',
-              ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: _createNewTour,
-              tooltip: 'New Tour',
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 10,
+                        height: 10,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Text('On', style: TextStyle(color: Colors.white, fontSize: 11)),
+                    ],
+                  ),
+                ),
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: IconButton(
+                    icon: const Icon(Icons.stop, color: Colors.red, size: 18),
+                    onPressed: () => SequenceManager.instance.stopSequence(),
+                    tooltip: 'Stop',
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              ] else ...[
+                // Cloud sync button
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.cloud_sync,
+                      size: 18,
+                      color: SequenceManager.instance.cloudSyncEnabled
+                          ? Colors.green
+                          : Colors.grey,
+                    ),
+                    onPressed: _showCloudSyncDialog,
+                    tooltip: 'Cloud',
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: IconButton(
+                    icon: const Icon(Icons.add, size: 18),
+                    onPressed: _createNewSequence,
+                    tooltip: 'New',
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          // Controls row (when not running)
+          if (status != SequenceStatus.running && tours.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButton<String>(
+                    value: _selectedSequence?.id,
+                    hint: const Text('Select Tour', style: TextStyle(fontSize: 13)),
+                    isExpanded: true,
+                    isDense: true,
+                    items: tours.map((t) => DropdownMenuItem(
+                      value: t.id,
+                      child: Text(t.name, overflow: TextOverflow.ellipsis),
+                    )).toList(),
+                    onChanged: (id) {
+                      if (id != null) {
+                        _selectSequence(tours.firstWhere((t) => t.id == id));
+                      }
+                    },
+                  ),
+                ),
+                if (_selectedSequence != null)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    onPressed: () => _deleteSequence(_selectedSequence!),
+                    tooltip: 'Delete Tour',
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
             ),
           ],
         ],
@@ -373,14 +591,14 @@ class _TourEditorState extends State<TourEditor> {
           ElevatedButton.icon(
             icon: const Icon(Icons.add),
             label: const Text('Create Tour'),
-            onPressed: _createNewTour,
+            onPressed: _createNewSequence,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTourPreview(Tour tour) {
+  Widget _buildTourPreview(Sequence seq) {
     return Column(
       children: [
         // Tour info header
@@ -393,16 +611,16 @@ class _TourEditorState extends State<TourEditor> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      tour.name,
+                      seq.name,
                       style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     ),
-                    if (tour.description.isNotEmpty)
+                    if (seq.description.isNotEmpty)
                       Text(
-                        tour.description,
+                        seq.description,
                         style: TextStyle(color: Colors.grey[400]),
                       ),
                     Text(
-                      '${tour.stops.length} stops${tour.loop ? ' (loops)' : ''}',
+                      '${seq.stops.length} stops${seq.loop ? ' (loops)' : ''}',
                       style: TextStyle(color: Colors.grey[500], fontSize: 12),
                     ),
                   ],
@@ -415,7 +633,7 @@ class _TourEditorState extends State<TourEditor> {
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline),
-                onPressed: () => _deleteTour(tour),
+                onPressed: () => _deleteSequence(seq),
                 tooltip: 'Delete Tour',
               ),
               const SizedBox(width: 8),
@@ -426,10 +644,10 @@ class _TourEditorState extends State<TourEditor> {
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: tour.stops.isNotEmpty
+                onPressed: seq.stops.isNotEmpty
                     ? () {
-                        widget.onStartTour?.call(tour);
-                        TourManager.instance.startTour(tour);
+                        widget.onStartSequence?.call(seq);
+                        SequenceManager.instance.startSequence(seq);
                       }
                     : null,
               ),
@@ -439,7 +657,7 @@ class _TourEditorState extends State<TourEditor> {
 
         // Stops list
         Expanded(
-          child: tour.stops.isEmpty
+          child: seq.stops.isEmpty
               ? Center(
                   child: Text(
                     'No stops configured. Tap Edit to add waypoints.',
@@ -448,9 +666,9 @@ class _TourEditorState extends State<TourEditor> {
                 )
               : ListView.builder(
                   padding: const EdgeInsets.all(8),
-                  itemCount: tour.stops.length,
+                  itemCount: seq.stops.length,
                   itemBuilder: (ctx, index) {
-                    final stop = tour.stops[index];
+                    final stop = seq.stops[index];
                     return _buildStopPreviewCard(stop, index);
                   },
                 ),
@@ -459,7 +677,7 @@ class _TourEditorState extends State<TourEditor> {
     );
   }
 
-  Widget _buildStopPreviewCard(TourStop stop, int index) {
+  Widget _buildStopPreviewCard(SequenceStop stop, int index) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       child: ListTile(
@@ -510,7 +728,7 @@ class _TourEditorState extends State<TourEditor> {
     );
   }
 
-  Widget _buildTourEditForm(Tour tour) {
+  Widget _buildTourEditForm(Sequence seq) {
     return Column(
       children: [
         // Edit header
@@ -521,7 +739,7 @@ class _TourEditorState extends State<TourEditor> {
               IconButton(
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () {
-                  _saveTour();
+                  _saveSequence();
                   setState(() => _isEditing = false);
                 },
               ),
@@ -541,7 +759,7 @@ class _TourEditorState extends State<TourEditor> {
                 icon: const Icon(Icons.done),
                 label: const Text('Done'),
                 onPressed: () {
-                  _saveTour();
+                  _saveSequence();
                   setState(() => _isEditing = false);
                 },
               ),
@@ -557,7 +775,7 @@ class _TourEditorState extends State<TourEditor> {
               Expanded(
                 child: CheckboxListTile(
                   title: const Text('Loop', style: TextStyle(fontSize: 14)),
-                  value: tour.loop,
+                  value: seq.loop,
                   dense: true,
                   onChanged: (v) => _updateTourOptions(loop: v),
                 ),
@@ -565,7 +783,7 @@ class _TourEditorState extends State<TourEditor> {
               Expanded(
                 child: CheckboxListTile(
                   title: const Text('Announce', style: TextStyle(fontSize: 14)),
-                  value: tour.announceArrival,
+                  value: seq.announceArrival,
                   dense: true,
                   onChanged: (v) => _updateTourOptions(announceArrival: v),
                 ),
@@ -584,7 +802,7 @@ class _TourEditorState extends State<TourEditor> {
               SizedBox(
                 width: 150,
                 child: DropdownButtonFormField<String>(
-                  initialValue: tour.startWaypoint,
+                  initialValue: seq.startWaypoint,
                   decoration: const InputDecoration(
                     labelText: 'Start At',
                     prefixIcon: Icon(Icons.play_arrow, size: 20),
@@ -601,7 +819,7 @@ class _TourEditorState extends State<TourEditor> {
                   ],
                   onChanged: (value) {
                     setState(() {
-                      _selectedTour = _selectedTour!.copyWith(startWaypoint: value ?? '');
+                      _selectedSequence = _selectedSequence!.copyWith(startWaypoint: value ?? '');
                     });
                   },
                 ),
@@ -613,7 +831,7 @@ class _TourEditorState extends State<TourEditor> {
                   controller: _introTextController,
                   decoration: const InputDecoration(
                     labelText: 'Start Message',
-                    hintText: 'Welcome to our facility tour...',
+                    hintText: 'Welcome to our facility seq...',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -633,7 +851,7 @@ class _TourEditorState extends State<TourEditor> {
               SizedBox(
                 width: 150,
                 child: DropdownButtonFormField<String>(
-                  initialValue: tour.endWaypoint,
+                  initialValue: seq.endWaypoint,
                   decoration: const InputDecoration(
                     labelText: 'End At',
                     prefixIcon: Icon(Icons.stop, size: 20),
@@ -650,7 +868,7 @@ class _TourEditorState extends State<TourEditor> {
                   ],
                   onChanged: (value) {
                     setState(() {
-                      _selectedTour = _selectedTour!.copyWith(endWaypoint: value ?? '');
+                      _selectedSequence = _selectedSequence!.copyWith(endWaypoint: value ?? '');
                     });
                   },
                 ),
@@ -685,7 +903,7 @@ class _TourEditorState extends State<TourEditor> {
               ElevatedButton.icon(
                 icon: const Icon(Icons.add_location, size: 18),
                 label: const Text('Add Stop'),
-                onPressed: () => _showAddStopDialog(tour),
+                onPressed: () => _showAddStopDialog(seq),
               ),
             ],
           ),
@@ -693,7 +911,7 @@ class _TourEditorState extends State<TourEditor> {
 
         // Reorderable stops list
         Expanded(
-          child: tour.stops.isEmpty
+          child: seq.stops.isEmpty
               ? Center(
                   child: Text(
                     'Tap "Add Stop" to add waypoints',
@@ -702,11 +920,11 @@ class _TourEditorState extends State<TourEditor> {
                 )
               : ReorderableListView.builder(
                   padding: const EdgeInsets.all(8),
-                  itemCount: tour.stops.length,
+                  itemCount: seq.stops.length,
                   onReorder: _reorderStops,
                   itemBuilder: (ctx, index) {
-                    final stop = tour.stops[index];
-                    return _buildStopEditCard(tour, stop, index);
+                    final stop = seq.stops[index];
+                    return _buildStopEditCard(seq, stop, index);
                   },
                 ),
         ),
@@ -714,9 +932,9 @@ class _TourEditorState extends State<TourEditor> {
     );
   }
 
-  Widget _buildStopEditCard(Tour tour, TourStop stop, int index) {
+  Widget _buildStopEditCard(Sequence seq, SequenceStop stop, int index) {
     return Card(
-      key: ValueKey('${tour.id}_${stop.waypoint}_$index'),
+      key: ValueKey('${seq.id}_${stop.waypoint}_$index'),
       margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       child: ExpansionTile(
         leading: ReorderableDragStartListener(
@@ -749,7 +967,7 @@ class _TourEditorState extends State<TourEditor> {
               children: [
                 // Speak text - NO onChanged, read from controller on save
                 TextField(
-                  controller: _getStopController('${tour.id}_${index}_speak', stop.speakText ?? ''),
+                  controller: _getStopController('${seq.id}_${index}_speak', stop.speakText ?? ''),
                   decoration: const InputDecoration(
                     labelText: 'Speak Text (TTS)',
                     hintText: 'What to say at this stop...',
@@ -763,7 +981,7 @@ class _TourEditorState extends State<TourEditor> {
 
                 // Display URL - NO onChanged
                 TextField(
-                  controller: _getStopController('${tour.id}_${index}_url', stop.displayUrl ?? ''),
+                  controller: _getStopController('${seq.id}_${index}_url', stop.displayUrl ?? ''),
                   decoration: const InputDecoration(
                     labelText: 'Display URL (website/image)',
                     hintText: 'https://...',
@@ -779,7 +997,7 @@ class _TourEditorState extends State<TourEditor> {
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: _getStopController('${tour.id}_${index}_duration', stop.displayDuration.toString()),
+                        controller: _getStopController('${seq.id}_${index}_duration', stop.displayDuration.toString()),
                         decoration: const InputDecoration(
                           labelText: 'Display (sec)',
                           border: OutlineInputBorder(),
@@ -791,7 +1009,7 @@ class _TourEditorState extends State<TourEditor> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextField(
-                        controller: _getStopController('${tour.id}_${index}_wait', stop.waitSeconds.toString()),
+                        controller: _getStopController('${seq.id}_${index}_wait', stop.waitSeconds.toString()),
                         decoration: const InputDecoration(
                           labelText: 'Extra Wait (sec)',
                           border: OutlineInputBorder(),
@@ -810,9 +1028,9 @@ class _TourEditorState extends State<TourEditor> {
     );
   }
 
-  void _showAddStopDialog(Tour tour) {
+  void _showAddStopDialog(Sequence seq) {
     // Filter out waypoints already in the tour
-    final usedWaypoints = tour.stops.map((s) => s.waypoint).toSet();
+    final usedWaypoints = seq.stops.map((s) => s.waypoint).toSet();
     final available = widget.availableWaypoints
         .where((wp) => !usedWaypoints.contains(wp))
         .toList();
@@ -839,7 +1057,7 @@ class _TourEditorState extends State<TourEditor> {
                 leading: const Icon(Icons.location_on),
                 title: Text(wp),
                 onTap: () {
-                  _addStop(TourStop(waypoint: wp));
+                  _addStop(SequenceStop(waypoint: wp));
                   Navigator.pop(ctx);
                 },
               );
@@ -864,17 +1082,17 @@ class TourRunnerWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: TourManager.instance,
+      listenable: SequenceManager.instance,
       builder: (context, _) {
-        final tour = TourManager.instance.currentTour;
-        final status = TourManager.instance.status;
-        final stopIndex = TourManager.instance.currentStopIndex;
-        final stop = TourManager.instance.currentStop;
-        final phase = TourManager.instance.currentPhase;
-        final countdown = TourManager.instance.countdownSeconds;
-        final phaseDuration = TourManager.instance.phaseDurationSeconds;
+        final seq = SequenceManager.instance.currentSequence;
+        final status = SequenceManager.instance.status;
+        final stopIndex = SequenceManager.instance.currentStopIndex;
+        final stop = SequenceManager.instance.currentStop;
+        final phase = SequenceManager.instance.currentPhase;
+        final countdown = SequenceManager.instance.countdownSeconds;
+        final phaseDuration = SequenceManager.instance.phaseDurationSeconds;
 
-        if (status != TourStatus.running || tour == null) {
+        if (status != SequenceStatus.running || seq == null) {
           return const SizedBox.shrink();
         }
 
@@ -903,11 +1121,11 @@ class TourRunnerWidget extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            tour.name,
+                            seq.name,
                             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           Text(
-                            'Stop ${stopIndex + 1} of ${tour.stops.length}${tour.loop ? ' (looping)' : ''}',
+                            'Stop ${stopIndex + 1} of ${seq.stops.length}${seq.loop ? ' (looping)' : ''}',
                             style: TextStyle(fontSize: 12, color: Colors.grey[400]),
                           ),
                         ],
@@ -915,7 +1133,7 @@ class TourRunnerWidget extends StatelessWidget {
                     ),
                     IconButton(
                       icon: const Icon(Icons.skip_next, size: 28),
-                      onPressed: TourManager.instance.skipToNextStop,
+                      onPressed: SequenceManager.instance.skipToNextStop,
                       tooltip: 'Skip to next stop',
                     ),
                     const SizedBox(width: 8),
@@ -926,117 +1144,121 @@ class TourRunnerWidget extends StatelessWidget {
                         backgroundColor: Colors.red,
                         foregroundColor: Colors.white,
                       ),
-                      onPressed: TourManager.instance.stopTour,
+                      onPressed: SequenceManager.instance.stopSequence,
                     ),
                   ],
                 ),
               ),
 
-              // Main content area
+              // Main content area - stacked vertically for narrow panel
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
                     children: [
-                      // Large countdown/phase display
-                      Container(
-                        width: 120,
-                        height: 120,
-                        decoration: BoxDecoration(
-                          color: _getPhaseColor(phase).withValues(alpha: 0.2),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: _getPhaseColor(phase), width: 3),
-                        ),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            if (countdown > 0 && phaseDuration > 0)
-                              SizedBox(
-                                width: 100,
-                                height: 100,
-                                child: CircularProgressIndicator(
-                                  value: countdown / phaseDuration,
-                                  strokeWidth: 8,
-                                  backgroundColor: Colors.grey[800],
-                                  color: _getPhaseColor(phase),
-                                ),
-                              ),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
+                      // Phase display row - compact
+                      Row(
+                        children: [
+                          // Countdown circle (smaller)
+                          Container(
+                            width: 70,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              color: _getPhaseColor(phase).withValues(alpha: 0.2),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: _getPhaseColor(phase), width: 2),
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
                               children: [
-                                Icon(phase.icon, size: 32, color: _getPhaseColor(phase)),
-                                if (countdown > 0)
-                                  Text(
-                                    '${countdown}s',
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
+                                if (countdown > 0 && phaseDuration > 0)
+                                  SizedBox(
+                                    width: 60,
+                                    height: 60,
+                                    child: CircularProgressIndicator(
+                                      value: countdown / phaseDuration,
+                                      strokeWidth: 5,
+                                      backgroundColor: Colors.grey[800],
                                       color: _getPhaseColor(phase),
                                     ),
                                   ),
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(phase.icon, size: 20, color: _getPhaseColor(phase)),
+                                    if (countdown > 0)
+                                      Text(
+                                        '${countdown}s',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                          color: _getPhaseColor(phase),
+                                        ),
+                                      ),
+                                  ],
+                                ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 24),
-
-                      // Current stop details
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Phase badge
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: _getPhaseColor(phase),
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(phase.icon, size: 16, color: Colors.white),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    phase.label,
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(width: 12),
+                          // Phase badge + waypoint
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _getPhaseColor(phase),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
-                                ],
-                              ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(phase.icon, size: 14, color: Colors.white),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        phase.label,
+                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                if (stop != null)
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.location_on, size: 16),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          stop.waypoint,
+                                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                              ],
                             ),
-                            const SizedBox(height: 16),
-
-                            // Current waypoint
-                            if (stop != null) ...[
-                              Row(
-                                children: [
-                                  const Icon(Icons.location_on, size: 20),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    stop.waypoint,
-                                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-
-                              // What's happening at this stop
-                              if (stop.speakText != null && stop.speakText!.isNotEmpty)
-                                _buildDetailRow(Icons.volume_up, 'Speech', stop.speakText!),
-                              if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty)
-                                _buildDetailRow(Icons.web, 'Display', stop.displayUrl!),
-                              if (stop.waitSeconds > 0)
-                                _buildDetailRow(Icons.timer, 'Wait', '${stop.waitSeconds} seconds'),
-                            ],
-
-                            const Spacer(),
-
-                            // Stop progress indicator
-                            _buildStopProgress(tour, stopIndex),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 12),
+
+                      // Stop details
+                      if (stop != null) ...[
+                        if (stop.speakText != null && stop.speakText!.isNotEmpty)
+                          _buildDetailRow(Icons.volume_up, 'Speech', stop.speakText!),
+                        if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty)
+                          _buildDetailRow(Icons.web, 'Display', stop.displayUrl!),
+                        if (stop.waitSeconds > 0)
+                          _buildDetailRow(Icons.timer, 'Wait', '${stop.waitSeconds} seconds'),
+                      ],
+
+                      const SizedBox(height: 12),
+                      // Stop progress indicator
+                      _buildStopProgress(seq, stopIndex),
                     ],
                   ),
                 ),
@@ -1070,9 +1292,9 @@ class TourRunnerWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildStopProgress(Tour tour, int currentIndex) {
+  Widget _buildStopProgress(Sequence seq, int currentIndex) {
     return Row(
-      children: List.generate(tour.stops.length, (index) {
+      children: List.generate(seq.stops.length, (index) {
         final isCompleted = index < currentIndex;
         final isCurrent = index == currentIndex;
         return Expanded(
@@ -1093,17 +1315,17 @@ class TourRunnerWidget extends StatelessWidget {
     );
   }
 
-  Color _getPhaseColor(TourPhase phase) {
+  Color _getPhaseColor(SequencePhase phase) {
     switch (phase) {
-      case TourPhase.navigating:
+      case SequencePhase.navigating:
         return Colors.blue;
-      case TourPhase.arriving:
+      case SequencePhase.arriving:
         return Colors.green;
-      case TourPhase.speaking:
+      case SequencePhase.speaking:
         return Colors.orange;
-      case TourPhase.displaying:
+      case SequencePhase.displaying:
         return Colors.purple;
-      case TourPhase.waiting:
+      case SequencePhase.waiting:
         return Colors.teal;
     }
   }

@@ -69,6 +69,16 @@ class TaskStep {
       );
 }
 
+/// Mode types - how the mode operates
+enum ModeType {
+  perWaypoint('Per-Waypoint', 'Executes when arriving at assigned waypoint'),
+  sequence('Sequence', 'Executes through multiple waypoints in order');
+
+  final String label;
+  final String description;
+  const ModeType(this.label, this.description);
+}
+
 /// A mode is a named group of ordered task steps
 class TaskMode {
   final String id;
@@ -76,7 +86,8 @@ class TaskMode {
   final String description;
   final List<TaskStep> steps;
   final bool announceArrival; // Say "Arrived at [waypoint]" first
-  final bool isBuiltIn; // Delivery, Tour are built-in
+  final bool isDefault; // Default modes can't be deleted, only reset
+  final ModeType modeType; // How this mode operates
 
   const TaskMode({
     required this.id,
@@ -84,8 +95,12 @@ class TaskMode {
     this.description = '',
     this.steps = const [],
     this.announceArrival = true,
-    this.isBuiltIn = false,
+    this.isDefault = false,
+    this.modeType = ModeType.perWaypoint,
   });
+
+  // Legacy getter for compatibility
+  bool get isBuiltIn => isDefault;
 
   /// Built-in Delivery mode: speak + display + wait + return
   static TaskMode delivery({
@@ -97,7 +112,7 @@ class TaskMode {
         id: 'delivery',
         name: 'Delivery',
         description: 'Announce arrival, wait for pickup, return to origin',
-        isBuiltIn: true,
+        isDefault: true,
         steps: [
           if (speakText.isNotEmpty)
             TaskStep(
@@ -127,7 +142,7 @@ class TaskMode {
         id: 'announce',
         name: 'Announce',
         description: 'Speak and/or display content',
-        isBuiltIn: true,
+        isDefault: true,
         steps: [
           if (speakText.isNotEmpty)
             TaskStep(
@@ -144,13 +159,15 @@ class TaskMode {
         ],
       );
 
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'description': description,
         'steps': steps.map((s) => s.toJson()).toList(),
         'announce_arrival': announceArrival,
-        'is_built_in': isBuiltIn,
+        'is_default': isDefault,
+        'mode_type': modeType.name,
       };
 
   factory TaskMode.fromJson(Map<String, dynamic> json) => TaskMode(
@@ -163,7 +180,11 @@ class TaskMode {
                 .toList() ??
             [],
         announceArrival: json['announce_arrival'] as bool? ?? true,
-        isBuiltIn: json['is_built_in'] as bool? ?? false,
+        isDefault: json['is_default'] as bool? ?? json['is_built_in'] as bool? ?? false,
+        modeType: ModeType.values.firstWhere(
+          (t) => t.name == json['mode_type'],
+          orElse: () => ModeType.perWaypoint,
+        ),
       );
 
   TaskMode copyWith({
@@ -172,7 +193,8 @@ class TaskMode {
     String? description,
     List<TaskStep>? steps,
     bool? announceArrival,
-    bool? isBuiltIn,
+    bool? isDefault,
+    ModeType? modeType,
   }) =>
       TaskMode(
         id: id ?? this.id,
@@ -180,7 +202,8 @@ class TaskMode {
         description: description ?? this.description,
         steps: steps ?? this.steps,
         announceArrival: announceArrival ?? this.announceArrival,
-        isBuiltIn: isBuiltIn ?? this.isBuiltIn,
+        isDefault: isDefault ?? this.isDefault,
+        modeType: modeType ?? this.modeType,
       );
 }
 

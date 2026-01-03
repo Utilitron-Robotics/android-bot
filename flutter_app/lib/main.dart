@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/robot_connection.dart';
 import 'core/fleet_discovery.dart';
-import 'core/tour_mode.dart';
+import 'core/sequence_mode.dart';
 import 'screens/hud_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Load saved tours before app starts
-  await TourManager.instance.load();
+  await SequenceManager.instance.load();
   runApp(const DroidControllerApp());
 }
 
@@ -21,7 +21,7 @@ class DroidControllerApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => RobotConnection()),
         ChangeNotifierProvider(create: (_) => FleetDiscovery()),
-        ChangeNotifierProvider.value(value: TourManager.instance),
+        ChangeNotifierProvider.value(value: SequenceManager.instance),
       ],
       child: MaterialApp(
         title: 'Droid Controller',

@@ -7,7 +7,7 @@ import 'parameter_list.dart';
 import 'voice_control.dart';
 import 'map_view.dart';
 import 'tablet_control_panel.dart';
-import 'tour_editor.dart';
+import 'sequence_editor.dart';
 import 'mode_editor.dart';
 import 'announcement_presets.dart';
 import 'crowd_logic_settings.dart';
@@ -94,14 +94,14 @@ class WidgetFactory {
   }
 
   Widget _buildAnnouncementsSection() {
-    return Card(
-      key: const ValueKey('announcements_section'),
-      margin: const EdgeInsets.only(bottom: 16),
+    return const Card(
+      key: ValueKey('announcements_section'),
+      margin: EdgeInsets.only(bottom: 16),
       child: ExpansionTile(
-        key: const ValueKey('announcements_expansion'),
-        title: const Text('Crowd Logic & Announcements'),
-        leading: const Icon(Icons.campaign),
-        subtitle: const Text('Configure blocked path behavior and announcements'),
+        key: ValueKey('announcements_expansion'),
+        title: Text('Crowd Logic & Announcements'),
+        leading: Icon(Icons.campaign),
+        subtitle: Text('Configure blocked path behavior and announcements'),
         children: [
           SizedBox(
             height: 500,
@@ -109,13 +109,13 @@ class WidgetFactory {
               length: 2,
               child: Column(
                 children: [
-                  const TabBar(
+                  TabBar(
                     tabs: [
                       Tab(icon: Icon(Icons.people), text: 'Crowd Logic'),
                       Tab(icon: Icon(Icons.volume_up), text: 'Announcements'),
                     ],
                   ),
-                  const Expanded(
+                  Expanded(
                     child: TabBarView(
                       children: [
                         CrowdLogicSettings(),
@@ -165,7 +165,7 @@ class WidgetFactory {
         children: [
           SizedBox(
             height: 600, // Increased height for better editing
-            child: TourEditor(availableWaypoints: waypoints),
+            child: SequenceEditor(availableWaypoints: waypoints),
           ),
         ],
       ),

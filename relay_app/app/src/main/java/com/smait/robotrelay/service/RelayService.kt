@@ -55,8 +55,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         private const val CONFIG_KEY = "waypoint_modes"
         private const val TTS_API_KEY = "google_tts_api_key"
 
-        // Robot base IP via USB wired connection (NOT the WiFi hotspot IP!)
-        // WiFi hotspot: 10.42.0.1 | Wired/USB: 192.168.20.22
+        // Robot IP via WIRED USB connection (tablet is physically connected to robot)
+        // See NETWORKING.md for architecture details
         private const val ROBOT_WIRED_IP = "192.168.20.22"
 
         // Broadcast actions for UI updates
@@ -110,7 +110,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private var alertSoundPlayer: android.media.MediaPlayer? = null
     private var pendingSoundRunnables = mutableListOf<Runnable>()
 
-    // Robot connection settings - defaults to wired (USB) connection
+    // Robot connection settings - tablet is WIRED to robot base
     private var robotIp = ROBOT_WIRED_IP
     private var robotPort = 9090
     private var relayPort = 8765
@@ -610,6 +610,12 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         cloudTts?.stop()
         tts?.stop()
         speak(text, null)
+    }
+
+    override fun stopSpeak() {
+        Log.i(TAG, ">>> stopSpeak() called - clearing TTS queue")
+        cloudTts?.stop()
+        tts?.stop()
     }
 
     override fun displayUrl(url: String) {

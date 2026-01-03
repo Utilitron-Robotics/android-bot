@@ -26,7 +26,7 @@ enum class SafetyZone {
  * allowing WiFi to remain connected for internet access.
  */
 class RobotWebSocketClient(
-    val robotIp: String = "192.168.20.22",  // Wired IP, not WiFi hotspot
+    val robotIp: String = "192.168.20.22",  // Wired USB connection to robot
     private val robotPort: Int = 9090,
     private val socketFactory: SocketFactory? = null
 ) {
