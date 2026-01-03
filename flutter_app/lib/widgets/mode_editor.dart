@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/task_engine.dart';
+import '../core/sequence_mode.dart';
 
 /// Mode Editor widget for creating and managing task modes
 /// Supports parallel and serial task execution
@@ -19,6 +20,7 @@ class ModeEditor extends StatefulWidget {
 
 class _ModeEditorState extends State<ModeEditor> {
   TaskMode? _selectedMode;
+  Sequence? _selectedSequence;
   bool _isEditing = false;
   String? _assigningToWaypoint;
 
@@ -134,7 +136,7 @@ class _ModeEditorState extends State<ModeEditor> {
       description: _modeDescController.text,
       steps: steps,
       announceArrival: _selectedMode!.announceArrival,
-      isBuiltIn: false,
+      isDefault: false,
     );
 
     _selectedMode = updatedMode;
@@ -205,9 +207,11 @@ class _ModeEditorState extends State<ModeEditor> {
           children: [
             _buildHeader(modes),
             Expanded(
-              child: _selectedMode == null
-                  ? _buildEmptyState()
-                  : _buildModePreview(_selectedMode!),
+              child: _selectedSequence != null
+                  ? _buildSequenceModePreview(_selectedSequence!)
+                  : _selectedMode == null
+                      ? _buildEmptyState()
+                      : _buildModePreview(_selectedMode!),
             ),
           ],
         );
@@ -215,7 +219,126 @@ class _ModeEditorState extends State<ModeEditor> {
     );
   }
 
+  Widget _buildSequenceModePreview(Sequence mode) {
+    return Column(
+      children: [
+        // Mode info header
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.route, color: Colors.blue.shade400),
+                        const SizedBox(width: 8),
+                        Text(
+                          mode.name,
+                          style: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('Sequence',
+                              style: TextStyle(fontSize: 10)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${mode.stops.length} stops${mode.loop ? ' (loops)' : ''}',
+                      style: TextStyle(color: Colors.grey[400]),
+                    ),
+                    if (mode.introText?.isNotEmpty == true)
+                      Text(
+                        'Intro: ${mode.introText}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: Colors.grey[500], fontSize: 12),
+                      ),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Start'),
+                onPressed: () {
+                  SequenceManager.instance.startSequence(mode);
+                },
+              ),
+            ],
+          ),
+        ),
+        const Divider(),
+        // Stops list
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: mode.stops.length,
+            itemBuilder: (ctx, index) {
+              final stop = mode.stops[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.blue.shade700,
+                    child: Text('${index + 1}'),
+                  ),
+                  title: Text(stop.waypoint),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (stop.speakText?.isNotEmpty == true)
+                        Text(
+                          '🔊 ${stop.speakText}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      if (stop.displayUrl?.isNotEmpty == true)
+                        Text(
+                          '📺 ${stop.displayUrl}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      if (stop.waitSeconds > 0)
+                        Text(
+                          '⏱️ Wait ${stop.waitSeconds}s',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                    ],
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                ),
+              );
+            },
+          ),
+        ),
+        // Edit hint
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(
+            'Switch to Sequence tab to edit stops',
+            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildHeader(List<TaskMode> modes) {
+    final sequences = SequenceManager.instance.sequences;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -233,29 +356,61 @@ class _ModeEditorState extends State<ModeEditor> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const Spacer(),
-          // Mode selector dropdown
-          if (modes.isNotEmpty)
-            DropdownButton<String>(
-              value: _selectedMode?.id,
-              hint: const Text('Select Mode'),
-              items: modes.map((m) => DropdownMenuItem(
-                value: m.id,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (m.isBuiltIn)
-                      const Icon(Icons.lock, size: 14, color: Colors.grey),
-                    const SizedBox(width: 4),
-                    Text(m.name),
-                  ],
+          // Combined Mode selector dropdown
+          DropdownButton<String>(
+            value: _selectedSequence != null
+                ? 'seq:${_selectedSequence!.id}'
+                : _selectedMode?.id,
+            hint: const Text('Select Mode'),
+            items: [
+              // Task modes
+              ...modes.map((m) => DropdownMenuItem(
+                    value: m.id,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (m.isBuiltIn)
+                          const Icon(Icons.lock, size: 14, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(m.name),
+                      ],
+                    ),
+                  )),
+              // Divider
+              if (sequences.isNotEmpty)
+                const DropdownMenuItem(
+                  enabled: false,
+                  value: '_divider',
+                  child: Divider(),
                 ),
-              )).toList(),
-              onChanged: (id) {
-                if (id != null) {
-                  _selectMode(modes.firstWhere((m) => m.id == id));
-                }
-              },
-            ),
+              // Sequence modes (multi-waypoint)
+              ...sequences.map((t) => DropdownMenuItem(
+                    value: 'seq:${t.id}',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.route, size: 14, color: Colors.blue.shade400),
+                        const SizedBox(width: 4),
+                        Text(t.name),
+                      ],
+                    ),
+                  )),
+            ],
+            onChanged: (id) {
+              if (id == null || id == '_divider') return;
+              if (id.startsWith('seq:')) {
+                final seqId = id.substring(4);
+                final seq = sequences.firstWhere((t) => t.id == seqId);
+                setState(() {
+                  _selectedSequence = seq;
+                  _selectedMode = null;
+                });
+              } else {
+                _selectMode(modes.firstWhere((m) => m.id == id));
+                setState(() => _selectedSequence = null);
+              }
+            },
+          ),
           const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Icons.assignment),

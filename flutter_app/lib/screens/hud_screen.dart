@@ -2,13 +2,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
-import '../core/tour_mode.dart' show TourManager, TourStatus;
+import '../core/sequence_mode.dart' show SequenceManager, SequenceStatus, SequencePhase, Sequence;
 import '../core/smait_protocol.dart' as protocol;
+import '../core/task_engine.dart';
+import '../services/audio_announcer.dart';
 import '../widgets/map_view.dart';
 import '../widgets/joystick.dart';
-import '../widgets/tour_editor.dart';
+import '../widgets/sequence_editor.dart';
 import '../widgets/voice_control.dart';
 import '../widgets/fleet_picker.dart';
+import '../widgets/crowd_logic_settings.dart';
+import '../widgets/announcement_presets.dart';
+import '../widgets/mode_editor.dart';
+
+/// Connection mode options for HUD
+enum ConnectionMode {
+  direct('Direct WiFi', 'ws://10.42.0.1:9090', Icons.wifi),
+  relayWs('Relay WS', 'ws://192.168.1.100:8766', Icons.router),
+  relayHttp('Relay HTTP', 'http://192.168.1.100:8765', Icons.http);
+
+  final String label;
+  final String defaultUrl;
+  final IconData icon;
+  const ConnectionMode(this.label, this.defaultUrl, this.icon);
+}
 
 /// HUD-style cockpit layout for landscape tablet control
 /// Inspired by spaceship cockpit / video game HUD design
@@ -19,16 +36,33 @@ class HudScreen extends StatefulWidget {
   State<HudScreen> createState() => _HudScreenState();
 }
 
-class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
+class _HudScreenState extends State<HudScreen>
+    with TickerProviderStateMixin
+    implements TaskExecutorCallback {
   final _urlController = TextEditingController();
+  final _customSoundController = TextEditingController();
 
   // Edge panel states
   bool _leftPanelExpanded = true;
   bool _rightPanelExpanded = true;
   bool _bottomPanelExpanded = false;
 
-  // Left panel tab (0 = waypoints, 1 = tour)
+  // Left panel tab (0 = waypoints, 1 = tour, 2 = crowd)
   int _leftPanelTab = 0;
+
+  // Map info from MapView callback
+  MapInfo? _mapInfo;
+  double _robotX = 0;
+  double _robotY = 0;
+
+  // Connection mode
+  ConnectionMode _connectionMode = ConnectionMode.direct;
+
+  // Task engine integration
+  final _taskEngine = TaskEngine.instance;
+  String? _navigatingTo;
+  String? _lastWaypoint;
+  int? _lastNavStatus;
 
   // Animation controllers for smooth panel transitions
   late AnimationController _leftPanelController;
@@ -65,15 +99,125 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
       value: 0.0,
     );
 
+    // Initialize TaskEngine
+    _loadTaskEngine();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final robot = context.read<RobotConnection>();
       _urlController.text = robot.robotUrl;
     });
   }
 
+  Future<void> _loadTaskEngine() async {
+    await _taskEngine.load();
+    _taskEngine.setCallback(this);
+    if (mounted) setState(() {});
+  }
+
+  // === TaskExecutorCallback Implementation ===
+
+  @override
+  void onSpeak(String text) {
+    AudioAnnouncer().speak(text);
+  }
+
+  @override
+  void onDisplay(String url, int durationSeconds) {
+    final robot = context.read<RobotConnection>();
+    if (robot.isConnected) {
+      robot.client.tabletDisplay(url);
+      if (durationSeconds > 0) {
+        Future.delayed(Duration(seconds: durationSeconds), () {
+          if (mounted) onCloseDisplay();
+        });
+      }
+    }
+  }
+
+  @override
+  void onCloseDisplay() {
+    final robot = context.read<RobotConnection>();
+    if (robot.isConnected) {
+      robot.client.tabletCloseDisplay();
+    }
+  }
+
+  @override
+  void onDisplayDefault(String waypoint) {
+    final robot = context.read<RobotConnection>();
+    if (!robot.isConnected) return;
+
+    final displayName = waypoint
+        .replaceAll('_', ' ')
+        .split(' ')
+        .map((word) =>
+            word.isEmpty ? '' : '${word[0].toUpperCase()}${word.substring(1)}')
+        .join(' ');
+
+    final html =
+        'data:text/html,<html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:%23222;"><h1 style="color:white;font-size:72px;font-family:sans-serif;">$displayName</h1></body></html>';
+    robot.client.tabletDisplay(html);
+  }
+
+  @override
+  void onNavigate(String waypoint) {
+    final robot = context.read<RobotConnection>();
+    if (robot.isConnected) {
+      _goToWaypointInternal(robot, waypoint);
+    }
+  }
+
+  @override
+  void onWait(int seconds) {
+    // Wait is handled by TaskEngine timer
+  }
+
+  /// Check nav status and execute task on arrival
+  void _checkNavStatus(int navStatus, String goalName) {
+    if (_lastNavStatus == navStatus) return;
+    final previousStatus = _lastNavStatus;
+    _lastNavStatus = navStatus;
+
+    debugPrint(
+        'HUD: navStatus $previousStatus -> $navStatus, navigatingTo=$_navigatingTo, goal=$goalName');
+
+    // Execute task on arrival (603 = Success/Arrived)
+    if (_navigatingTo != null && navStatus == 603) {
+      final arrivedAt = _navigatingTo!;
+      debugPrint('HUD: Arrival detected at $arrivedAt, executing task...');
+      _taskEngine.executeForWaypoint(arrivedAt, fromWaypoint: _lastWaypoint);
+      _lastWaypoint = arrivedAt;
+    }
+
+    // Clear navigating state on terminal statuses (not 601=Moving)
+    if (_navigatingTo != null && navStatus != 601) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() => _navigatingTo = null);
+        }
+      });
+    }
+  }
+
+  Future<void> _goToWaypointInternal(
+      RobotConnection robot, String waypoint) async {
+    setState(() => _navigatingTo = waypoint);
+    await robot.goToWaypoint(waypoint);
+
+    // Quick check: if robot didn't start moving within 1.5s, assume already there
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted &&
+          _navigatingTo == waypoint &&
+          robot.status.navStatus != 601) {
+        setState(() => _navigatingTo = null);
+      }
+    });
+  }
+
   @override
   void dispose() {
     _urlController.dispose();
+    _customSoundController.dispose();
     _leftPanelController.dispose();
     _rightPanelController.dispose();
     _bottomPanelController.dispose();
@@ -115,9 +259,12 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
       backgroundColor: const Color(0xFF0A0E14), // Deep dark blue-black
       body: Consumer<RobotConnection>(
         builder: (context, robot, _) {
+          // Check nav status for task execution on arrival
+          _checkNavStatus(robot.status.navStatus, robot.status.currentGoal);
+
           // Check if tour is running to adjust layout
-          final tourManager = context.watch<TourManager>();
-          final tourRunning = tourManager.status == TourStatus.running;
+          final tourManager = context.watch<SequenceManager>();
+          final tourRunning = tourManager.status == SequenceStatus.running;
 
           if (robot.state == RobotConnectionState.disconnected ||
               robot.state == RobotConnectionState.error) {
@@ -131,20 +278,68 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
           // Main HUD layout - Map is FULL SCREEN background, panels float on top
           return Stack(
             children: [
-              // === LAYER 0: Full-screen Map (BACKGROUND) ===
-              const Positioned.fill(
-                child: MapView(),
+              // === LAYER 0: Map with frame (90% - "glass on the table" with bezel) ===
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 200),
+                top: 60,
+                left: _leftPanelExpanded ? 420 : 68,
+                right: _rightPanelExpanded ? 276 : 68,
+                bottom: 54,
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: _accentColor.withValues(alpha: 0.4),
+                      width: 2,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _accentColor.withValues(alpha: 0.15),
+                        blurRadius: 12,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: MapView(
+                      fullscreen: true,
+                      onMapUpdate: (info, x, y) {
+                        if (mounted &&
+                            (info != _mapInfo ||
+                                x != _robotX ||
+                                y != _robotY)) {
+                          setState(() {
+                            _mapInfo = info;
+                            _robotX = x;
+                            _robotY = y;
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                ),
               ),
 
               // === LAYER 1: Corner brackets (HUD aesthetic) ===
               ..._buildCornerBrackets(),
 
-              // === LAYER 2: Tour overlay when running ===
+              // === LAYER 2: Map info overlay (top center) - hide when tour running ===
+              if (_mapInfo != null && !tourRunning)
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 200),
+                  top: 64,
+                  left: _leftPanelExpanded ? 424 : 72,
+                  child: _buildMapInfoOverlay(),
+                ),
+
+              // === LAYER 2b: Tour overlay when running (prominent, replaces map info) ===
               if (tourRunning)
-                Positioned(
-                  top: 60,
-                  left: _leftPanelExpanded ? 290 : 56,
-                  right: _rightPanelExpanded ? 270 : 56,
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 200),
+                  top: 64,
+                  left: _leftPanelExpanded ? 424 : 72,
+                  right: _rightPanelExpanded ? 280 : 72,
                   child: _buildTourOverlay(tourManager),
                 ),
 
@@ -239,6 +434,44 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
               ),
             ],
             const SizedBox(height: 24),
+            // Connection mode selector
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<ConnectionMode>(
+                  value: _connectionMode,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF1A1F28),
+                  icon: const Icon(Icons.arrow_drop_down, color: _accentColor),
+                  items: ConnectionMode.values.map((mode) {
+                    return DropdownMenuItem(
+                      value: mode,
+                      child: Row(
+                        children: [
+                          Icon(mode.icon, size: 18, color: _accentColor),
+                          const SizedBox(width: 10),
+                          Text(mode.label,
+                              style: const TextStyle(color: _accentColor)),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (mode) {
+                    if (mode != null) {
+                      setState(() {
+                        _connectionMode = mode;
+                        _urlController.text = mode.defaultUrl;
+                      });
+                    }
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
@@ -246,20 +479,22 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
                     controller: _urlController,
                     decoration: InputDecoration(
                       labelText: 'Robot URL',
-                      hintText: 'ws://10.42.0.1:9090',
+                      hintText: _connectionMode.defaultUrl,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: _accentColor.withValues(alpha: 0.3)),
+                        borderSide: BorderSide(
+                            color: _accentColor.withValues(alpha: 0.3)),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: _accentColor.withValues(alpha: 0.3)),
+                        borderSide: BorderSide(
+                            color: _accentColor.withValues(alpha: 0.3)),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: _accentColor),
+                        borderSide: const BorderSide(color: _accentColor),
                       ),
-                      prefixIcon: Icon(Icons.link, color: _accentColor),
+                      prefixIcon: const Icon(Icons.link, color: _accentColor),
                     ),
                     style: const TextStyle(fontFamily: 'monospace'),
                     onSubmitted: (_) => _connect(robot),
@@ -297,7 +532,7 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
+          const SizedBox(
             width: 80,
             height: 80,
             child: CircularProgressIndicator(
@@ -306,7 +541,7 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
             ),
           ),
           const SizedBox(height: 24),
-          Text(
+          const Text(
             'INITIALIZING LINK...',
             style: TextStyle(
               fontSize: 18,
@@ -320,46 +555,6 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
             style: TextStyle(color: Colors.grey.shade500),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildMapArea(RobotConnection robot, bool tourRunning, TourManager tourManager) {
-    return Container(
-      margin: EdgeInsets.only(
-        top: 60,
-        bottom: 50,
-        left: _leftPanelExpanded ? 280 : 48,
-        right: _rightPanelExpanded ? 260 : 48,
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1117),
-        border: Border.all(
-          color: _accentColor.withValues(alpha: 0.2),
-          width: 1,
-        ),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(7),
-        child: Stack(
-          children: [
-            // Map view fills the area
-            const Positioned.fill(
-              child: MapView(),
-            ),
-            // Tour overlay when running
-            if (tourRunning)
-              Positioned(
-                top: 8,
-                left: 8,
-                right: 8,
-                child: _buildTourOverlay(tourManager),
-              ),
-            // Subtle corner brackets for HUD feel
-            ..._buildCornerBrackets(),
-          ],
-        ),
       ),
     );
   }
@@ -395,57 +590,260 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
     ];
   }
 
-  Widget _buildTourOverlay(TourManager tourManager) {
+  Widget _buildMapInfoOverlay() {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _accentSecondary.withValues(alpha: 0.5)),
+        color: Colors.black.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.tour, color: _accentSecondary, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'TOUR: ${tourManager.currentTour?.name ?? ""}',
-                  style: TextStyle(
-                    color: _accentSecondary,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-                Text(
-                  '${tourManager.currentPhase.label} • Stop ${tourManager.currentStopIndex + 1}/${tourManager.currentTour?.stops.length ?? 0}',
-                  style: TextStyle(color: Colors.grey.shade400, fontSize: 11),
-                ),
-              ],
+          const Icon(Icons.map, color: _accentColor, size: 14),
+          const SizedBox(width: 6),
+          Text(
+            '${_mapInfo!.width}x${_mapInfo!.height}',
+            style: const TextStyle(
+              color: _accentColor,
+              fontSize: 11,
+              fontFamily: 'monospace',
             ),
           ),
-          if (tourManager.countdownSeconds > 0)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: _accentSecondary.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                '${tourManager.countdownSeconds}s',
-                style: TextStyle(
-                  color: _accentSecondary,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'monospace',
-                ),
-              ),
+          const SizedBox(width: 8),
+          const Icon(Icons.location_on, color: _accentSecondary, size: 14),
+          const SizedBox(width: 4),
+          Text(
+            '(${_robotX.toStringAsFixed(1)}, ${_robotY.toStringAsFixed(1)})',
+            style: const TextStyle(
+              color: _accentSecondary,
+              fontSize: 11,
+              fontFamily: 'monospace',
             ),
+          ),
         ],
       ),
     );
+  }
+
+  Widget _buildTourOverlay(SequenceManager tourManager) {
+    final seq = tourManager.currentSequence;
+    final phase = tourManager.currentPhase;
+    final countdown = tourManager.countdownSeconds;
+    final phaseDuration = tourManager.phaseDurationSeconds;
+    final stopIndex = tourManager.currentStopIndex;
+    final stop = tourManager.currentStop;
+    final status = tourManager.status;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _accentSecondary.withValues(alpha: 0.6), width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: _accentSecondary.withValues(alpha: 0.2),
+            blurRadius: 12,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Top row: Tour name + controls
+          Row(
+            children: [
+              // Countdown circle with phase icon
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: _getPhaseColor(phase).withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _getPhaseColor(phase), width: 2),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    if (countdown > 0 && phaseDuration > 0)
+                      SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: CircularProgressIndicator(
+                          value: countdown / phaseDuration,
+                          strokeWidth: 4,
+                          backgroundColor: Colors.grey.shade800,
+                          color: _getPhaseColor(phase),
+                        ),
+                      ),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(phase.icon, size: 16, color: _getPhaseColor(phase)),
+                        if (countdown > 0)
+                          Text(
+                            '${countdown}s',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: _getPhaseColor(phase),
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Tour info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _getPhaseColor(phase),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            phase.label.replaceAll('...', ''),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            seq?.name ?? 'Tour',
+                            style: const TextStyle(
+                              color: _accentSecondary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    if (stop != null)
+                      Row(
+                        children: [
+                          Icon(Icons.location_on, size: 12, color: Colors.grey.shade400),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              stop.waypoint,
+                              style: TextStyle(color: Colors.grey.shade300, fontSize: 11),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            '${stopIndex + 1}/${seq?.stops.length ?? 0}',
+                            style: TextStyle(
+                              color: Colors.grey.shade500,
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Control buttons
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Skip button
+                  _MiniControlButton(
+                    icon: Icons.skip_next,
+                    color: _accentColor,
+                    onTap: tourManager.skipToNextStop,
+                    tooltip: 'Skip',
+                  ),
+                  const SizedBox(width: 4),
+                  // Pause/Resume button
+                  _MiniControlButton(
+                    icon: status == SequenceStatus.paused ? Icons.play_arrow : Icons.pause,
+                    color: Colors.orange,
+                    onTap: status == SequenceStatus.paused
+                        ? tourManager.resumeSequence
+                        : tourManager.pauseSequence,
+                    tooltip: status == SequenceStatus.paused ? 'Resume' : 'Pause',
+                  ),
+                  const SizedBox(width: 4),
+                  // Stop button
+                  _MiniControlButton(
+                    icon: Icons.stop,
+                    color: _dangerColor,
+                    onTap: tourManager.stopSequence,
+                    tooltip: 'Stop',
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Stop progress bar
+          _buildStopProgressBar(seq, stopIndex),
+        ],
+      ),
+    );
+  }
+
+  /// Build stop progress bar showing completed/current/pending stops
+  Widget _buildStopProgressBar(Sequence? seq, int currentIndex) {
+    if (seq == null || seq.stops.isEmpty) return const SizedBox.shrink();
+
+    return Row(
+      children: List.generate(seq.stops.length, (index) {
+        final isCompleted = index < currentIndex;
+        final isCurrent = index == currentIndex;
+        return Expanded(
+          child: Container(
+            height: 4,
+            margin: const EdgeInsets.symmetric(horizontal: 1),
+            decoration: BoxDecoration(
+              color: isCompleted
+                  ? _accentSecondary
+                  : isCurrent
+                      ? _accentSecondary.withValues(alpha: 0.5)
+                      : Colors.grey.shade700,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  /// Get color for sequence phase
+  Color _getPhaseColor(SequencePhase phase) {
+    switch (phase) {
+      case SequencePhase.navigating:
+        return Colors.blue;
+      case SequencePhase.arriving:
+        return _accentSecondary;
+      case SequencePhase.speaking:
+        return Colors.orange;
+      case SequencePhase.displaying:
+        return Colors.purple;
+      case SequencePhase.waiting:
+        return Colors.teal;
+    }
   }
 
   Widget _buildTopStatusBar(RobotConnection robot) {
@@ -456,9 +854,12 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
       margin: const EdgeInsets.all(4),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF151A22).withValues(alpha: 0.95),
+        color: const Color(0xFF0A0E14).withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _accentColor.withValues(alpha: 0.2)),
+        border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8),
+        ],
       ),
       child: Row(
         children: [
@@ -476,6 +877,17 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
             label: '${status.battery.toStringAsFixed(0)}%',
             color: _batteryColor(status.battery),
           ),
+
+          // Charging indicator
+          if (status.isCharging) ...[
+            const SizedBox(width: 8),
+            const _HudChip(
+              icon: Icons.bolt,
+              label: 'CHG',
+              color: Colors.yellow,
+              pulse: true,
+            ),
+          ],
           const SizedBox(width: 12),
 
           // Nav status
@@ -484,6 +896,16 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
             label: status.navStatusText,
             color: status.isMoving ? _accentSecondary : Colors.grey,
           ),
+
+          // Speed (when moving)
+          if (status.isMoving && status.velocity.isNotEmpty) ...[
+            const SizedBox(width: 8),
+            _HudChip(
+              icon: Icons.speed,
+              label: '${status.velocity[0].abs().toStringAsFixed(2)} m/s',
+              color: _accentColor,
+            ),
+          ],
 
           // E-stop warning
           if (status.hasEstop) ...[
@@ -499,7 +921,7 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
           // Stale data warning
           if (robot.isStale) ...[
             const SizedBox(width: 12),
-            _HudChip(
+            const _HudChip(
               icon: Icons.warning_amber,
               label: 'DATA STALE',
               color: Colors.amber,
@@ -511,11 +933,12 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
 
           // Current goal
           if (status.currentGoal.isNotEmpty) ...[
-            Icon(Icons.flag, size: 16, color: _accentColor),
+            const Icon(Icons.flag, size: 16, color: _accentColor),
             const SizedBox(width: 4),
             Text(
               status.currentGoal,
-              style: TextStyle(color: _accentColor, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  color: _accentColor, fontWeight: FontWeight.bold),
             ),
             const SizedBox(width: 16),
           ],
@@ -532,19 +955,24 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildLeftPanel(RobotConnection robot, bool tourRunning, TourManager tourManager) {
+  Widget _buildLeftPanel(
+      RobotConnection robot, bool tourRunning, SequenceManager tourManager) {
     final capabilities = robot.capabilities;
     final waypoints = capabilities?.waypoints ?? [];
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      width: _leftPanelExpanded ? 280 : 48,
+      width: _leftPanelExpanded ? 400 : 48,
       child: Container(
         margin: const EdgeInsets.only(left: 4, top: 4, bottom: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFF151A22).withValues(alpha: 0.95),
+          color: const Color(0xFF0A0E14).withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _accentColor.withValues(alpha: 0.2)),
+          border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3), blurRadius: 8),
+          ],
         ),
         child: Column(
           children: [
@@ -556,7 +984,9 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
               Expanded(
                 child: _leftPanelTab == 0
                     ? _buildWaypointsContent(waypoints)
-                    : _buildTourContent(waypoints, tourManager),
+                    : _leftPanelTab == 1
+                        ? _buildTourContent(waypoints, tourManager)
+                        : _buildCrowdContent(),
               ),
           ],
         ),
@@ -603,6 +1033,14 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
               color: _accentSecondary,
               onTap: () => setState(() => _leftPanelTab = 1),
             ),
+            const SizedBox(width: 4),
+            _PanelTabButton(
+              icon: Icons.people,
+              label: 'CROWD',
+              selected: _leftPanelTab == 2,
+              color: Colors.orange,
+              onTap: () => setState(() => _leftPanelTab = 2),
+            ),
           ],
         ],
       ),
@@ -621,6 +1059,14 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
 
     return Column(
       children: [
+        // Hint text
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Text(
+            'Long-press to configure task mode',
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+          ),
+        ),
         // Voice control
         Padding(
           padding: const EdgeInsets.all(8),
@@ -634,10 +1080,15 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
             itemCount: waypoints.length,
             itemBuilder: (context, index) {
               final wp = waypoints[index];
+              final hasMode = _taskEngine.hasMode(wp);
+              final isNavigating = _navigatingTo == wp;
               return _WaypointButton(
                 name: wp,
                 color: _accentColor,
                 onTap: () => _navigateTo(wp),
+                onLongPress: () => _showTaskConfigDialog(wp),
+                hasMode: hasMode,
+                isNavigating: isNavigating,
               );
             },
           ),
@@ -646,11 +1097,15 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildTourContent(List<String> waypoints, TourManager tourManager) {
+  Widget _buildTourContent(List<String> waypoints, SequenceManager tourManager) {
     return Padding(
       padding: const EdgeInsets.all(8),
-      child: TourEditor(availableWaypoints: waypoints),
+      child: SequenceEditor(availableWaypoints: waypoints),
     );
+  }
+
+  Widget _buildCrowdContent() {
+    return const CrowdLogicSettings();
   }
 
   Widget _buildRightPanel(RobotConnection robot) {
@@ -660,9 +1115,13 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
       child: Container(
         margin: const EdgeInsets.only(right: 4, top: 4, bottom: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFF151A22).withValues(alpha: 0.95),
+          color: const Color(0xFF0A0E14).withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _accentColor.withValues(alpha: 0.2)),
+          border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.3), blurRadius: 8),
+          ],
         ),
         child: Column(
           children: [
@@ -672,15 +1131,17 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
               padding: const EdgeInsets.symmetric(horizontal: 4),
               decoration: BoxDecoration(
                 border: Border(
-                  bottom: BorderSide(color: _accentColor.withValues(alpha: 0.2)),
+                  bottom:
+                      BorderSide(color: _accentColor.withValues(alpha: 0.2)),
                 ),
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: _rightPanelExpanded
+                    ? MainAxisAlignment.spaceBetween
+                    : MainAxisAlignment.center,
                 children: [
                   if (_rightPanelExpanded)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 8),
+                    const Expanded(
                       child: Text(
                         'MANUAL CONTROL',
                         style: TextStyle(
@@ -689,16 +1150,22 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   IconButton(
                     icon: Icon(
-                      _rightPanelExpanded ? Icons.chevron_right : Icons.chevron_left,
+                      _rightPanelExpanded
+                          ? Icons.chevron_right
+                          : Icons.chevron_left,
                       color: _accentColor,
                     ),
                     onPressed: _toggleRightPanel,
                     tooltip: _rightPanelExpanded ? 'Collapse' : 'Expand',
                     iconSize: 20,
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 36, minHeight: 36),
                   ),
                 ],
               ),
@@ -721,9 +1188,12 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
       margin: const EdgeInsets.all(4),
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF151A22).withValues(alpha: 0.95),
+        color: const Color(0xFF0A0E14).withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _accentColor.withValues(alpha: 0.2)),
+        border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8),
+        ],
       ),
       child: Row(
         children: [
@@ -753,13 +1223,67 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
             label: robot.status.softEstop ? 'RELEASE' : 'E-STOP',
             color: robot.status.softEstop ? _accentSecondary : _dangerColor,
             onTap: () {
-              debugPrint('HUD: E-STOP pressed, current=${robot.status.softEstop}');
+              debugPrint(
+                  'HUD: E-STOP pressed, current=${robot.status.softEstop}');
               // Advertise first, then publish
               robot.client.send(protocol.SmaitProtocol.advertiseSoftStop());
               Future.delayed(const Duration(milliseconds: 100), () {
-                robot.client.send(protocol.SmaitProtocol.publishSoftStop(!robot.status.softEstop));
+                robot.client.send(protocol.SmaitProtocol.publishSoftStop(
+                    !robot.status.softEstop));
               });
             },
+          ),
+
+          const SizedBox(width: 16),
+
+          // Expandable feature pills
+          _FeaturePill(
+            icon: Icons.volume_up,
+            label: 'SND',
+            color: Colors.purple,
+            onTap: () => _showFeaturePanel('sound', robot),
+          ),
+          const SizedBox(width: 4),
+          _FeaturePill(
+            icon: Icons.campaign,
+            label: 'ANN',
+            color: Colors.teal,
+            onTap: () => _showFeaturePanel('announcements', robot),
+          ),
+          const SizedBox(width: 4),
+          _FeaturePill(
+            icon: Icons.science,
+            label: 'TEST',
+            color: Colors.amber,
+            onTap: () => _showFeaturePanel('testing', robot),
+          ),
+          const SizedBox(width: 4),
+          _FeaturePill(
+            icon: Icons.settings,
+            label: 'SET',
+            color: Colors.blueGrey,
+            onTap: () => _showFeaturePanel('settings', robot),
+          ),
+          const SizedBox(width: 4),
+          _FeaturePill(
+            icon: Icons.tune,
+            label: 'PRM',
+            color: Colors.indigo,
+            onTap: () => _showFeaturePanel('params', robot),
+          ),
+          const SizedBox(width: 4),
+          _FeaturePill(
+            icon: Icons.psychology,
+            label: 'CAP',
+            color: Colors.deepPurple,
+            onTap: () => _showFeaturePanel('capabilities', robot),
+          ),
+          const SizedBox(width: 4),
+          _FeaturePill(
+            icon: Icons.auto_fix_high,
+            label: 'MODE',
+            color: Colors.pink,
+            onTap: () => _showFeaturePanel('modes', robot),
           ),
 
           const Spacer(),
@@ -773,6 +1297,303 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
           ),
         ],
       ),
+    );
+  }
+
+  void _showFeaturePanel(String feature, RobotConnection robot) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: const Color(0xFF151A22),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: _accentColor.withValues(alpha: 0.4)),
+        ),
+        child: Container(
+          width: 500,
+          height: 500,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Header
+              Row(
+                children: [
+                  Icon(_getFeatureIcon(feature), color: _accentColor),
+                  const SizedBox(width: 8),
+                  Text(
+                    _getFeatureTitle(feature),
+                    style: const TextStyle(
+                      color: _accentColor,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    color: Colors.grey,
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.grey),
+              // Content
+              Expanded(child: _buildFeatureContent(feature, robot)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getFeatureIcon(String feature) {
+    switch (feature) {
+      case 'sound':
+        return Icons.volume_up;
+      case 'announcements':
+        return Icons.campaign;
+      case 'testing':
+        return Icons.science;
+      case 'settings':
+        return Icons.settings;
+      case 'params':
+        return Icons.tune;
+      case 'capabilities':
+        return Icons.psychology;
+      case 'modes':
+        return Icons.auto_fix_high;
+      default:
+        return Icons.help;
+    }
+  }
+
+  String _getFeatureTitle(String feature) {
+    switch (feature) {
+      case 'sound':
+        return 'SOUND CONTROL';
+      case 'announcements':
+        return 'ANNOUNCEMENTS';
+      case 'testing':
+        return 'TESTING';
+      case 'settings':
+        return 'SETTINGS';
+      case 'params':
+        return 'ROBOT PARAMS';
+      case 'capabilities':
+        return 'CAPABILITIES';
+      case 'modes':
+        return 'TASK MODES';
+      default:
+        return feature.toUpperCase();
+    }
+  }
+
+  Widget _buildFeatureContent(String feature, RobotConnection robot) {
+    final waypoints = robot.capabilities?.waypoints ?? [];
+    switch (feature) {
+      case 'sound':
+        return _buildSoundControl(robot);
+      case 'announcements':
+        return const AnnouncementPresetsEditor();
+      case 'testing':
+        return _buildTestingPanel(robot);
+      case 'settings':
+        return _buildSettingsPanel(robot);
+      case 'params':
+        return _buildParamsPanel(robot);
+      case 'capabilities':
+        return _buildCapabilitiesPanel(robot);
+      case 'modes':
+        return ModeEditor(availableWaypoints: waypoints);
+      default:
+        return const Center(child: Text('Coming soon...'));
+    }
+  }
+
+  Widget _buildSoundControl(RobotConnection robot) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Audio Announcements', style: TextStyle(color: Colors.grey[400])),
+        const SizedBox(height: 12),
+        // Custom text input
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _customSoundController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Type custom announcement...',
+                  hintStyle: TextStyle(color: Colors.grey[600]),
+                  filled: true,
+                  fillColor: Colors.grey[850],
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                onSubmitted: (text) {
+                  if (text.trim().isNotEmpty) {
+                    robot.client.tabletSpeak(text.trim());
+                    _customSoundController.clear();
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.send, color: Color(0xFF00D4FF)),
+              onPressed: () {
+                final text = _customSoundController.text.trim();
+                if (text.isNotEmpty) {
+                  robot.client.tabletSpeak(text);
+                  _customSoundController.clear();
+                }
+              },
+              tooltip: 'Speak',
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text('Quick Phrases', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _SoundButton(
+                label: 'Excuse Me',
+                text: 'Excuse me, please make way.',
+                robot: robot),
+            _SoundButton(
+                label: 'Thank You',
+                text: 'Thank you! Have a great day.',
+                robot: robot),
+            _SoundButton(
+                label: 'Arriving',
+                text: 'I am arriving at my destination.',
+                robot: robot),
+            _SoundButton(
+                label: 'Following',
+                text: 'I am following you. Please walk slowly.',
+                robot: robot),
+            _SoundButton(
+                label: 'Low Battery',
+                text: 'Warning: Battery is running low.',
+                robot: robot),
+            _SoundButton(
+                label: 'Emergency',
+                text: 'Emergency stop activated.',
+                robot: robot),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTestingPanel(RobotConnection robot) {
+    return ListView(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.navigation, color: Colors.blue),
+          title: const Text('Test Navigation'),
+          subtitle: const Text('Send robot to home position'),
+          onTap: () =>
+              robot.client.callService(service: '/poi', args: {'poi': 'home'}),
+        ),
+        ListTile(
+          leading: const Icon(Icons.rotate_right, color: Colors.green),
+          title: const Text('Spin Test'),
+          subtitle: const Text('Rotate robot 360°'),
+          onTap: () => robot.sendVelocity(0, 0.5),
+        ),
+        ListTile(
+          leading: const Icon(Icons.speaker, color: Colors.orange),
+          title: const Text('Audio Test'),
+          subtitle: const Text('Test tablet TTS'),
+          onTap: () => robot.client.tabletSpeak('Audio test successful.'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSettingsPanel(RobotConnection robot) {
+    return ListView(
+      children: [
+        SwitchListTile(
+          title: const Text('Audio Enabled'),
+          subtitle: const Text('Enable/disable robot announcements'),
+          value: true, // TODO: bind to actual setting
+          onChanged: (v) {},
+        ),
+        const ListTile(
+          leading: Icon(Icons.speed),
+          title: Text('Max Speed'),
+          subtitle: Text('0.5 m/s'),
+          trailing: Icon(Icons.chevron_right),
+        ),
+        const ListTile(
+          leading: Icon(Icons.volume_up),
+          title: Text('Volume'),
+          subtitle: Text('80%'),
+          trailing: Icon(Icons.chevron_right),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildParamsPanel(RobotConnection robot) {
+    final params = robot.capabilities?.parameters ?? [];
+    if (params.isEmpty) {
+      return const Center(
+          child: Text('No parameters discovered',
+              style: TextStyle(color: Colors.grey)));
+    }
+    return ListView.builder(
+      itemCount: params.length,
+      itemBuilder: (ctx, i) {
+        final param = params[i];
+        return ListTile(
+          dense: true,
+          title: Text(param,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+        );
+      },
+    );
+  }
+
+  Widget _buildCapabilitiesPanel(RobotConnection robot) {
+    final caps = robot.capabilities;
+    if (caps == null) {
+      return const Center(
+          child: Text('Not connected', style: TextStyle(color: Colors.grey)));
+    }
+    return ListView(
+      children: [
+        _CapabilityTile(
+            icon: Icons.topic, label: 'Topics', count: caps.topics.length),
+        _CapabilityTile(
+            icon: Icons.miscellaneous_services,
+            label: 'Services',
+            count: caps.services.length),
+        _CapabilityTile(
+            icon: Icons.tune,
+            label: 'Parameters',
+            count: caps.parameters.length),
+        _CapabilityTile(
+            icon: Icons.location_on,
+            label: 'Waypoints',
+            count: caps.waypoints.length),
+        const Divider(),
+        _CapabilityRow(label: 'Navigation', enabled: caps.hasNavigation),
+        _CapabilityRow(
+            label: 'Velocity Control', enabled: caps.hasVelocityControl),
+        _CapabilityRow(label: 'Status', enabled: caps.hasStatus),
+        _CapabilityRow(label: 'Battery', enabled: caps.hasBattery),
+        _CapabilityRow(label: 'Map', enabled: caps.hasMap),
+      ],
     );
   }
 
@@ -793,10 +1614,24 @@ class _HudScreenState extends State<HudScreen> with TickerProviderStateMixin {
   void _navigateTo(String waypoint) {
     debugPrint('HUD: Navigate to $waypoint');
     final robot = context.read<RobotConnection>();
-    robot.client.callService(
-      service: '/poi',
-      args: {'poi': waypoint},
+    _goToWaypointInternal(robot, waypoint);
+  }
+
+  /// Show dialog to configure task mode for a waypoint
+  Future<void> _showTaskConfigDialog(String waypoint) async {
+    final result = await showDialog<_TaskConfigResult>(
+      context: context,
+      builder: (context) => _TaskConfigDialog(
+        waypoint: waypoint,
+        taskEngine: _taskEngine,
+      ),
     );
+
+    if (result != null) {
+      setState(() {
+        _taskEngine.assignMode(waypoint, result.modeId, params: result.params);
+      });
+    }
   }
 
   IconData _batteryIcon(double level) {
@@ -832,7 +1667,8 @@ class _HudChip extends StatefulWidget {
   State<_HudChip> createState() => _HudChipState();
 }
 
-class _HudChipState extends State<_HudChip> with SingleTickerProviderStateMixin {
+class _HudChipState extends State<_HudChip>
+    with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
 
   @override
@@ -956,45 +1792,64 @@ class _PanelTabButton extends StatelessWidget {
   }
 }
 
-/// Compact waypoint button for HUD
+/// Compact waypoint button for HUD with long-press for task config
 class _WaypointButton extends StatelessWidget {
   final String name;
   final Color color;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final bool hasMode;
+  final bool isNavigating;
 
   const _WaypointButton({
     required this.name,
     required this.color,
     required this.onTap,
+    this.onLongPress,
+    this.hasMode = false,
+    this.isNavigating = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final activeColor = isNavigating ? const Color(0xFF00FF88) : color;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
+          onLongPress: onLongPress,
           borderRadius: BorderRadius.circular(4),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              border: Border.all(color: color.withValues(alpha: 0.3)),
+              color: isNavigating ? activeColor.withValues(alpha: 0.15) : null,
+              border: Border.all(color: activeColor.withValues(alpha: isNavigating ? 0.6 : 0.3)),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Row(
               children: [
-                Icon(Icons.location_on, size: 16, color: color),
+                if (isNavigating)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00FF88)),
+                  )
+                else if (hasMode)
+                  Icon(Icons.auto_awesome, size: 14, color: Colors.amber.shade400)
+                else
+                  Icon(Icons.location_on, size: 16, color: activeColor),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     name,
-                    style: TextStyle(color: color, fontSize: 12),
+                    style: TextStyle(color: activeColor, fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Icon(Icons.play_arrow, size: 18, color: color),
+                Icon(Icons.play_arrow, size: 18, color: activeColor),
               ],
             ),
           ),
@@ -1101,8 +1956,414 @@ class _BracketPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _BracketPainter oldDelegate) {
     return oldDelegate.color != color ||
-           oldDelegate.thickness != thickness ||
-           oldDelegate.top != top ||
-           oldDelegate.left != left;
+        oldDelegate.thickness != thickness ||
+        oldDelegate.top != top ||
+        oldDelegate.left != left;
+  }
+}
+
+/// Feature pill button for bottom bar expandable panels
+class _FeaturePill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _FeaturePill({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: color.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 3),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Sound preset button
+class _SoundButton extends StatelessWidget {
+  final String label;
+  final String text;
+  final RobotConnection robot;
+
+  const _SoundButton({
+    required this.label,
+    required this.text,
+    required this.robot,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ElevatedButton.icon(
+      icon: const Icon(Icons.play_arrow, size: 16),
+      label: Text(label, style: const TextStyle(fontSize: 12)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.grey.shade800,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      ),
+      onPressed: () => robot.client.tabletSpeak(text),
+    );
+  }
+}
+
+/// Capability count tile
+class _CapabilityTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final int count;
+
+  const _CapabilityTile({
+    required this.icon,
+    required this.label,
+    required this.count,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      leading: Icon(icon, size: 20, color: Colors.grey),
+      title: Text(label),
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.blue.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          count.toString(),
+          style:
+              const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+
+/// Capability boolean row
+class _CapabilityRow extends StatelessWidget {
+  final String label;
+  final bool enabled;
+
+  const _CapabilityRow({
+    required this.label,
+    required this.enabled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      dense: true,
+      title: Text(label),
+      trailing: Icon(
+        enabled ? Icons.check_circle : Icons.cancel,
+        color: enabled ? Colors.green : Colors.red,
+        size: 20,
+      ),
+    );
+  }
+}
+
+/// Task types for the waypoint task dialog
+enum _TaskType {
+  none('None', 'Just announce arrival'),
+  deliver('Deliver', 'Wait for pickup, then return'),
+  speak('Speak', 'Text-to-speech announcement'),
+  display('Display', 'Show webpage or video');
+
+  final String label;
+  final String description;
+  const _TaskType(this.label, this.description);
+}
+
+/// Result from task config dialog
+class _TaskConfigResult {
+  final String? modeId;
+  final Map<String, String> params;
+
+  _TaskConfigResult({this.modeId, this.params = const {}});
+}
+
+/// Dialog to configure a waypoint task mode
+class _TaskConfigDialog extends StatefulWidget {
+  final String waypoint;
+  final TaskEngine taskEngine;
+
+  const _TaskConfigDialog({
+    required this.waypoint,
+    required this.taskEngine,
+  });
+
+  @override
+  State<_TaskConfigDialog> createState() => _TaskConfigDialogState();
+}
+
+class _TaskConfigDialogState extends State<_TaskConfigDialog> {
+  _TaskType _selectedType = _TaskType.none;
+  late TextEditingController _dataController;
+  int _waitSeconds = 30;
+
+  @override
+  void initState() {
+    super.initState();
+    _dataController = TextEditingController();
+
+    // Load existing assignment
+    final assignment = widget.taskEngine.getAssignment(widget.waypoint);
+    if (assignment != null && assignment.modeId != null) {
+      if (assignment.modeId == 'delivery') {
+        _selectedType = _TaskType.deliver;
+        _dataController.text = assignment.params['speak_text'] ?? '';
+        _waitSeconds =
+            int.tryParse(assignment.params['wait_seconds'] ?? '30') ?? 30;
+      } else if (assignment.modeId == 'announce') {
+        if (assignment.params['display_url']?.isNotEmpty == true) {
+          _selectedType = _TaskType.display;
+          _dataController.text = assignment.params['display_url'] ?? '';
+        } else {
+          _selectedType = _TaskType.speak;
+          _dataController.text = assignment.params['speak_text'] ?? '';
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _dataController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF151A22),
+      title: Text(
+        'Task: ${widget.waypoint}',
+        style: const TextStyle(color: Color(0xFF00D4FF)),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Task Type:',
+                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
+            const SizedBox(height: 8),
+            SegmentedButton<_TaskType>(
+              segments: _TaskType.values
+                  .map((t) => ButtonSegment(
+                        value: t,
+                        label: Text(t.label, style: const TextStyle(fontSize: 11)),
+                        icon: Icon(_getTaskIcon(t), size: 16),
+                      ))
+                  .toList(),
+              selected: {_selectedType},
+              onSelectionChanged: (selected) {
+                setState(() => _selectedType = selected.first);
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _selectedType.description,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+            ),
+            const SizedBox(height: 16),
+
+            if (_selectedType != _TaskType.none) ...[
+              TextField(
+                controller: _dataController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: _getDataLabel(),
+                  hintText: _getDataHint(),
+                  border: const OutlineInputBorder(),
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintStyle: TextStyle(color: Colors.grey.shade600),
+                ),
+                maxLines: _selectedType == _TaskType.speak ? 3 : 1,
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            if (_selectedType == _TaskType.deliver) ...[
+              Row(
+                children: [
+                  const Text('Wait time: ', style: TextStyle(color: Colors.white70)),
+                  Expanded(
+                    child: Slider(
+                      value: _waitSeconds.toDouble(),
+                      min: 10,
+                      max: 120,
+                      divisions: 11,
+                      label: '$_waitSeconds sec',
+                      onChanged: (value) {
+                        setState(() => _waitSeconds = value.round());
+                      },
+                    ),
+                  ),
+                  Text('$_waitSeconds sec', style: const TextStyle(color: Colors.white70)),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        if (_selectedType != _TaskType.none)
+          TextButton(
+            onPressed: () => Navigator.pop(context, _TaskConfigResult()),
+            child: const Text('Clear Task'),
+          ),
+        FilledButton(
+          onPressed: () {
+            String? modeId;
+            Map<String, String> params = {};
+
+            switch (_selectedType) {
+              case _TaskType.none:
+                modeId = null;
+                break;
+              case _TaskType.deliver:
+                modeId = 'delivery';
+                params = {
+                  if (_dataController.text.isNotEmpty)
+                    'speak_text': _dataController.text,
+                  'wait_seconds': _waitSeconds.toString(),
+                };
+                break;
+              case _TaskType.speak:
+                modeId = 'announce';
+                params = {'speak_text': _dataController.text};
+                break;
+              case _TaskType.display:
+                modeId = 'announce';
+                params = {
+                  'display_url': _dataController.text,
+                  'display_duration': '0',
+                };
+                break;
+            }
+
+            Navigator.pop(context, _TaskConfigResult(modeId: modeId, params: params));
+          },
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+
+  String _getDataLabel() {
+    switch (_selectedType) {
+      case _TaskType.speak:
+        return 'Speech Text';
+      case _TaskType.display:
+        return 'URL';
+      case _TaskType.deliver:
+        return 'Arrival Message';
+      case _TaskType.none:
+        return '';
+    }
+  }
+
+  String _getDataHint() {
+    switch (_selectedType) {
+      case _TaskType.speak:
+        return 'Your order is ready!';
+      case _TaskType.display:
+        return 'https://example.com/video.mp4';
+      case _TaskType.deliver:
+        return 'Please collect your items';
+      case _TaskType.none:
+        return '';
+    }
+  }
+
+  IconData _getTaskIcon(_TaskType type) {
+    switch (type) {
+      case _TaskType.deliver:
+        return Icons.delivery_dining;
+      case _TaskType.speak:
+        return Icons.volume_up;
+      case _TaskType.display:
+        return Icons.tv;
+      case _TaskType.none:
+        return Icons.block;
+    }
+  }
+}
+
+/// Mini control button for sequence overlay
+class _MiniControlButton extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+  final String tooltip;
+
+  const _MiniControlButton({
+    required this.icon,
+    required this.color,
+    required this.onTap,
+    required this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(4),
+          child: Container(
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: color.withValues(alpha: 0.5)),
+            ),
+            child: Icon(icon, size: 16, color: color),
+          ),
+        ),
+      ),
+    );
   }
 }

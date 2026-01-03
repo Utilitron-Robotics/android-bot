@@ -2,15 +2,16 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'rosbridge_client.dart';
+import 'task_mode.dart';
 import '../services/robot_introspection.dart';
 import '../services/audio_announcer.dart';
-import '../services/tour_executor.dart';
+import '../services/sequence_executor.dart';
 
 /// Robot connection state (renamed to avoid conflict with Flutter's ConnectionState)
 enum RobotConnectionState { disconnected, connecting, connected, error }
 
 /// Manages robot connection and discovered capabilities
-class RobotConnection extends ChangeNotifier {
+class RobotConnection extends ChangeNotifier implements CommandExecutor {
   final RosbridgeClient _client = RosbridgeClient();
   RobotIntrospection? _introspection;
 
@@ -26,8 +27,17 @@ class RobotConnection extends ChangeNotifier {
   // Connection health tracking
   DateTime? _lastStatusUpdate;
   DateTime? get lastStatusUpdate => _lastStatusUpdate;
+  @override
   bool get isStale => _lastStatusUpdate != null &&
       DateTime.now().difference(_lastStatusUpdate!) > const Duration(seconds: 5);
+
+  // Command manager for retry logic
+  late final CommandManager _commandManager;
+  CommandManager get commandManager => _commandManager;
+
+  // Task manager for task modes (tour, delivery, etc.)
+  final TaskManager _taskManager = TaskManager.instance;
+  TaskManager get taskManager => _taskManager;
 
   // Getters
   RobotConnectionState get state => _state;
@@ -36,10 +46,59 @@ class RobotConnection extends ChangeNotifier {
   RobotCapabilities? get capabilities => _capabilities;
   RobotStatus get status => _status;
   RosbridgeClient get client => _client;
+  @override
   bool get isConnected => _state == RobotConnectionState.connected;
 
   RobotConnection() {
+    _commandManager = CommandManager(this);
+    _taskManager.setCommandManager(_commandManager);
     _loadSavedUrl();
+  }
+
+  /// CommandExecutor implementation - send command to robot
+  @override
+  Future<bool> sendCommand(TrackedCommand command) async {
+    if (!isConnected) return false;
+
+    try {
+      switch (command.type) {
+        case 'navigate':
+          final waypoint = command.payload['waypoint'] as String?;
+          if (waypoint != null) {
+            await _client.callService(
+              service: '/poi',
+              args: {'poi': waypoint},
+            );
+            return true;
+          }
+          return false;
+
+        case 'velocity':
+          final linear = command.payload['linear'] as double? ?? 0.0;
+          final angular = command.payload['angular'] as double? ?? 0.0;
+          sendVelocity(linear, angular);
+          // Velocity commands are fire-and-forget, mark as completed immediately
+          _commandManager.commandCompleted(command.id);
+          return true;
+
+        case 'stop':
+          sendVelocity(0, 0);
+          _commandManager.commandCompleted(command.id);
+          return true;
+
+        case 'cancel':
+          await cancelNavigation();
+          _commandManager.commandCompleted(command.id);
+          return true;
+
+        default:
+          debugPrint('RobotConnection: Unknown command type: ${command.type}');
+          return false;
+      }
+    } catch (e) {
+      debugPrint('RobotConnection: Error sending command: $e');
+      return false;
+    }
   }
 
   Future<void> _loadSavedUrl() async {
@@ -78,8 +137,8 @@ class RobotConnection extends ChangeNotifier {
       // Inject dependency for audio announcements
       AudioAnnouncer().setRobotConnection(this);
 
-      // Initialize tour executor
-      TourExecutor().init(this);
+      // Initialize sequence executor
+      SequenceExecutor().init(this);
 
       // Discover robot capabilities
       _introspection = RobotIntrospection(_client);
@@ -149,11 +208,18 @@ class RobotConnection extends ChangeNotifier {
             newStatus.currentGoal,
           );
 
-          // Forward to tour executor for tour mode
-          TourExecutor().onNavStatusChanged(
+          // Forward to sequence executor for sequence mode (legacy)
+          SequenceExecutor().onNavStatusChanged(
             newStatus.navStatus,
             newStatus.currentGoal,
           );
+
+          // Forward to task manager for new task mode system
+          _taskManager.onNavStatus(newStatus.navStatus);
+          if (newStatus.navStatus == 603 && newStatus.currentGoal.isNotEmpty) {
+            // Arrived at waypoint
+            _taskManager.onArrived(newStatus.currentGoal);
+          }
 
           _status = newStatus;
           _lastStatusUpdate = DateTime.now();
@@ -172,12 +238,18 @@ class RobotConnection extends ChangeNotifier {
 
   /// Navigate to a waypoint (POI)
   Future<void> goToWaypoint(String poi) async {
-    if (!isConnected) return;
+    debugPrint('RobotConnection.goToWaypoint: poi=$poi, isConnected=$isConnected');
+    if (!isConnected) {
+      debugPrint('RobotConnection.goToWaypoint: NOT CONNECTED - aborting!');
+      return;
+    }
 
+    debugPrint('RobotConnection.goToWaypoint: Calling service /poi');
     await _client.callService(
       service: '/poi',
       args: {'poi': poi},
     );
+    debugPrint('RobotConnection.goToWaypoint: Service call complete');
   }
 
   /// Cancel current navigation
@@ -237,6 +309,7 @@ class RobotConnection extends ChangeNotifier {
   @override
   void dispose() {
     disconnect();
+    _commandManager.dispose();
     _client.dispose();
     super.dispose();
   }

@@ -42,29 +42,37 @@ class _CrowdLogicSettingsState extends State<CrowdLogicSettings> {
             children: [
               const Icon(Icons.people, size: 24),
               const SizedBox(width: 8),
-              const Text('Crowd Logic', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-              const Spacer(),
+              const Expanded(
+                child: Text('Crowd Logic', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 8),
               // Current venue indicator
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _getVenueColor(_config.venue).withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: _getVenueColor(_config.venue)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(_getVenueIcon(_config.venue), size: 16, color: _getVenueColor(_config.venue)),
-                    const SizedBox(width: 6),
-                    Text(
-                      _config.venue.label,
-                      style: TextStyle(
-                        color: _getVenueColor(_config.venue),
-                        fontWeight: FontWeight.bold,
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _getVenueColor(_config.venue).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: _getVenueColor(_config.venue)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(_getVenueIcon(_config.venue), size: 14, color: _getVenueColor(_config.venue)),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          _config.venue.label,
+                          style: TextStyle(
+                            color: _getVenueColor(_config.venue),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
