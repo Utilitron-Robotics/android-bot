@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'task_mode.dart';
 import 'sequence_task_mode.dart';
+import 'buffer_sequence_executor.dart';
+import 'buffer_client.dart';
 
 /// A single stop in a tour with waypoint and associated actions
 class SequenceStop {
@@ -101,6 +103,209 @@ class Sequence {
         speakText: scripts[wp],
         displayUrl: displayUrls[wp],
       )).toList(),
+    );
+  }
+
+  // ================================================================
+  // EXAMPLE SEQUENCE FACTORY METHODS
+  // These create pre-configured sequences for common use cases
+  // ================================================================
+
+  /// Tour Sequence: Multi-stop guided tour with narration at each exhibit
+  /// Use Case: Museums, offices, campus tours
+  static Sequence tourExample({
+    required List<String> waypoints,
+    Map<String, String> narrations = const {},
+    Map<String, String> mediaUrls = const {},
+    String? returnWaypoint,
+  }) {
+    return Sequence(
+      id: 'tour_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Guided Tour',
+      description: 'Multi-stop guided tour with narration',
+      introText: 'Welcome to the tour! Please follow me as I show you around.',
+      outroText: 'This concludes our tour. Thank you for joining me!',
+      announceArrival: true,
+      endWaypoint: returnWaypoint,
+      stops: waypoints.map((wp) => SequenceStop(
+        waypoint: wp,
+        speakText: narrations[wp] ?? 'This is $wp.',
+        displayUrl: mediaUrls[wp],
+        displayDuration: 15,
+        waitSeconds: 5,
+      )).toList(),
+    );
+  }
+
+  /// Comic Sequence: Go to waypoints (or people) and tell jokes
+  /// Use Case: Entertainment events, parties
+  static Sequence comicExample({
+    required List<String> waypoints,
+    required List<String> jokes,
+    Map<String, String> punchlineGifs = const {},
+  }) {
+    final stops = <SequenceStop>[];
+    for (int i = 0; i < waypoints.length; i++) {
+      final wp = waypoints[i];
+      final joke = i < jokes.length ? jokes[i] : 'Why did the robot cross the road? To get to the other circuit!';
+      stops.add(SequenceStop(
+        waypoint: wp,
+        speakText: joke,
+        displayUrl: punchlineGifs[wp],
+        displayDuration: 5,
+        waitSeconds: 3, // Wait for laughter
+      ));
+    }
+    return Sequence(
+      id: 'comic_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Comedy Tour',
+      description: 'Tell jokes at each stop',
+      introText: 'Get ready to laugh! I have some great jokes for you today.',
+      outroText: 'Thank you, thank you! I will be here all week!',
+      announceArrival: false, // Don't announce, just tell joke
+      stops: stops,
+    );
+  }
+
+  /// Delivery Sequence: Deliver to multiple destinations, then return
+  /// Use Case: Restaurant multi-table delivery, mail/package runs
+  static Sequence deliveryExample({
+    required List<String> destinations,
+    required String returnWaypoint,
+    String deliveryMessage = 'Your delivery has arrived. Please take your items.',
+    int waitSeconds = 30,
+  }) {
+    return Sequence(
+      id: 'delivery_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Delivery Run',
+      description: 'Deliver to multiple stops and return',
+      introText: 'Starting delivery run.',
+      outroText: 'All deliveries complete. Returning to station.',
+      announceArrival: true,
+      endWaypoint: returnWaypoint,
+      stops: destinations.map((wp) => SequenceStop(
+        waypoint: wp,
+        speakText: deliveryMessage,
+        waitSeconds: waitSeconds,
+      )).toList(),
+    );
+  }
+
+  /// Busser Sequence: Go to tables, collect items, go to bus station
+  /// Use Case: Restaurant clearing, event cleanup
+  static Sequence busserExample({
+    required List<String> tables,
+    required String busStation,
+    String askText = 'Please place any finished items on my tray.',
+    int waitSeconds = 20,
+  }) {
+    final stops = tables.map((table) => SequenceStop(
+      waypoint: table,
+      speakText: askText,
+      waitSeconds: waitSeconds,
+    )).toList();
+
+    // Add bus station as final stop
+    stops.add(SequenceStop(
+      waypoint: busStation,
+      speakText: 'Ready for unloading. Please remove all items from the tray.',
+      waitSeconds: 30,
+    ));
+
+    return Sequence(
+      id: 'busser_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Bussing Run',
+      description: 'Collect items from tables and deliver to bus station',
+      introText: 'Starting bussing run.',
+      outroText: 'Bussing complete.',
+      announceArrival: true,
+      stops: stops,
+    );
+  }
+
+  /// Emergency Sequence: Alert all areas and guide to exit
+  /// Use Case: Fire drills, evacuation, safety alerts
+  static Sequence emergencyExample({
+    required List<String> alertWaypoints,
+    required String exitWaypoint,
+    String alertMessage = 'EMERGENCY! Please evacuate immediately. Follow me to the exit.',
+    String? evacuationMapUrl,
+  }) {
+    final stops = alertWaypoints.map((wp) => SequenceStop(
+      waypoint: wp,
+      speakText: alertMessage,
+      displayUrl: evacuationMapUrl,
+      displayDuration: 0, // Keep displayed until departure
+      waitSeconds: 5, // Brief wait to ensure message heard
+    )).toList();
+
+    // Add exit as final stop
+    stops.add(SequenceStop(
+      waypoint: exitWaypoint,
+      speakText: 'Exit this way. Please proceed calmly.',
+      displayUrl: evacuationMapUrl,
+      waitSeconds: 0,
+    ));
+
+    return Sequence(
+      id: 'emergency_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Emergency Evacuation',
+      description: 'Alert all areas and guide to emergency exit',
+      introText: 'EMERGENCY ALERT!',
+      announceArrival: false, // No arrival announcements - just alert
+      loop: true, // Keep looping until manually stopped
+      stops: stops,
+    );
+  }
+
+  /// Patrol Sequence: Loop through waypoints continuously
+  /// Use Case: Security patrol, monitoring
+  static Sequence patrolExample({
+    required List<String> patrolPoints,
+    int dwellSeconds = 10,
+  }) {
+    return Sequence(
+      id: 'patrol_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Patrol Route',
+      description: 'Continuously patrol waypoints',
+      loop: true,
+      announceArrival: false,
+      stops: patrolPoints.map((wp) => SequenceStop(
+        waypoint: wp,
+        waitSeconds: dwellSeconds,
+      )).toList(),
+    );
+  }
+
+  /// Greeter Sequence: Wait at entrance, greet, then idle
+  /// Use Case: Reception, lobby greeting
+  static Sequence greeterExample({
+    required String entranceWaypoint,
+    required String idleWaypoint,
+    String greetingText = 'Welcome! How can I help you today?',
+    String? logoUrl,
+    int waitSeconds = 60,
+  }) {
+    return Sequence(
+      id: 'greeter_${DateTime.now().millisecondsSinceEpoch}',
+      name: 'Greeter Duty',
+      description: 'Greet visitors at entrance',
+      loop: true, // Keep greeting until stopped
+      announceArrival: false,
+      stops: [
+        SequenceStop(
+          waypoint: entranceWaypoint,
+          speakText: greetingText,
+          displayUrl: logoUrl,
+          displayDuration: waitSeconds,
+          waitSeconds: waitSeconds,
+        ),
+        SequenceStop(
+          waypoint: idleWaypoint,
+          speakText: 'Returning to standby.',
+          waitSeconds: 10,
+        ),
+      ],
     );
   }
 
@@ -207,6 +412,7 @@ enum SequencePhase {
 /// Callback interface for tour execution
 abstract class SequenceExecutorCallback {
   void onSpeak(String text);
+  void onArrivalAnnouncement(String waypoint, {bool isDelivery = false}); // Beep + speak arrival
   void onDisplay(String url, int durationSeconds);
   void onDisplayDefault(String waypoint);  // Show company branding when no media
   void onCloseDisplay();
@@ -241,6 +447,10 @@ class SequenceManager extends ChangeNotifier {
 
   // NEW: SequenceTaskMode for command queue/retry support
   SequenceTaskMode? _activeSequenceTask;
+
+  // NEW: Buffer-based executor (preferred when available)
+  BufferSequenceExecutor? _bufferExecutor;
+  bool _useBufferExecutor = false;
 
   // Phase tracking for UI countdown
   SequencePhase _currentPhase = SequencePhase.navigating;
@@ -309,6 +519,62 @@ class SequenceManager extends ChangeNotifier {
   /// Set the callback for tour execution
   void setCallback(SequenceExecutorCallback callback) {
     _callback = callback;
+  }
+
+  /// Configure buffer-based executor (preferred for relay connection)
+  /// When set, sequences are loaded into the relay buffer for execution
+  void setBufferExecutor(BufferClient bufferClient) {
+    if (_callback == null) {
+      debugPrint('SequenceManager: Cannot set buffer executor - no callback set');
+      return;
+    }
+    _bufferExecutor = BufferSequenceExecutor.withClient(
+      bufferClient: bufferClient,
+      callback: _callback!,
+    );
+    _bufferExecutor!.addListener(_onBufferExecutorChanged);
+    _useBufferExecutor = true;
+    debugPrint('SequenceManager: Buffer executor configured');
+  }
+
+  /// Clear buffer executor (fall back to old system)
+  void clearBufferExecutor() {
+    _bufferExecutor?.removeListener(_onBufferExecutorChanged);
+    _bufferExecutor?.dispose();
+    _bufferExecutor = null;
+    _useBufferExecutor = false;
+  }
+
+  /// Mirror buffer executor state to SequenceManager
+  void _onBufferExecutorChanged() {
+    final executor = _bufferExecutor;
+    if (executor == null) return;
+
+    _currentStopIndex = executor.currentStopIndex;
+    _currentPhase = executor.currentPhase;
+    _countdownSeconds = executor.countdownSeconds;
+
+    // Map buffer executor status to sequence status
+    switch (executor.status) {
+      case SequenceExecutorStatus.idle:
+        _status = SequenceStatus.idle;
+        _currentSequence = null;
+        break;
+      case SequenceExecutorStatus.running:
+        _status = SequenceStatus.running;
+        break;
+      case SequenceExecutorStatus.paused:
+        _status = SequenceStatus.paused;
+        break;
+      case SequenceExecutorStatus.completed:
+        _status = SequenceStatus.completed;
+        break;
+      case SequenceExecutorStatus.failed:
+        _status = SequenceStatus.failed;
+        break;
+    }
+
+    notifyListeners();
   }
 
   /// Configure cloud sync
@@ -600,10 +866,10 @@ class SequenceManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Start a sequence using the new SequenceTaskMode system with command queue/retry
+  /// Start a sequence using buffer executor (preferred) or SequenceTaskMode fallback
   Future<void> startSequence(Sequence sequence) async {
     debugPrint('SequenceManager.startSequence: CALLED with sequence="${sequence.name}" (${sequence.stops.length} stops)');
-    debugPrint('SequenceManager.startSequence: Current status=$_status, callback=${_callback == null ? "NULL!" : "set"}');
+    debugPrint('SequenceManager.startSequence: Current status=$_status, useBuffer=$_useBufferExecutor');
 
     if (_status == SequenceStatus.running) {
       debugPrint('SequenceManager.startSequence: ABORT - sequence already running');
@@ -611,7 +877,7 @@ class SequenceManager extends ChangeNotifier {
     }
 
     if (_callback == null) {
-      debugPrint('SequenceManager.startSequence: ERROR - no callback set! SequenceExecutor.init() not called?');
+      debugPrint('SequenceManager.startSequence: ERROR - no callback set!');
       return;
     }
 
@@ -621,28 +887,32 @@ class SequenceManager extends ChangeNotifier {
     _status = SequenceStatus.running;
     notifyListeners();
 
-    // Create SequenceTaskMode with callback adapter
-    debugPrint('SequenceManager.startSequence: Creating SequenceTaskMode with CommandManager support');
+    // PREFER buffer executor when available (new architecture)
+    if (_useBufferExecutor && _bufferExecutor != null) {
+      debugPrint('SequenceManager.startSequence: Using BufferSequenceExecutor (relay buffer)');
+      await _bufferExecutor!.startSequence(sequence);
+      return;
+    }
+
+    // FALLBACK to old SequenceTaskMode system
+    debugPrint('SequenceManager.startSequence: Falling back to SequenceTaskMode');
     _activeSequenceTask = SequenceTaskMode(
       sequence: sequence,
       callback: SequenceCallbackAdapter(_callback!),
     );
 
-    // Listen to SequenceTaskMode for state changes to mirror to UI
     _activeSequenceTask!.addListener(_onSequenceTaskChanged);
 
-    // Start via TaskManager (gives us CommandManager for retry)
-    debugPrint('SequenceManager.startTour: Starting via TaskManager');
     final success = await TaskManager.instance.startTask(_activeSequenceTask!);
 
     if (!success) {
-      debugPrint('SequenceManager.startTour: TaskManager.startTask failed!');
+      debugPrint('SequenceManager.startSequence: TaskManager.startTask failed!');
       _status = SequenceStatus.failed;
       _activeSequenceTask?.removeListener(_onSequenceTaskChanged);
       _activeSequenceTask = null;
       notifyListeners();
     } else {
-      debugPrint('SequenceManager.startTour: Tour started successfully via TaskManager');
+      debugPrint('SequenceManager.startSequence: Started via TaskManager');
     }
   }
 
@@ -709,8 +979,22 @@ class SequenceManager extends ChangeNotifier {
   }
 
   /// Called when robot arrives at a waypoint
+  /// NOTE: When SequenceTaskMode or BufferSequenceExecutor is active, they handle arrivals
   void onArrived(String waypoint) {
     debugPrint('SequenceManager: onArrived($waypoint) - status=$_status, tour=${_currentSequence?.name}, stopIndex=$_currentStopIndex');
+
+    // If SequenceTaskMode is handling execution, let IT handle arrivals
+    // This prevents duplicate execution of stop actions
+    if (_activeSequenceTask != null) {
+      debugPrint('SequenceManager: Ignoring arrival - SequenceTaskMode is handling it');
+      return;
+    }
+
+    // If BufferSequenceExecutor is handling execution, let IT handle arrivals
+    if (_useBufferExecutor && _bufferExecutor != null) {
+      debugPrint('SequenceManager: Ignoring arrival - BufferSequenceExecutor is handling it');
+      return;
+    }
 
     if (_status != SequenceStatus.running) {
       debugPrint('SequenceManager: Ignoring arrival - tour not running');
@@ -779,15 +1063,16 @@ class SequenceManager extends ChangeNotifier {
     // Brief pause for display to render
     await Future.delayed(const Duration(milliseconds: 500));
 
-    // Step 2: Announce arrival if enabled (wait for TTS to finish)
+    // Step 2: Announce arrival if enabled (beep + speak, wait for TTS to finish)
     if (_currentSequence?.announceArrival == true) {
+      debugPrint('SequenceManager: Announcing arrival at ${stop.waypoint} with beep');
       final arrivalText = 'Arrived at ${stop.waypoint}';
-      debugPrint('SequenceManager: Speaking arrival: $arrivalText');
       final arrivalDuration = _estimateTtsDuration(arrivalText);
-      _setPhase(SequencePhase.speaking, arrivalDuration.inSeconds);
-      _callback?.onSpeak(arrivalText);
-      debugPrint('SequenceManager: Waiting ${arrivalDuration.inSeconds}s for arrival TTS');
-      await Future.delayed(arrivalDuration + const Duration(milliseconds: 500));
+      // Add 500ms for beep sound before TTS
+      _setPhase(SequencePhase.speaking, arrivalDuration.inSeconds + 1);
+      _callback?.onArrivalAnnouncement(stop.waypoint);
+      debugPrint('SequenceManager: Waiting ${arrivalDuration.inSeconds + 1}s for beep + arrival TTS');
+      await Future.delayed(arrivalDuration + const Duration(milliseconds: 1000));
     }
 
     // Step 3: Speak custom text (wait for it to finish)
@@ -897,11 +1182,18 @@ class SequenceManager extends ChangeNotifier {
 
   /// Stop the current tour
   void stopSequence() {
-    if (_status != SequenceStatus.running) return;
+    if (_status != SequenceStatus.running && _status != SequenceStatus.paused) return;
 
-    // Stop via SequenceTaskMode if active (new system)
+    // Use buffer executor if active
+    if (_useBufferExecutor && _bufferExecutor != null) {
+      debugPrint('SequenceManager.stopSequence: Stopping via BufferSequenceExecutor');
+      _bufferExecutor!.stopSequence();
+      return;
+    }
+
+    // Stop via SequenceTaskMode if active
     if (_activeSequenceTask != null) {
-      debugPrint('SequenceManager.stopTour: Stopping via SequenceTaskMode');
+      debugPrint('SequenceManager.stopSequence: Stopping via SequenceTaskMode');
       _activeSequenceTask!.stop();
       _activeSequenceTask!.removeListener(_onSequenceTaskChanged);
       _activeSequenceTask = null;
@@ -923,6 +1215,13 @@ class SequenceManager extends ChangeNotifier {
   void pauseSequence() {
     if (_status != SequenceStatus.running) return;
 
+    // Use buffer executor if active
+    if (_useBufferExecutor && _bufferExecutor != null) {
+      debugPrint('SequenceManager.pauseSequence: Pausing via BufferSequenceExecutor');
+      _bufferExecutor!.pauseSequence();
+      return;
+    }
+
     // Delegate to SequenceTaskMode if active
     if (_activeSequenceTask != null) {
       _activeSequenceTask!.pause();
@@ -936,6 +1235,13 @@ class SequenceManager extends ChangeNotifier {
   /// Resume a paused tour
   void resumeSequence() {
     if (_status != SequenceStatus.paused) return;
+
+    // Use buffer executor if active
+    if (_useBufferExecutor && _bufferExecutor != null) {
+      debugPrint('SequenceManager.resumeSequence: Resuming via BufferSequenceExecutor');
+      _bufferExecutor!.resumeSequence();
+      return;
+    }
 
     // Delegate to SequenceTaskMode if active
     if (_activeSequenceTask != null) {
@@ -955,7 +1261,14 @@ class SequenceManager extends ChangeNotifier {
   void skipToNextStop() {
     if (_status != SequenceStatus.running && _status != SequenceStatus.paused) return;
 
-    // Delegate to SequenceTaskMode if active (new system)
+    // Use buffer executor if active
+    if (_useBufferExecutor && _bufferExecutor != null) {
+      debugPrint('SequenceManager.skipToNextStop: Skipping via BufferSequenceExecutor');
+      _bufferExecutor!.skipCurrentCommand();
+      return;
+    }
+
+    // Delegate to SequenceTaskMode if active
     if (_activeSequenceTask != null) {
       debugPrint('SequenceManager.skipToNextStop: Delegating to SequenceTaskMode');
       _activeSequenceTask!.skipToNextStop();
@@ -1008,6 +1321,8 @@ class SequenceManager extends ChangeNotifier {
   @override
   void dispose() {
     _waitTimer?.cancel();
+    _bufferExecutor?.removeListener(_onBufferExecutorChanged);
+    _bufferExecutor?.dispose();
     super.dispose();
   }
 }

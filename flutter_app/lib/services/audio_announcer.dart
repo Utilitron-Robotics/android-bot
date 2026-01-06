@@ -708,6 +708,29 @@ class AudioAnnouncer {
     speak(message);
   }
 
+  /// Announce arrival at a waypoint with optional beep sound
+  /// [waypoint] - the waypoint name
+  /// [isDelivery] - if true, plays a celebratory delivery sound instead of standard beep
+  void announceArrival(String waypoint, {bool isDelivery = false}) {
+    if (!_enabled) return;
+
+    final robot = _robotConnection;
+    if (robot != null && robot.isConnected) {
+      // Play arrival beep first
+      final soundType = isDelivery ? 'delivery' : 'arrival';
+      robot.client.tabletPlaySound(soundType);
+
+      // Wait for sound to complete before speaking (arrival=500ms, delivery=460ms)
+      final soundDuration = isDelivery ? 460 : 500;
+      Future.delayed(Duration(milliseconds: soundDuration), () {
+        speak('Arrived at $waypoint');
+      });
+    } else {
+      // No robot connection, just speak
+      speak('Arrived at $waypoint');
+    }
+  }
+
   void dispose() {
     _stopBlockedDetection();
     _tts?.stop();

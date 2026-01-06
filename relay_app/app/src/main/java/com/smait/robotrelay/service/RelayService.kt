@@ -658,6 +658,28 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                         generateTone(880.0, 200)  // A5 - high pitched beep
                         Log.i(TAG, "Beep sound complete")
                     }
+                    "arrival", "arrival_beep" -> {
+                        // Loud beep-boop for POI/Delivery arrival
+                        Log.i(TAG, "Generating arrival beep-boop sound...")
+                        generateTone(880.0, 150)  // A5 - high beep
+                        delay(50)
+                        generateTone(1047.0, 150) // C6 - higher beep
+                        delay(50)
+                        generateTone(880.0, 200)  // A5 - back down
+                        Log.i(TAG, "Arrival sound complete")
+                    }
+                    "delivery" -> {
+                        // Extra loud celebratory sound for delivery arrival
+                        Log.i(TAG, "Generating delivery arrival sound...")
+                        generateTone(523.25, 100) // C5
+                        delay(30)
+                        generateTone(659.25, 100) // E5
+                        delay(30)
+                        generateTone(783.99, 100) // G5
+                        delay(30)
+                        generateTone(1047.0, 200) // C6 - triumphant high note
+                        Log.i(TAG, "Delivery sound complete")
+                    }
                     else -> {
                         Log.i(TAG, "Generating default beep...")
                         generateTone(660.0, 150)  // E5

@@ -59,10 +59,22 @@ class RelayServer(
 
     private var messageForwarderJob: Job? = null
     private var connectionWatcherJob: Job? = null
+    private var navStatusWatcherJob: Job? = null
     private var lastRobotConnectedState = false
+
+    // Command buffer for task execution
+    lateinit var commandBuffer: CommandBuffer
+        private set
 
     fun start() {
         try {
+            // Initialize command buffer
+            commandBuffer = CommandBuffer(robotClient, taskExecutor) { statusJson ->
+                // Broadcast buffer status to all connected Flutter clients
+                wsServer?.broadcast(statusJson)
+            }
+            commandBuffer.start()
+
             // Start HTTP server on port
             httpServer = RelayHttpServer(port, robotClient, gson, taskExecutor, configStore)
             httpServer?.start()
@@ -70,7 +82,7 @@ class RelayServer(
             // Start WebSocket server on port + 1
             wsServer = RelayWebSocketServer(port + 1, robotClient, scope, { count ->
                 _connectedClients.value = count
-            }, taskExecutor)
+            }, taskExecutor, commandBuffer)
             wsServer?.start()
 
             _isRunning.value = true
@@ -82,9 +94,26 @@ class RelayServer(
 
             // CRITICAL: Watch robot connection state and restart forwarder on reconnect
             startConnectionWatcher()
+
+            // Watch nav status for command buffer completion
+            startNavStatusWatcher()
         } catch (e: IOException) {
             Log.e(TAG, "Failed to start server: ${e.message}")
             _isRunning.value = false
+        }
+    }
+
+    /**
+     * Watch robot nav status and forward to command buffer
+     */
+    private fun startNavStatusWatcher() {
+        navStatusWatcherJob?.cancel()
+        navStatusWatcherJob = scope.launch {
+            robotClient.robotStatus.collect { status ->
+                if (status != null) {
+                    commandBuffer.onNavStatus(status.navStatus, status.currentGoalName)
+                }
+            }
         }
     }
 
@@ -182,6 +211,10 @@ class RelayServer(
     fun stop() {
         connectionWatcherJob?.cancel()
         messageForwarderJob?.cancel()
+        navStatusWatcherJob?.cancel()
+        if (::commandBuffer.isInitialized) {
+            commandBuffer.stop()
+        }
         httpServer?.stop()
         wsServer?.stop()
         _isRunning.value = false
@@ -553,7 +586,8 @@ class RelayWebSocketServer(
     private val robotClient: RobotWebSocketClient,
     private val scope: CoroutineScope,
     private val onClientCountChanged: (Int) -> Unit,
-    private val taskExecutor: RelayServer.TaskExecutor? = null
+    private val taskExecutor: RelayServer.TaskExecutor? = null,
+    private val commandBuffer: CommandBuffer? = null
 ) : NanoWSD(port) {
 
     companion object {
@@ -598,7 +632,7 @@ class RelayWebSocketServer(
     }
 
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
-        return RelayWebSocket(handshake, robotClient, scope, taskExecutor) { ws, connected ->
+        return RelayWebSocket(handshake, robotClient, scope, taskExecutor, commandBuffer) { ws, connected ->
             synchronized(clients) {
                 if (connected) {
                     clients.add(ws)
@@ -635,6 +669,7 @@ class RelayWebSocketServer(
         private val robotClient: RobotWebSocketClient,
         private val scope: CoroutineScope,
         private val taskExecutor: RelayServer.TaskExecutor?,
+        private val commandBuffer: CommandBuffer?,
         private val onConnectionChanged: (WebSocket, Boolean) -> Unit
     ) : NanoWSD.WebSocket(handshake) {
 
@@ -661,12 +696,49 @@ class RelayWebSocketServer(
                 val json = gson.fromJson(payload, com.google.gson.JsonObject::class.java)
                 val op = json.get("op")?.asString
 
-                // Log all ops that start with "tablet_" for debugging
-                if (op?.startsWith("tablet_") == true) {
-                    Log.i(TAG, ">>> Received tablet command: op=$op, executor=${taskExecutor != null}")
+                // Log all ops that start with "tablet_" or "buffer_" for debugging
+                if (op?.startsWith("tablet_") == true || op?.startsWith("buffer_") == true) {
+                    Log.i(TAG, ">>> Received command: op=$op")
                 }
 
                 when (op) {
+                    // === BUFFER PROTOCOL (new, preferred) ===
+                    "buffer_load" -> {
+                        val commands = json.getAsJsonArray("commands")?.map { cmdJson ->
+                            BufferCommand.fromJson(cmdJson.asJsonObject)
+                        } ?: emptyList()
+                        val clearExisting = json.get("clear_existing")?.asBoolean ?: false
+                        Log.i(TAG, "Buffer load: ${commands.size} commands, clear=$clearExisting")
+                        commandBuffer?.loadCommands(commands, clearExisting)
+                        return
+                    }
+                    "buffer_clear" -> {
+                        Log.i(TAG, "Buffer clear")
+                        commandBuffer?.clear()
+                        return
+                    }
+                    "buffer_pause" -> {
+                        Log.i(TAG, "Buffer pause")
+                        commandBuffer?.pause()
+                        return
+                    }
+                    "buffer_resume" -> {
+                        Log.i(TAG, "Buffer resume")
+                        commandBuffer?.resume()
+                        return
+                    }
+                    "buffer_skip" -> {
+                        Log.i(TAG, "Buffer skip")
+                        commandBuffer?.skip()
+                        return
+                    }
+                    "buffer_status" -> {
+                        Log.i(TAG, "Buffer status request")
+                        // Heartbeat will send current status
+                        return
+                    }
+
+                    // === LEGACY TABLET COMMANDS (still supported) ===
                     "tablet_stop_speak" -> {
                         Log.i(TAG, "Tablet stop speak")
                         taskExecutor?.stopSpeak()

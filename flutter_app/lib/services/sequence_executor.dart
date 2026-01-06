@@ -1,7 +1,7 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../core/sequence_mode.dart';
 import '../core/robot_connection.dart';
+import '../core/task_mode.dart';
 import 'audio_announcer.dart';
 
 /// Executes sequences by connecting SequenceManager to RobotConnection
@@ -15,11 +15,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
   int _lastNavStatus = 0;
   String _lastGoal = '';
 
-  // Retry tracking
+  // Waypoint tracking (retries handled by SequenceTaskMode)
   String? _pendingWaypoint;
-  int _navRetryCount = 0;
-  static const int _maxNavRetries = 3;
-  Timer? _retryTimer;
 
   /// Initialize with robot connection
   void init(RobotConnection robot) {
@@ -47,52 +44,18 @@ class SequenceExecutor implements SequenceExecutorCallback {
     // Check if we arrived at a waypoint (status 603)
     if (navStatus == 603 && goalName.isNotEmpty) {
       debugPrint('SequenceExecutor: Detected arrival at $goalName');
-      _navRetryCount = 0; // Reset retry count on success
       _pendingWaypoint = null;
-      _retryTimer?.cancel();
       SequenceManager.instance.onArrived(goalName);
     }
 
-    // Handle tour interruptions
-    if (navStatus == 602) {
-      // Navigation cancelled - might be intentional or blocked, try retry
-      debugPrint('SequenceExecutor: Navigation cancelled during tour');
-      _attemptRetry();
-    } else if (navStatus == 604) {
-      // Navigation failed - path blocked, retry
-      debugPrint('SequenceExecutor: Navigation failed during tour, attempting retry');
-      _attemptRetry();
-    }
+    // NOTE: Navigation retries are handled by SequenceTaskMode, NOT here
+    // SequenceTaskMode has its own _retryNavigation() with 3 retries
+    // Duplicating retry logic here caused "fighting" with competing retries
+    // Forward ALL nav status changes to TaskManager which routes to SequenceTaskMode
+    TaskManager.instance.onNavStatus(navStatus);
   }
 
-  /// Attempt to retry navigation
-  void _attemptRetry() {
-    if (_pendingWaypoint == null) {
-      debugPrint('SequenceExecutor: No pending waypoint to retry');
-      return;
-    }
-
-    _navRetryCount++;
-    if (_navRetryCount > _maxNavRetries) {
-      debugPrint('SequenceExecutor: Max retries ($_maxNavRetries) exceeded, failing tour');
-      _pendingWaypoint = null;
-      _navRetryCount = 0;
-      onSequenceFailed('Navigation failed after $_maxNavRetries retries');
-      return;
-    }
-
-    debugPrint('SequenceExecutor: Retry $_navRetryCount/$_maxNavRetries for $_pendingWaypoint');
-    AudioAnnouncer().speak('Path blocked. Retrying navigation.');
-
-    // Wait 3 seconds then retry
-    _retryTimer?.cancel();
-    _retryTimer = Timer(const Duration(seconds: 3), () {
-      if (_pendingWaypoint != null && SequenceManager.instance.status == SequenceStatus.running) {
-        debugPrint('SequenceExecutor: Retrying navigation to $_pendingWaypoint');
-        _robot?.goToWaypoint(_pendingWaypoint!);
-      }
-    });
-  }
+  // NOTE: _attemptRetry() removed - SequenceTaskMode handles all navigation retries
 
   /// Check if connection is stale and handle accordingly
   void checkStaleConnection() {
@@ -111,6 +74,12 @@ class SequenceExecutor implements SequenceExecutorCallback {
   void onSpeak(String text) {
     debugPrint('SequenceExecutor: Speaking: $text');
     AudioAnnouncer().speak(text);
+  }
+
+  @override
+  void onArrivalAnnouncement(String waypoint, {bool isDelivery = false}) {
+    debugPrint('SequenceExecutor: Arrival announcement at $waypoint (delivery=$isDelivery)');
+    AudioAnnouncer().announceArrival(waypoint, isDelivery: isDelivery);
   }
 
   @override
@@ -153,8 +122,6 @@ class SequenceExecutor implements SequenceExecutorCallback {
     debugPrint('SequenceExecutor: onNavigate called with waypoint=$waypoint');
     debugPrint('SequenceExecutor: _robot=${_robot != null}, isConnected=${_robot?.isConnected}');
     _pendingWaypoint = waypoint;
-    _navRetryCount = 0;
-    _retryTimer?.cancel();
     if (_robot != null) {
       debugPrint('SequenceExecutor: Calling goToWaypoint($waypoint)');
       _robot!.goToWaypoint(waypoint);
@@ -174,8 +141,6 @@ class SequenceExecutor implements SequenceExecutorCallback {
   void onSequenceStopped(SequenceStop? currentStop, int stopIndex) {
     debugPrint('SequenceExecutor: Sequence stopped at stop $stopIndex');
     _pendingWaypoint = null;
-    _navRetryCount = 0;
-    _retryTimer?.cancel();
     _robot?.cancelNavigation();
     AudioAnnouncer().speak('Sequence stopped');
   }

@@ -34,6 +34,7 @@ enum SequenceTaskPhase {
 /// Callback interface for sequence execution
 abstract class SequenceTaskCallback {
   void onSpeak(String text);
+  void onArrivalAnnouncement(String waypoint, {bool isDelivery = false}); // Beep + speak arrival
   void onDisplay(String url, int durationSeconds);
   void onDisplayDefault(String waypoint);
   void onCloseDisplay();
@@ -223,6 +224,15 @@ class SequenceTaskMode extends TaskMode {
     if (!isRunning) return;
 
     switch (status) {
+      case NavStatus.moving:
+        // Robot started moving - acknowledge the command to prevent timeout
+        if (currentCommand != null) {
+          debugPrint('SequenceTaskMode: Acknowledging nav command ${currentCommand!.id}');
+          commandManager?.acknowledgeCommand(currentCommand!.id);
+          commandManager?.commandExecuting(currentCommand!.id);
+        }
+        break;
+
       case NavStatus.arrived:
         if (_pendingWaypoint != null) {
           onArrived(_pendingWaypoint!);
@@ -232,6 +242,8 @@ class SequenceTaskMode extends TaskMode {
       case NavStatus.failed:
         if (_waitingForArrival && _pendingWaypoint != null) {
           debugPrint('SequenceTaskMode: Navigation failed, attempting retry');
+          // Mark current command as completed before retrying (we handle retries, not CommandManager)
+          _completeCurrentCommand();
           _retryNavigation();
         }
         break;
@@ -239,11 +251,20 @@ class SequenceTaskMode extends TaskMode {
       case NavStatus.cancelled:
         if (_waitingForArrival) {
           debugPrint('SequenceTaskMode: Navigation cancelled');
-          // Could be intentional or could be blocked path
-          // Try to recover
+          // Mark current command as completed before retrying (we handle retries, not CommandManager)
+          _completeCurrentCommand();
           _retryNavigation();
         }
         break;
+    }
+  }
+
+  /// Mark the current command as completed to prevent CommandManager from timing out
+  /// We use "completed" instead of "failed" because SequenceTaskMode handles its own retries
+  void _completeCurrentCommand() {
+    if (currentCommand != null) {
+      debugPrint('SequenceTaskMode: Completing command ${currentCommand!.id} (will retry manually)');
+      commandManager?.commandCompleted(currentCommand!.id);
     }
   }
 
@@ -297,11 +318,12 @@ class SequenceTaskMode extends TaskMode {
     _pendingWaypoint = waypoint;
     _waitingForArrival = true;
 
-    // Queue the navigation command with retry support
+    // Queue the navigation command with NO retries - SequenceTaskMode handles its own retry logic
+    // This prevents CommandManager and SequenceTaskMode from fighting over retries
     final cmd = queueCommand(
       type: 'navigate',
       payload: {'waypoint': waypoint},
-      maxRetries: 5,
+      maxRetries: 0,  // SequenceTaskMode handles retries via _retryNavigation()
     );
 
     if (cmd != null) {
@@ -427,6 +449,10 @@ class SequenceCallbackAdapter implements SequenceTaskCallback {
 
   @override
   void onSpeak(String text) => _oldCallback.onSpeak(text);
+
+  @override
+  void onArrivalAnnouncement(String waypoint, {bool isDelivery = false}) =>
+      _oldCallback.onArrivalAnnouncement(waypoint, isDelivery: isDelivery);
 
   @override
   void onDisplay(String url, int durationSeconds) =>
