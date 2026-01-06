@@ -524,8 +524,18 @@ class AudioAnnouncer {
         break;
       case 603: // Arrived
         _stopBlockedDetection();  // Successfully arrived, stop checking
-        // NOTE: Arrival announcements are now handled by TaskEngine via WaypointGrid callback
-        // to avoid duplicate announcements. Don't announce here.
+        // Announce arrival if:
+        // 1. No sequence is running (normal waypoint navigation)
+        // 2. Sequence failed (robot arrived but sequence died - still tell user!)
+        // 3. Sequence completed (edge case)
+        // Do NOT announce if sequence is actively running - it handles its own announcements
+        final seqStatus = SequenceManager.instance.status;
+        if (!tourRunning || seqStatus == SequenceStatus.failed || seqStatus == SequenceStatus.completed) {
+          if (goalName.isNotEmpty) {
+            debugPrint('AudioAnnouncer: Announcing arrival at $goalName (seqStatus=$seqStatus)');
+            announceArrival(goalName);
+          }
+        }
         break;
       case 602: // Cancelled
         _stopBlockedDetection();  // Navigation cancelled

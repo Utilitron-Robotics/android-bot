@@ -732,7 +732,7 @@ class _HudScreenState extends State<HudScreen>
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            seq?.name ?? 'Tour',
+                            seq?.name ?? 'Mode',
                             style: const TextStyle(
                               color: _accentSecondary,
                               fontWeight: FontWeight.bold,

@@ -111,7 +111,7 @@ class RelayServer(
         navStatusWatcherJob = scope.launch {
             robotClient.robotStatus.collect { status ->
                 if (status != null) {
-                    commandBuffer.onNavStatus(status.navStatus, status.currentGoalName)
+                    commandBuffer.onNavStatus(status.navStatus, status.currentGoalName ?: "")
                 }
             }
         }

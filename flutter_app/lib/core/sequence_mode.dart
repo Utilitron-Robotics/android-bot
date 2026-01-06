@@ -881,17 +881,29 @@ class SequenceManager extends ChangeNotifier {
       return;
     }
 
+    // Clean up any previous sequence task
+    if (_activeSequenceTask != null) {
+      _activeSequenceTask!.removeListener(_onSequenceTaskChanged);
+      _activeSequenceTask = null;
+    }
+
     // Set initial state
     _currentSequence = sequence;
     _currentStopIndex = -1;
     _status = SequenceStatus.running;
     notifyListeners();
 
-    // PREFER buffer executor when available (new architecture)
+    // PREFER buffer executor when available AND relay is actively sending heartbeats
+    // If buffer is stale (no heartbeats), the relay isn't connected or doesn't have buffer support
     if (_useBufferExecutor && _bufferExecutor != null) {
-      debugPrint('SequenceManager.startSequence: Using BufferSequenceExecutor (relay buffer)');
-      await _bufferExecutor!.startSequence(sequence);
-      return;
+      final bufferClient = _bufferExecutor!.bufferClient;
+      if (!bufferClient.isStale) {
+        debugPrint('SequenceManager.startSequence: Using BufferSequenceExecutor (relay buffer alive, last heartbeat ${DateTime.now().difference(bufferClient.lastHeartbeat!).inMilliseconds}ms ago)');
+        await _bufferExecutor!.startSequence(sequence);
+        return;
+      } else {
+        debugPrint('SequenceManager.startSequence: Buffer is stale (no heartbeats) - falling back to SequenceTaskMode');
+      }
     }
 
     // FALLBACK to old SequenceTaskMode system

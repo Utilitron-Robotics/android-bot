@@ -158,9 +158,9 @@ class WidgetFactory {
       margin: const EdgeInsets.only(bottom: 16),
       child: ExpansionTile(
         key: const ValueKey('tour_expansion'),
-        title: const Text('Tour Mode'),
-        leading: const Icon(Icons.tour),
-        subtitle: const Text('Create guided tours with waypoint sequences'),
+        title: const Text('Mode Editor'),
+        leading: const Icon(Icons.route),
+        subtitle: const Text('Create guided modes with waypoint sequences'),
         initiallyExpanded: false,
         children: [
           SizedBox(

@@ -126,20 +126,36 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
   void _onCommandStarted(Map<String, dynamic> cmd) {
     final type = cmd['type'] as String?;
-    debugPrint('BufferSequenceExecutor: Command started: $type');
+    debugPrint('BufferSequenceExecutor: Command started: $type (cmd=$cmd)');
 
     // Update stop index when navigation starts
     if (type == 'navigate') {
-      final waypoint = cmd['waypoint'] as String?;
+      // Waypoint can be in cmd['waypoint'] (flat) or cmd['data']['waypoint'] (nested)
+      String? waypoint = cmd['waypoint'] as String?;
+      if (waypoint == null) {
+        final data = cmd['data'] as Map<String, dynamic>?;
+        waypoint = data?['waypoint'] as String?;
+      }
+
+      debugPrint('BufferSequenceExecutor: Navigate waypoint=$waypoint');
+
       if (waypoint != null && _currentSequence != null) {
         // Find the stop index for this waypoint
         for (int i = 0; i < _currentSequence!.stops.length; i++) {
           if (_currentSequence!.stops[i].waypoint == waypoint) {
+            debugPrint('BufferSequenceExecutor: Found stop index $i for $waypoint');
             _currentStopIndex = i;
+            _currentPhase = SequencePhase.navigating;
             break;
           }
         }
       }
+    } else if (type == 'display') {
+      _currentPhase = SequencePhase.displaying;
+    } else if (type == 'speak') {
+      _currentPhase = SequencePhase.speaking;
+    } else if (type == 'wait') {
+      _currentPhase = SequencePhase.waiting;
     }
     notifyListeners();
   }
@@ -160,7 +176,10 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Check for sequence completion
     if (result.isSuccess) {
       _navRetryCount = 0; // Reset retry count on success
-      _checkSequenceCompletion();
+      // Give heartbeat a moment to update, then check completion
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _checkSequenceCompletion();
+      });
     }
 
     notifyListeners();
@@ -190,14 +209,31 @@ class BufferSequenceExecutor extends ChangeNotifier {
     ], clearExisting: false);
   }
 
+  // Track completed commands to detect sequence end without relying on stale heartbeat
+  int _completedCommandCount = 0;
+  int _totalCommandCount = 0;
+
   /// Check if sequence is complete
   void _checkSequenceCompletion() {
     final state = _bufferClient.state;
 
-    // If no pending commands and not paused, sequence is done
+    debugPrint('BufferSequenceExecutor: Checking completion - pending=${state.pendingCount}, current=${state.current?.type}, paused=${state.paused}, status=$_status, completed=$_completedCommandCount/$_totalCommandCount');
+
+    // Method 1: Check heartbeat state (may be stale)
     if (state.pendingCount == 0 && state.current == null && !state.paused) {
       if (_status == SequenceExecutorStatus.running) {
+        debugPrint('BufferSequenceExecutor: Completing via heartbeat state (pending=0, current=null)');
         _completeSequence();
+        return;
+      }
+    }
+
+    // Method 2: Check local command tracking (more reliable)
+    if (_totalCommandCount > 0 && _completedCommandCount >= _totalCommandCount) {
+      if (_status == SequenceExecutorStatus.running) {
+        debugPrint('BufferSequenceExecutor: Completing via command count ($_completedCommandCount/$_totalCommandCount)');
+        _completeSequence();
+        return;
       }
     }
   }
@@ -230,6 +266,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
   /// Build buffer commands for a sequence
   List<BufferCommand> _buildSequenceCommands(Sequence sequence) {
     final commands = <BufferCommand>[];
+
+    // START waypoint - navigate here before starting tour
+    if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
+      debugPrint('BufferSequenceExecutor: Adding start waypoint: ${sequence.startWaypoint}');
+      commands.add(BufferCommand.navigate(sequence.startWaypoint!));
+    }
 
     // Intro text
     if (sequence.introText != null && sequence.introText!.isNotEmpty) {

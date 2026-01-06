@@ -26,6 +26,11 @@ class _SequenceEditorState extends State<SequenceEditor> {
   final TextEditingController _outroTextController = TextEditingController();
   final Map<String, TextEditingController> _stopControllers = {};
 
+  // Cache to reduce unnecessary rebuilds - only rebuild when these actually change
+  int _cachedSequenceCount = 0;
+  SequenceStatus? _cachedStatus;
+  String? _cachedRunningSequenceId;
+
   @override
   void initState() {
     super.initState();
@@ -54,7 +59,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
   void _createNewSequence() {
     final newTour = Sequence(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
-      name: 'New Tour',
+      name: 'New Mode',
       description: '',
       stops: [],
     );
@@ -315,7 +320,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Tours are shared between robots on the same map',
+                'Modes are shared between robots on the same map',
                 style: TextStyle(color: Colors.grey[500], fontSize: 12),
               ),
             ],
@@ -335,7 +340,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 await SequenceManager.instance.syncWithCloud();
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Tours synced with cloud')),
+                    const SnackBar(content: Text('Modes synced with cloud')),
                   );
                   setState(() {}); // Refresh UI
                 }
@@ -361,7 +366,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   SnackBar(
                     content: Text(
                       SequenceManager.instance.cloudSyncEnabled
-                          ? 'Connected! Tours loaded from cloud.'
+                          ? 'Connected! Modes loaded from cloud.'
                           : 'Cloud sync disabled',
                     ),
                   ),
@@ -394,7 +399,20 @@ class _SequenceEditorState extends State<SequenceEditor> {
         final sequences = SequenceManager.instance.sequences;
         final status = SequenceManager.instance.status;
         final runningSequence = SequenceManager.instance.currentSequence;
-        debugPrint('SequenceEditor: ListenableBuilder - ${sequences.length} sequences, status=$status, running=${runningSequence?.name}');
+
+        // Skip excessive logging - only log when something we care about changed
+        final sequenceCount = sequences.length;
+        final runningId = runningSequence?.id;
+        final shouldLog = sequenceCount != _cachedSequenceCount ||
+                          status != _cachedStatus ||
+                          runningId != _cachedRunningSequenceId;
+
+        if (shouldLog) {
+          debugPrint('SequenceEditor: ListenableBuilder - $sequenceCount sequences, status=$status, running=${runningSequence?.name}');
+          _cachedSequenceCount = sequenceCount;
+          _cachedStatus = status;
+          _cachedRunningSequenceId = runningId;
+        }
 
         // When a tour is running, show prominent status and collapse editor
         if (status == SequenceStatus.running && runningSequence != null) {
