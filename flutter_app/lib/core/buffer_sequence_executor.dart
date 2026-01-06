@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'buffer_client.dart';
 import 'rosbridge_client.dart';
 import 'sequence_mode.dart';
@@ -12,6 +13,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
   final BufferClient _bufferClient;
   final SequenceExecutorCallback _callback;
 
+  // Persistence key for reconnect recovery
+  static const String _runningSequenceKey = 'buffer_running_sequence_id';
+
   // Current sequence state
   Sequence? _currentSequence;
   int _currentStopIndex = -1;
@@ -20,6 +24,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
   // Retry tracking (logic HERE, not in relay)
   int _navRetryCount = 0;
   static const int _maxNavRetries = 3;
+
+  // Reconnect detection - track if we need to restore state
+  bool _needsStateRestore = true;
 
   // Phase tracking for UI
   SequencePhase _currentPhase = SequencePhase.navigating;
@@ -94,6 +101,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
   /// Update state from buffer heartbeat
   void _updateFromHeartbeat(BufferState state) {
+    // RECONNECT DETECTION: If buffer is running but we have no sequence, restore state
+    if (_needsStateRestore && state.current != null && _currentSequence == null) {
+      debugPrint('BufferSequenceExecutor: Detected running buffer on reconnect, restoring state...');
+      _restoreFromHeartbeat(state);
+      return;
+    }
+
     // Update phase based on current command
     if (state.current != null) {
       switch (state.current!.type) {
@@ -130,6 +144,65 @@ class BufferSequenceExecutor extends ChangeNotifier {
       notifyListeners();
     } else if (!state.paused && _status == SequenceExecutorStatus.paused) {
       _status = SequenceExecutorStatus.running;
+      notifyListeners();
+    }
+  }
+
+  /// Restore executor state from heartbeat on reconnect
+  Future<void> _restoreFromHeartbeat(BufferState state) async {
+    debugPrint('BufferSequenceExecutor: Restoring from heartbeat...');
+
+    // Mark reconnect time to ignore stale completion events
+    _reconnectTimestamp = DateTime.now().millisecondsSinceEpoch;
+
+    // Sync command counts from heartbeat to avoid skip-to-next issues
+    // The relay's completed_count tells us how many commands finished
+    _completedCommandCount = state.completedCount;
+    debugPrint('BufferSequenceExecutor: Synced completed count from relay: $_completedCommandCount');
+
+    // Try to load the running sequence ID from preferences
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sequenceId = prefs.getString(_runningSequenceKey);
+
+      if (sequenceId != null) {
+        // Get sequence from SequenceManager
+        final sequence = SequenceManager.instance.getSequence(sequenceId);
+        if (sequence != null) {
+          debugPrint('BufferSequenceExecutor: Restored sequence "${sequence.name}" from preferences');
+          _currentSequence = sequence;
+          _status = state.paused
+              ? SequenceExecutorStatus.paused
+              : SequenceExecutorStatus.running;
+          _needsStateRestore = false;
+
+          // Rebuild total command count so completion detection works
+          final commands = _buildSequenceCommands(sequence);
+          _totalCommandCount = commands.length;
+          debugPrint('BufferSequenceExecutor: Rebuilt total count: $_totalCommandCount, completed: $_completedCommandCount');
+
+          // Try to determine current stop from navigate command
+          if (state.current?.type == 'navigate') {
+            // Request current command details - we'll get waypoint from next heartbeat
+            debugPrint('BufferSequenceExecutor: Currently navigating, will sync stop index from next command event');
+          }
+
+          notifyListeners();
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('BufferSequenceExecutor: Error restoring state: $e');
+    }
+
+    // If we couldn't restore, mark as running but with unknown sequence
+    // This allows the UI to show "Tour Running" even without full details
+    if (state.current != null || state.pendingCount > 0) {
+      debugPrint('BufferSequenceExecutor: Buffer is running but sequence unknown, showing running state');
+      _status = state.paused
+          ? SequenceExecutorStatus.paused
+          : SequenceExecutorStatus.running;
+      _needsStateRestore = false;
       notifyListeners();
     }
   }
@@ -184,6 +257,14 @@ class BufferSequenceExecutor extends ChangeNotifier {
   }
 
   void _onCommandCompleted(CommandResult result) {
+    // Filter out stale events from before reconnect
+    // Give 2 second grace period after reconnect to avoid processing buffered events
+    final timeSinceReconnect = DateTime.now().millisecondsSinceEpoch - _reconnectTimestamp;
+    if (_reconnectTimestamp > 0 && timeSinceReconnect < 2000) {
+      debugPrint('BufferSequenceExecutor: Ignoring completion event within ${timeSinceReconnect}ms of reconnect');
+      return;
+    }
+
     _completedCommandCount++;
     debugPrint('BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
 
@@ -240,6 +321,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
   // Track current wait duration for countdown display
   int _currentWaitDurationMs = 0;
 
+  // Track reconnect to avoid processing stale events
+  int _reconnectTimestamp = 0;
+
   /// Check if sequence is complete
   void _checkSequenceCompletion() {
     final state = _bufferClient.state;
@@ -279,6 +363,11 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _navRetryCount = 0;
     _completedCommandCount = 0;
     _status = SequenceExecutorStatus.running;
+    _needsStateRestore = false; // We have fresh state, no restore needed
+    _reconnectTimestamp = 0; // Clear reconnect filter for fresh sequence
+
+    // Save sequence ID for reconnect recovery
+    _saveRunningSequenceId(sequence.id);
 
     _callback.onSequenceStarted(sequence);
 
@@ -291,6 +380,22 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _bufferClient.loadCommands(commands, clearExisting: true);
 
     notifyListeners();
+  }
+
+  /// Save running sequence ID for reconnect recovery
+  Future<void> _saveRunningSequenceId(String? sequenceId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (sequenceId != null) {
+        await prefs.setString(_runningSequenceKey, sequenceId);
+        debugPrint('BufferSequenceExecutor: Saved running sequence ID: $sequenceId');
+      } else {
+        await prefs.remove(_runningSequenceKey);
+        debugPrint('BufferSequenceExecutor: Cleared running sequence ID');
+      }
+    } catch (e) {
+      debugPrint('BufferSequenceExecutor: Error saving sequence ID: $e');
+    }
   }
 
   /// Build buffer commands for a sequence
@@ -370,11 +475,15 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _callback.onCloseDisplay();
     _callback.onSequenceStopped(currentStop, _currentStopIndex);
 
+    // Clear saved sequence ID - no longer running
+    _saveRunningSequenceId(null);
+
     _status = SequenceExecutorStatus.idle;
     _currentSequence = null;
     _currentStopIndex = -1;
     _navRetryCount = 0;
     _stopCountdown();
+    _needsStateRestore = true; // Ready to restore on next reconnect
 
     notifyListeners();
   }
@@ -410,6 +519,10 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _status = SequenceExecutorStatus.completed;
     _stopCountdown();
     _callback.onSequenceCompleted();
+
+    // Clear saved sequence ID - no longer running
+    _saveRunningSequenceId(null);
+
     notifyListeners();
 
     // Reset after delay
@@ -417,6 +530,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
       _currentSequence = null;
       _currentStopIndex = -1;
       _status = SequenceExecutorStatus.idle;
+      _needsStateRestore = true; // Ready to restore on next reconnect
       notifyListeners();
     });
   }
@@ -427,6 +541,11 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _status = SequenceExecutorStatus.failed;
     _stopCountdown();
     _callback.onSequenceFailed(reason);
+
+    // Clear saved sequence ID - no longer running
+    _saveRunningSequenceId(null);
+    _needsStateRestore = true; // Ready to restore on next reconnect
+
     notifyListeners();
   }
 
