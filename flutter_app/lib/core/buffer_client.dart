@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'rosbridge_client.dart';
 
@@ -176,6 +177,8 @@ typedef BufferEventCallback = void Function(String event, dynamic data);
 /// ALL logic lives here in Flutter. The relay is just a dumb buffer.
 class BufferClient extends ChangeNotifier {
   final RosbridgeClient _client;
+  StreamSubscription? _messageSubscription;
+  StreamSubscription? _stateSubscription;
 
   // Current state
   BufferState _state = BufferState();
@@ -199,11 +202,26 @@ class BufferClient extends ChangeNotifier {
 
   BufferClient(this._client) {
     _setupMessageHandler();
+    _setupConnectionStateHandler();
+  }
+
+  void _setupConnectionStateHandler() {
+    // Re-subscribe to messages when connection state changes
+    // This handles the case where RosbridgeClient recreates stream controllers on reconnect
+    _stateSubscription = _client.connectionState.listen((state) {
+      if (state == WsConnectionState.connected) {
+        debugPrint('BufferClient: Connection restored, re-subscribing to messages');
+        _setupMessageHandler();
+      }
+    });
   }
 
   void _setupMessageHandler() {
+    // Cancel existing subscription before creating new one
+    _messageSubscription?.cancel();
+
     // Listen for buffer messages from relay
-    _client.messages.listen((json) {
+    _messageSubscription = _client.messages.listen((json) {
       try {
         final op = json['op'] as String?;
 
@@ -351,4 +369,11 @@ class BufferClient extends ChangeNotifier {
   /// Check if a command should be retried
   bool shouldRetry(String commandId) =>
       (_retryCount[commandId] ?? 0) < maxRetries;
+
+  @override
+  void dispose() {
+    _messageSubscription?.cancel();
+    _stateSubscription?.cancel();
+    super.dispose();
+  }
 }
