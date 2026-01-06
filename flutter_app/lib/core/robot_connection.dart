@@ -31,6 +31,9 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
   bool get isStale => _lastStatusUpdate != null &&
       DateTime.now().difference(_lastStatusUpdate!) > const Duration(seconds: 5);
 
+  // Nav status deduplication - only forward CHANGED status to task manager
+  int _lastForwardedNavStatus = -1;
+
   // Command manager for retry logic
   late final CommandManager _commandManager;
   CommandManager get commandManager => _commandManager;
@@ -215,10 +218,14 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
           );
 
           // Forward to task manager for new task mode system
-          _taskManager.onNavStatus(newStatus.navStatus);
-          if (newStatus.navStatus == 603 && newStatus.currentGoal.isNotEmpty) {
-            // Arrived at waypoint
-            _taskManager.onArrived(newStatus.currentGoal);
+          // DEDUPLICATE: Only forward if nav status actually changed
+          if (newStatus.navStatus != _lastForwardedNavStatus) {
+            _lastForwardedNavStatus = newStatus.navStatus;
+            _taskManager.onNavStatus(newStatus.navStatus);
+            if (newStatus.navStatus == 603 && newStatus.currentGoal.isNotEmpty) {
+              // Arrived at waypoint
+              _taskManager.onArrived(newStatus.currentGoal);
+            }
           }
 
           _status = newStatus;

@@ -1,21 +1,25 @@
 import 'package:flutter/foundation.dart';
 import '../core/sequence_mode.dart';
 import '../core/robot_connection.dart';
-import '../core/task_mode.dart';
+import '../core/buffer_client.dart';
 import 'audio_announcer.dart';
 
 /// Executes sequences by connecting SequenceManager to RobotConnection
-/// Now with command retry support via CommandManager
+///
+/// Supports two execution modes:
+/// 1. BufferSequenceExecutor (preferred) - Commands sent to relay buffer, relay executes
+/// 2. SequenceTaskMode (fallback) - Direct execution when no relay buffer available
 class SequenceExecutor implements SequenceExecutorCallback {
   static final SequenceExecutor _instance = SequenceExecutor._internal();
   factory SequenceExecutor() => _instance;
   SequenceExecutor._internal();
 
   RobotConnection? _robot;
+  BufferClient? _bufferClient;
   int _lastNavStatus = 0;
   String _lastGoal = '';
 
-  // Waypoint tracking (retries handled by SequenceTaskMode)
+  // Waypoint tracking (retries handled by SequenceTaskMode or BufferSequenceExecutor)
   String? _pendingWaypoint;
 
   /// Initialize with robot connection
@@ -23,10 +27,26 @@ class SequenceExecutor implements SequenceExecutorCallback {
     debugPrint('SequenceExecutor.init: CALLED with robot=${robot.hashCode}, isConnected=${robot.isConnected}');
     _robot = robot;
     debugPrint('SequenceExecutor.init: _robot is now set');
+
+    // Set callback first
     SequenceManager.instance.setCallback(this);
     debugPrint('SequenceExecutor.init: Callback set on SequenceManager');
+
+    // Create BufferClient for relay buffer support
+    // The buffer will receive heartbeats from relay if connected via relay
+    _bufferClient = BufferClient(robot.client);
+    debugPrint('SequenceExecutor.init: BufferClient created');
+
+    // Enable buffer executor on SequenceManager
+    // When sequences start, they'll use the buffer if available (heartbeats coming)
+    SequenceManager.instance.setBufferExecutor(_bufferClient!);
+    debugPrint('SequenceExecutor.init: BufferSequenceExecutor enabled');
+
     debugPrint('SequenceExecutor.init: Verifying - SequenceManager._callback is ${SequenceManager.instance.status}');
   }
+
+  /// Get the buffer client for external monitoring
+  BufferClient? get bufferClient => _bufferClient;
 
   /// Check if executor is properly initialized
   bool get isInitialized => _robot != null;
@@ -50,9 +70,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
 
     // NOTE: Navigation retries are handled by SequenceTaskMode, NOT here
     // SequenceTaskMode has its own _retryNavigation() with 3 retries
-    // Duplicating retry logic here caused "fighting" with competing retries
-    // Forward ALL nav status changes to TaskManager which routes to SequenceTaskMode
-    TaskManager.instance.onNavStatus(navStatus);
+    // RobotConnection now forwards nav status to TaskManager with deduplication
+    // DO NOT forward here - it causes duplicate events!
   }
 
   // NOTE: _attemptRetry() removed - SequenceTaskMode handles all navigation retries

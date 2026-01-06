@@ -66,6 +66,10 @@ class SequenceTaskMode extends TaskMode {
   static const int _maxNavRetries = 3;
   String? _pendingWaypoint;
   bool _waitingForArrival = false;
+  bool _isRetryInProgress = false;  // Guard against rapid 602 events
+  DateTime? _lastRetryTime;  // Debounce rapid 602 events
+  static const Duration _retryDebounce = Duration(seconds: 3);  // Min time between retries
+  bool _hasStartedMoving = false;  // Track if robot actually started moving (601) before cancellation
 
   SequenceTaskMode({
     required this.sequence,
@@ -75,6 +79,32 @@ class SequenceTaskMode extends TaskMode {
     name: sequence.name,
     type: 'sequence',
   );
+
+  /// Override to add listener for command timeouts
+  @override
+  void setCommandManager(CommandManager manager) {
+    super.setCommandManager(manager);
+    manager.addListener(_onCommandManagerChanged);
+  }
+
+  /// Handle command manager updates (timeouts, failures)
+  void _onCommandManagerChanged() {
+    final cmd = currentCommand;
+    if (cmd == null || !_waitingForArrival) return;
+
+    // Check if our navigate command timed out or failed
+    if (cmd.type == 'navigate' &&
+        (cmd.status == CommandStatus.timeout || cmd.status == CommandStatus.failed)) {
+      // If robot never started moving (no 601 received), don't retry on timeout
+      // The robot may still be processing the command or cancelling its previous task
+      if (!_hasStartedMoving) {
+        debugPrint('SequenceTaskMode: Ignoring ${cmd.status.name} - robot never started moving');
+        return;
+      }
+      debugPrint('SequenceTaskMode: Navigate command ${cmd.id} ${cmd.status.name} - triggering retry');
+      _retryNavigation();
+    }
+  }
 
   // Getters
   int get currentStopIndex => _currentStopIndex;
@@ -134,6 +164,9 @@ class SequenceTaskMode extends TaskMode {
     _currentStopIndex = -1;
     _navRetryCount = 0;
     _waitingForArrival = false;
+    _isRetryInProgress = false;  // Ensure clean state
+    _lastRetryTime = null;  // Reset debounce on fresh start
+    _hasStartedMoving = false;  // Reset moving state
 
     _setPhase(SequenceTaskPhase.starting, 2);
     callback.onSequenceStarted(sequence);
@@ -155,6 +188,10 @@ class SequenceTaskMode extends TaskMode {
     _waitTimer?.cancel();
     _stopCountdown();
     _waitingForArrival = false;
+    _isRetryInProgress = false;  // Reset retry guard on stop
+    _lastRetryTime = null;  // Reset debounce on stop
+    _navRetryCount = 0;  // Reset retry count on stop
+    commandManager?.removeListener(_onCommandManagerChanged);
     callback.onCloseDisplay();
     callback.onSequenceStopped(currentStop, _currentStopIndex);
   }
@@ -177,42 +214,62 @@ class SequenceTaskMode extends TaskMode {
   @override
   void onComplete() {
     _setPhase(SequenceTaskPhase.complete, 0);
+    commandManager?.removeListener(_onCommandManagerChanged);
     callback.onSequenceCompleted();
   }
 
   @override
   void onFail(String reason) {
+    commandManager?.removeListener(_onCommandManagerChanged);
     callback.onSequenceFailed(reason);
   }
 
   /// Handle robot arrival at waypoint
   @override
   void onArrived(String waypoint) {
-    debugPrint('SequenceTaskMode: onArrived($waypoint) - phase=$_phase, stopIndex=$_currentStopIndex, waiting=$_waitingForArrival');
+    debugPrint('SequenceTaskMode: onArrived($waypoint) - phase=$_phase, stopIndex=$_currentStopIndex, waiting=$_waitingForArrival, isRunning=$isRunning, status=$status');
 
-    if (!isRunning || !_waitingForArrival) {
-      debugPrint('SequenceTaskMode: Ignoring arrival - not running or not waiting');
+    // Check if we should process this arrival
+    // We process if: (a) running and waiting, OR (b) was waiting but sequence just failed
+    final wasWaiting = _waitingForArrival;
+    final shouldProcess = (isRunning && wasWaiting) ||
+                          (wasWaiting && (status == TaskStatus.failed || status == TaskStatus.cancelled));
+
+    if (!shouldProcess) {
+      debugPrint('SequenceTaskMode: Ignoring arrival - shouldProcess=false (running=$isRunning, waiting=$wasWaiting, status=$status)');
       return;
     }
 
     final stop = currentStop;
     if (stop == null) {
-      debugPrint('SequenceTaskMode: No current stop');
+      debugPrint('SequenceTaskMode: No current stop at index $_currentStopIndex');
       return;
     }
 
     if (stop.waypoint == waypoint || _pendingWaypoint == waypoint) {
-      debugPrint('SequenceTaskMode: Arrived at ${stop.waypoint}');
+      debugPrint('SequenceTaskMode: Processing arrival at ${stop.waypoint} (even if failed - still execute actions)');
       _waitingForArrival = false;
       _pendingWaypoint = null;
       _navRetryCount = 0;
+      _isRetryInProgress = false;  // Reset retry guard on success
+      _lastRetryTime = null;  // Reset debounce on success
+      _hasStartedMoving = false;  // Reset for next navigation
 
       // Mark navigation command as completed
       if (currentCommand != null) {
         commandManager?.commandCompleted(currentCommand!.id);
       }
 
+      // Execute stop actions even if sequence technically failed
+      // This ensures user sees the content at this waypoint
+      final wasFailed = status == TaskStatus.failed || status == TaskStatus.cancelled;
+      if (wasFailed) {
+        debugPrint('SequenceTaskMode: Executing actions despite failed status (late arrival recovery)');
+      }
+
       _executeStopActions();
+    } else {
+      debugPrint('SequenceTaskMode: Waypoint mismatch - expected ${stop.waypoint} or $_pendingWaypoint, got $waypoint');
     }
   }
 
@@ -226,16 +283,22 @@ class SequenceTaskMode extends TaskMode {
     switch (status) {
       case NavStatus.moving:
         // Robot started moving - acknowledge the command to prevent timeout
+        _hasStartedMoving = true;  // NOW 602 events count as real failures
         if (currentCommand != null) {
-          debugPrint('SequenceTaskMode: Acknowledging nav command ${currentCommand!.id}');
+          debugPrint('SequenceTaskMode: Acknowledging nav command ${currentCommand!.id} (robot moving)');
           commandManager?.acknowledgeCommand(currentCommand!.id);
           commandManager?.commandExecuting(currentCommand!.id);
         }
         break;
 
       case NavStatus.arrived:
-        if (_pendingWaypoint != null) {
-          onArrived(_pendingWaypoint!);
+        // Use pending waypoint if set, otherwise fall back to current stop waypoint
+        final arrivedAt = _pendingWaypoint ?? currentStop?.waypoint;
+        if (arrivedAt != null) {
+          debugPrint('SequenceTaskMode: Nav 603 arrived - calling onArrived($arrivedAt)');
+          onArrived(arrivedAt);
+        } else {
+          debugPrint('SequenceTaskMode: Nav 603 but no pending waypoint or current stop!');
         }
         break;
 
@@ -250,7 +313,13 @@ class SequenceTaskMode extends TaskMode {
 
       case NavStatus.cancelled:
         if (_waitingForArrival) {
-          debugPrint('SequenceTaskMode: Navigation cancelled');
+          // CRITICAL: Only count 602 as a real failure if robot actually started moving (saw 601)
+          // The first 602 after sending a POI command is EXPECTED - robot cancels previous task
+          if (!_hasStartedMoving) {
+            debugPrint('SequenceTaskMode: Ignoring 602 - robot never started moving (expected cancel of previous task)');
+            break;
+          }
+          debugPrint('SequenceTaskMode: Navigation cancelled (after robot was moving)');
           // Mark current command as completed before retrying (we handle retries, not CommandManager)
           _completeCurrentCommand();
           _retryNavigation();
@@ -269,11 +338,28 @@ class SequenceTaskMode extends TaskMode {
   }
 
   /// Retry navigation if failed
+  /// GUARD: Prevents rapid 602 events from exhausting retries instantly
+  /// Uses timestamp-based debounce to ensure we don't burn through retries on transient 602 spam
   void _retryNavigation() {
-    if (_pendingWaypoint == null) return;
+    // Guard against concurrent retries from rapid 602 events
+    if (_pendingWaypoint == null || _isRetryInProgress) {
+      debugPrint('SequenceTaskMode: Ignoring retry - ${_pendingWaypoint == null ? "no waypoint" : "retry already in progress"}');
+      return;
+    }
 
+    // Debounce: If we retried recently, ignore this 602 event entirely (don't count it)
+    final now = DateTime.now();
+    if (_lastRetryTime != null && now.difference(_lastRetryTime!) < _retryDebounce) {
+      debugPrint('SequenceTaskMode: Ignoring 602 - debounce active (${now.difference(_lastRetryTime!).inMilliseconds}ms since last retry)');
+      return;
+    }
+
+    _isRetryInProgress = true;
+    _lastRetryTime = now;
     _navRetryCount++;
+
     if (_navRetryCount > _maxNavRetries) {
+      _isRetryInProgress = false;
       debugPrint('SequenceTaskMode: Max nav retries exceeded, failing sequence');
       fail('Navigation failed after $_maxNavRetries retries');
       return;
@@ -281,8 +367,9 @@ class SequenceTaskMode extends TaskMode {
 
     debugPrint('SequenceTaskMode: Retrying navigation to $_pendingWaypoint (attempt $_navRetryCount/$_maxNavRetries)');
 
-    // Wait a moment then retry
+    // Wait then retry - reset guard AFTER delay completes
     Future.delayed(const Duration(seconds: 2), () {
+      _isRetryInProgress = false;
       if (isRunning && _pendingWaypoint != null) {
         _navigateToWaypoint(_pendingWaypoint!);
       }
@@ -317,6 +404,7 @@ class SequenceTaskMode extends TaskMode {
     _setPhase(SequenceTaskPhase.navigating, 0);
     _pendingWaypoint = waypoint;
     _waitingForArrival = true;
+    _hasStartedMoving = false;  // Reset - 602 before 601 is expected (cancelling previous task)
 
     // Queue the navigation command with NO retries - SequenceTaskMode handles its own retry logic
     // This prevents CommandManager and SequenceTaskMode from fighting over retries
@@ -338,12 +426,16 @@ class SequenceTaskMode extends TaskMode {
   /// Execute actions at current stop
   Future<void> _executeStopActions() async {
     final stop = currentStop;
-    if (stop == null) return;
+    if (stop == null) {
+      debugPrint('SequenceTaskMode: _executeStopActions - NO CURRENT STOP! index=$_currentStopIndex');
+      return;
+    }
 
-    debugPrint('SequenceTaskMode: Executing actions at ${stop.waypoint}');
+    debugPrint('SequenceTaskMode: Executing actions at ${stop.waypoint} (isRunning=$isRunning, status=$status)');
 
-    _setPhase(SequenceTaskPhase.arriving, 1);
-    callback.onStopArrived(stop, _currentStopIndex);
+    try {
+      _setPhase(SequenceTaskPhase.arriving, 1);
+      callback.onStopArrived(stop, _currentStopIndex);
 
     // Display content first
     if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
@@ -381,11 +473,20 @@ class SequenceTaskMode extends TaskMode {
     if (waitTime > 0) {
       _setPhase(SequenceTaskPhase.waiting, waitTime);
       _waitTimer = Timer(Duration(seconds: waitTime), () {
-        if (isRunning) {
+        // Continue even if status is technically failed (recovery mode)
+        if (isRunning || status == TaskStatus.failed) {
           _navigateToNextStop();
+        } else {
+          debugPrint('SequenceTaskMode: Not continuing - status=$status');
         }
       });
     } else {
+      _navigateToNextStop();
+    }
+    } catch (e, stack) {
+      debugPrint('SequenceTaskMode: ERROR in _executeStopActions: $e');
+      debugPrint('SequenceTaskMode: Stack: $stack');
+      // Don't fail the whole sequence on action error - try to continue
       _navigateToNextStop();
     }
   }
