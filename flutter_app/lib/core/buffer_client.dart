@@ -44,6 +44,13 @@ class BufferCommand {
         data: {'url': url, 'duration_ms': durationMs},
       );
 
+  /// Display default content (POI name/company branding) when no custom media
+  factory BufferCommand.displayDefault(String waypoint, {int durationMs = 0}) =>
+      BufferCommand(
+        type: 'display_default',
+        data: {'waypoint': waypoint, 'duration_ms': durationMs},
+      );
+
   factory BufferCommand.closeDisplay() =>
       BufferCommand(type: 'close_display');
 
@@ -315,6 +322,35 @@ class BufferClient extends ChangeNotifier {
   /// Request status update
   void requestStatus() {
     _client.send({'op': 'buffer_status'});
+  }
+
+  // === Tablet Display Control ===
+
+  /// Update countdown timer on tablet screen
+  /// @param seconds Countdown seconds (0 = hide countdown)
+  /// @param label Label text (e.g., "Next stop in", "Waiting...")
+  void updateCountdown(int seconds, {String label = 'Next stop in'}) {
+    _client.send({
+      'op': 'tablet_countdown',
+      'seconds': seconds,
+      'label': label,
+    });
+  }
+
+  /// Start tour mode - locks tablet screen to prevent access to controls
+  /// @param pin Optional PIN code to unlock (default is 1234)
+  void startTourMode({String? pin}) {
+    debugPrint('BufferClient: Starting tour mode on tablet');
+    _client.send({
+      'op': 'tablet_tour_start',
+      if (pin != null) 'pin': pin,
+    });
+  }
+
+  /// Stop tour mode - unlocks tablet screen
+  void stopTourMode() {
+    debugPrint('BufferClient: Stopping tour mode on tablet');
+    _client.send({'op': 'tablet_tour_stop'});
   }
 
   // === Convenience Methods ===

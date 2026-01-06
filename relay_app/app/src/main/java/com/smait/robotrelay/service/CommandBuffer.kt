@@ -300,6 +300,28 @@ class CommandBuffer(
                 completeCommand(cmd.id, "success")
             }
 
+            "display_default" -> {
+                // Show default POI display (waypoint name/company branding)
+                // When no custom URL is configured for a stop
+                val waypoint = cmd.data["waypoint"] as? String ?: "Unknown"
+                val durationMs = (cmd.data["duration_ms"] as? Number)?.toLong() ?: 0L
+
+                withContext(Dispatchers.Main) {
+                    // Use a default branding URL with waypoint as parameter
+                    // The tablet app should show POI name prominently with company logo
+                    taskExecutor?.displayUrl("default://waypoint/$waypoint")
+                }
+
+                if (durationMs > 0) {
+                    delay(durationMs)
+                    withContext(Dispatchers.Main) {
+                        taskExecutor?.closeDisplay()
+                    }
+                }
+
+                completeCommand(cmd.id, "success")
+            }
+
             "close_display" -> {
                 withContext(Dispatchers.Main) {
                     taskExecutor?.closeDisplay()
@@ -309,8 +331,15 @@ class CommandBuffer(
 
             "wait" -> {
                 val durationMs = (cmd.data["duration_ms"] as? Number)?.toLong() ?: 0L
-                delay(durationMs)
-                completeCommand(cmd.id, "success")
+                val deadline = System.currentTimeMillis() + durationMs
+                // Check every 100ms if we've been skipped (currentCommand becomes null)
+                while (System.currentTimeMillis() < deadline && currentCommand != null) {
+                    delay(100)
+                }
+                // Only complete if we weren't skipped
+                if (currentCommand != null) {
+                    completeCommand(cmd.id, "success")
+                }
             }
 
             "sound" -> {

@@ -128,14 +128,24 @@ class BufferSequenceExecutor extends ChangeNotifier {
           // Calculate countdown from elapsed time
           if (_currentWaitDurationMs > 0) {
             final remainingMs = _currentWaitDurationMs - state.current!.elapsedMs;
-            _countdownSeconds = (remainingMs / 1000).ceil().clamp(0, 9999);
+            final newCountdown = (remainingMs / 1000).ceil().clamp(0, 9999);
+            // Only send update if countdown changed (avoid flooding)
+            if (newCountdown != _countdownSeconds) {
+              _countdownSeconds = newCountdown;
+              // Send countdown to tablet for floating timer overlay
+              _bufferClient.updateCountdown(_countdownSeconds, label: 'Next stop in');
+            }
           }
           break;
         default:
           break;
       }
     } else {
-      _countdownSeconds = 0;
+      if (_countdownSeconds > 0) {
+        _countdownSeconds = 0;
+        // Clear countdown on tablet
+        _bufferClient.updateCountdown(0);
+      }
     }
 
     // Check for paused state
@@ -379,6 +389,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Load all commands into the relay buffer
     _bufferClient.loadCommands(commands, clearExisting: true);
 
+    // Start tour mode on tablet - locks screen for customer-facing display
+    _bufferClient.startTourMode();
+
     notifyListeners();
   }
 
@@ -399,56 +412,86 @@ class BufferSequenceExecutor extends ChangeNotifier {
   }
 
   /// Build buffer commands for a sequence
+  ///
+  /// Command execution order for each stop:
+  /// 1. Navigate to waypoint
+  /// 2. Display content (custom URL or default POI name) - stays up entire visit
+  /// 3. Arrival sound + announcement (if enabled)
+  /// 4. Custom speak text (if any)
+  /// 5. Wait timer AFTER speech completes (additional dwell time)
+  ///
+  /// The display stays up from arrival until next navigation starts.
+  /// Wait timer does NOT cut off speech - it waits AFTER speech completes.
   List<BufferCommand> _buildSequenceCommands(Sequence sequence) {
     final commands = <BufferCommand>[];
 
+    // DEBUG: Log all stops and their config
+    debugPrint('BufferSequenceExecutor: Building commands for ${sequence.stops.length} stops:');
+    for (int i = 0; i < sequence.stops.length; i++) {
+      final s = sequence.stops[i];
+      debugPrint('  Stop $i: ${s.waypoint} - display=${s.displayUrl?.isNotEmpty == true}, speak=${s.speakText?.isNotEmpty == true}, wait=${s.waitSeconds}s');
+    }
+
     // START waypoint - navigate here before starting tour
+    // (Robot will navigate to start even if human moved it)
     if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
       debugPrint('BufferSequenceExecutor: Adding start waypoint: ${sequence.startWaypoint}');
       commands.add(BufferCommand.navigate(sequence.startWaypoint!));
     }
 
-    // Intro text
+    // Intro text (spoken at start position)
     if (sequence.introText != null && sequence.introText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.introText!));
     }
 
     // Each stop
     for (final stop in sequence.stops) {
-      // Navigate to waypoint
+      // 1. Navigate to waypoint
       commands.add(BufferCommand.navigate(stop.waypoint));
 
-      // PARALLEL TASKS: Display first (instant, stays up), then audio plays over it
-      // Display content FIRST with durationMs=0 (instant completion, display stays up)
+      // 2. Display content - ALWAYS show something for the entire visit
+      // durationMs=0 means "show until explicitly cleared or next display command"
       if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
-        commands.add(BufferCommand.display(
-          stop.displayUrl!,
-          durationMs: 0,  // Instant completion - display stays up until next stop
-        ));
+        // Custom display URL (website, image, video)
+        commands.add(BufferCommand.display(stop.displayUrl!, durationMs: 0));
+      } else {
+        // Default display - show POI name/company branding
+        commands.add(BufferCommand.displayDefault(stop.waypoint, durationMs: 0));
       }
 
-      // Arrival sound + announcement (plays while display is showing)
+      // 3. Arrival sound + announcement (if enabled)
+      // Plays while display is showing
       if (sequence.announceArrival) {
         commands.add(BufferCommand.sound('arrival'));
         commands.add(BufferCommand.speak('Arrived at ${stop.waypoint}'));
       }
 
-      // Custom speak text (plays while display is showing)
+      // 4. Custom speak text (plays while display is showing)
+      // Speech completes fully before wait timer starts
       if (stop.speakText != null && stop.speakText!.isNotEmpty) {
         commands.add(BufferCommand.speak(stop.speakText!));
       }
 
-      // Wait time AFTER all audio completes (display still showing)
+      // 5. Wait timer AFTER all speech completes
+      // This is ADDITIONAL dwell time after speech finishes (not concurrent)
+      // Display continues showing during wait
       if (stop.waitSeconds > 0) {
         commands.add(BufferCommand.wait(stop.waitSeconds * 1000));
       } else if (stop.displayDuration > 0) {
+        // Fallback to displayDuration if no explicit wait
         commands.add(BufferCommand.wait(stop.displayDuration * 1000));
       }
     }
 
-    // Outro text
+    // Outro text (spoken before going to end)
     if (sequence.outroText != null && sequence.outroText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.outroText!));
+    }
+
+    // Rest at end - wait before going to end waypoint (for loops, or just resting)
+    if (sequence.restAtEndSeconds > 0) {
+      debugPrint('BufferSequenceExecutor: Adding rest at end: ${sequence.restAtEndSeconds}s');
+      commands.add(BufferCommand.wait(sequence.restAtEndSeconds * 1000));
     }
 
     // End waypoint
@@ -474,6 +517,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _bufferClient.clear();
     _callback.onCloseDisplay();
     _callback.onSequenceStopped(currentStop, _currentStopIndex);
+
+    // Stop tour mode on tablet - unlocks screen
+    _bufferClient.stopTourMode();
 
     // Clear saved sequence ID - no longer running
     _saveRunningSequenceId(null);
@@ -520,6 +566,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _stopCountdown();
     _callback.onSequenceCompleted();
 
+    // Stop tour mode on tablet - unlocks screen
+    _bufferClient.stopTourMode();
+
     // Clear saved sequence ID - no longer running
     _saveRunningSequenceId(null);
 
@@ -541,6 +590,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _status = SequenceExecutorStatus.failed;
     _stopCountdown();
     _callback.onSequenceFailed(reason);
+
+    // Stop tour mode on tablet - unlocks screen
+    _bufferClient.stopTourMode();
 
     // Clear saved sequence ID - no longer running
     _saveRunningSequenceId(null);

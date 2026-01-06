@@ -3,12 +3,14 @@ import 'package:provider/provider.dart';
 import 'core/robot_connection.dart';
 import 'core/fleet_discovery.dart';
 import 'core/sequence_mode.dart';
+import 'core/task_engine.dart';
 import 'screens/hud_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Load saved tours before app starts
+  // Load saved tours and task assignments before app starts
   await SequenceManager.instance.load();
+  await TaskEngine.instance.load();
   runApp(const DroidControllerApp());
 }
 

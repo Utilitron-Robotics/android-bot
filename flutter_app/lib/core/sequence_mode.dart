@@ -73,8 +73,10 @@ class Sequence {
   final String? outroText;      // Speak after completing tour
   final String? startWaypoint;  // Navigate here before starting tour
   final String? endWaypoint;    // Navigate here after completing tour
+  final int restAtEndSeconds;   // Wait at end waypoint before returning to start (for loops)
+  final int modifiedAt;         // Timestamp for conflict resolution (ms since epoch)
 
-  const Sequence({
+  Sequence({
     required this.id,
     required this.name,
     this.description = '',
@@ -85,7 +87,9 @@ class Sequence {
     this.outroText,
     this.startWaypoint,
     this.endWaypoint,
-  });
+    this.restAtEndSeconds = 0,
+    int? modifiedAt,
+  }) : modifiedAt = modifiedAt ?? DateTime.now().millisecondsSinceEpoch;
 
   /// Create sequence from waypoint list with auto-loaded scripts
   static Sequence fromWaypointList({
@@ -316,6 +320,8 @@ class Sequence {
     'stops': stops.map((s) => s.toJson()).toList(),
     'loop': loop,
     'announce_arrival': announceArrival,
+    'rest_at_end_seconds': restAtEndSeconds,
+    'modified_at': modifiedAt,
     if (introText != null) 'intro_text': introText,
     if (outroText != null) 'outro_text': outroText,
     if (startWaypoint != null) 'start_waypoint': startWaypoint,
@@ -331,10 +337,12 @@ class Sequence {
         .toList() ?? [],
     loop: json['loop'] as bool? ?? false,
     announceArrival: json['announce_arrival'] as bool? ?? false,
+    restAtEndSeconds: json['rest_at_end_seconds'] as int? ?? 0,
     introText: json['intro_text'] as String?,
     outroText: json['outro_text'] as String?,
     startWaypoint: json['start_waypoint'] as String?,
     endWaypoint: json['end_waypoint'] as String?,
+    modifiedAt: json['modified_at'] as int?,
   );
 
   Sequence copyWith({
@@ -348,6 +356,8 @@ class Sequence {
     String? outroText,
     String? startWaypoint,
     String? endWaypoint,
+    int? restAtEndSeconds,
+    int? modifiedAt,
   }) => Sequence(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -355,10 +365,12 @@ class Sequence {
     stops: stops ?? this.stops,
     loop: loop ?? this.loop,
     announceArrival: announceArrival ?? this.announceArrival,
+    restAtEndSeconds: restAtEndSeconds ?? this.restAtEndSeconds,
     introText: introText ?? this.introText,
     outroText: outroText ?? this.outroText,
     startWaypoint: startWaypoint ?? this.startWaypoint,
     endWaypoint: endWaypoint ?? this.endWaypoint,
+    modifiedAt: modifiedAt ?? this.modifiedAt,
   );
 
   /// Add a stop
@@ -430,9 +442,11 @@ class SequenceManager extends ChangeNotifier {
   static const String _sequencesKey = 'saved_sequences';
   static const String _cloudUrlKey = 'tour_cloud_api_url';
   static const String _currentMapKey = 'tour_current_map_id';
+  static const String _deletedToursKey = 'deleted_tour_ids';  // Tombstones
   static SequenceManager? _instance;
 
   final Map<String, Sequence> _sequences = {};
+  final Set<String> _deletedTourIds = {};  // Tombstones for deleted tours
   bool _loaded = false;
   bool _cloudSyncEnabled = false;
   String? _cloudApiUrl;
@@ -554,6 +568,9 @@ class SequenceManager extends ChangeNotifier {
     _currentPhase = executor.currentPhase;
     _countdownSeconds = executor.countdownSeconds;
 
+    // CRITICAL: Sync current sequence from buffer executor (for reconnect restore)
+    _currentSequence = executor.currentSequence;
+
     // Map buffer executor status to sequence status
     switch (executor.status) {
       case SequenceExecutorStatus.idle:
@@ -622,13 +639,32 @@ class SequenceManager extends ChangeNotifier {
       _currentMapId = prefs.getString(_currentMapKey);
       _cloudSyncEnabled = _cloudApiUrl != null && _cloudApiUrl!.isNotEmpty;
 
+      // Load deleted tour IDs (tombstones) - prevents cloud from re-adding deleted tours
+      final deletedJson = prefs.getStringList(_deletedToursKey);
+      if (deletedJson != null) {
+        _deletedTourIds.addAll(deletedJson);
+      }
+      debugPrint('SequenceManager: Loaded ${_deletedTourIds.length} tombstones');
+
       // Load local tours
       final toursJson = prefs.getString(_sequencesKey);
-      if (toursJson != null) {
-        final tours = jsonDecode(toursJson) as Map<String, dynamic>;
-        tours.forEach((id, data) {
-          _sequences[id] = Sequence.fromJson(data as Map<String, dynamic>);
-        });
+      final jsonLen = toursJson?.length ?? 0;
+      debugPrint('SequenceManager.load(): Raw JSON from prefs: ${jsonLen > 0 ? toursJson!.substring(0, jsonLen.clamp(0, 200)) : "(null)"}...');
+      debugPrint('SequenceManager.load(): JSON length: $jsonLen chars');
+
+      if (toursJson != null && toursJson.isNotEmpty) {
+        try {
+          final tours = jsonDecode(toursJson) as Map<String, dynamic>;
+          debugPrint('SequenceManager.load(): Decoded ${tours.length} tour entries');
+          tours.forEach((id, data) {
+            debugPrint('SequenceManager.load(): Loading tour id=$id');
+            _sequences[id] = Sequence.fromJson(data as Map<String, dynamic>);
+          });
+        } catch (e) {
+          debugPrint('SequenceManager.load(): JSON decode error: $e');
+        }
+      } else {
+        debugPrint('SequenceManager.load(): No tours JSON found in prefs (null or empty)');
       }
       _loaded = true;
       debugPrint('SequenceManager: Loaded ${_sequences.length} local tours');
@@ -645,9 +681,13 @@ class SequenceManager extends ChangeNotifier {
   }
 
   /// Load tours from cloud (DynamoDB via API Gateway)
+  /// Only overwrites local tours if cloud version is newer (based on modified_at timestamp)
   Future<bool> loadFromCloud({String? mapId}) async {
+    debugPrint('SequenceManager.loadFromCloud(): CALLED');
+    debugPrint('SequenceManager.loadFromCloud(): Current local tours BEFORE cloud load: ${_sequences.keys.toList()}');
+
     if (_cloudApiUrl == null || _cloudApiUrl!.isEmpty) {
-      debugPrint('SequenceManager: Cloud API URL not configured');
+      debugPrint('SequenceManager.loadFromCloud(): SKIP - Cloud API URL not configured');
       return false;
     }
 
@@ -657,7 +697,7 @@ class SequenceManager extends ChangeNotifier {
           ? '$_cloudApiUrl/tours?map_id=$targetMapId'
           : '$_cloudApiUrl/tours';
 
-      debugPrint('SequenceManager: Loading tours from cloud: $url');
+      debugPrint('SequenceManager.loadFromCloud(): GET $url');
 
       final response = await http.get(
         Uri.parse(url),
@@ -670,21 +710,55 @@ class SequenceManager extends ChangeNotifier {
 
         debugPrint('SequenceManager: Received ${cloudTours.length} tours from cloud');
 
+        int merged = 0;
+        int skipped = 0;
+        int added = 0;
+
         for (final tourData in cloudTours) {
-          final seq = _parseSequenceFromCloud(tourData as Map<String, dynamic>);
-          _sequences[seq.id] = seq;
+          final cloudSeq = _parseSequenceFromCloud(tourData as Map<String, dynamic>);
+
+          // Skip tours that were deleted locally (tombstoned)
+          if (_deletedTourIds.contains(cloudSeq.id)) {
+            skipped++;
+            debugPrint('SequenceManager: Skipping tombstoned tour: ${cloudSeq.name}');
+            continue;
+          }
+
+          final localSeq = _sequences[cloudSeq.id];
+
+          if (localSeq == null) {
+            // New tour from cloud - add it
+            _sequences[cloudSeq.id] = cloudSeq;
+            added++;
+            debugPrint('SequenceManager: Added new tour from cloud: ${cloudSeq.name}');
+          } else if (cloudSeq.modifiedAt > localSeq.modifiedAt) {
+            // Cloud is newer - use cloud version
+            _sequences[cloudSeq.id] = cloudSeq;
+            merged++;
+            debugPrint('SequenceManager: Cloud tour "${cloudSeq.name}" is newer (cloud=${cloudSeq.modifiedAt}, local=${localSeq.modifiedAt}) - updated');
+          } else {
+            // Local is newer or same - keep local
+            skipped++;
+            debugPrint('SequenceManager: Local tour "${localSeq.name}" is newer/same (cloud=${cloudSeq.modifiedAt}, local=${localSeq.modifiedAt}) - kept local');
+          }
         }
 
+        debugPrint('SequenceManager.loadFromCloud(): Cloud sync - added=$added, updated=$merged, kept_local=$skipped');
+        debugPrint('SequenceManager.loadFromCloud(): Local tours AFTER cloud merge: ${_sequences.keys.toList()}');
+
         // Save to local storage for offline access
+        debugPrint('SequenceManager.loadFromCloud(): About to call save() with ${_sequences.length} tours');
         await save();
+        debugPrint('SequenceManager.loadFromCloud(): save() completed');
         notifyListeners();
         return true;
       } else {
-        debugPrint('SequenceManager: Cloud load failed with status ${response.statusCode}');
+        debugPrint('SequenceManager.loadFromCloud(): FAILED - status ${response.statusCode}, body=${response.body}');
         return false;
       }
-    } catch (e) {
-      debugPrint('SequenceManager: Failed to load from cloud: $e');
+    } catch (e, stack) {
+      debugPrint('SequenceManager.loadFromCloud(): ERROR: $e');
+      debugPrint('SequenceManager.loadFromCloud(): Stack: $stack');
       return false;
     }
   }
@@ -731,18 +805,22 @@ class SequenceManager extends ChangeNotifier {
       outroText: cloudData['outro_text'] as String?,
       startWaypoint: cloudData['start_waypoint'] as String?,
       endWaypoint: cloudData['end_waypoint'] as String?,
+      modifiedAt: cloudData['modified_at'] as int?,
     );
   }
 
   /// Save a tour to cloud (DynamoDB via API Gateway)
   Future<bool> saveToCloud(Sequence sequence, {String? mapId}) async {
+    debugPrint('SequenceManager.saveToCloud(): CALLED for "${sequence.name}" id=${sequence.id}');
+
     if (_cloudApiUrl == null || _cloudApiUrl!.isEmpty) {
-      debugPrint('SequenceManager: Cloud API URL not configured');
+      debugPrint('SequenceManager.saveToCloud(): SKIP - Cloud API URL not configured');
       return false;
     }
 
     try {
       final targetMapId = mapId ?? _currentMapId ?? '';
+      debugPrint('SequenceManager.saveToCloud(): Saving to map: $targetMapId, API: $_cloudApiUrl');
 
       // Convert to cloud format
       final cloudData = {
@@ -760,13 +838,16 @@ class SequenceManager extends ChangeNotifier {
         'dwell_times': {for (var s in sequence.stops) s.waypoint: s.waitSeconds},
         'loop': sequence.loop,
         'announce_arrival': sequence.announceArrival,
+        'rest_at_end_seconds': sequence.restAtEndSeconds,
         'intro_text': sequence.introText,
         'outro_text': sequence.outroText,
         'start_waypoint': sequence.startWaypoint,
         'end_waypoint': sequence.endWaypoint,
+        'modified_at': sequence.modifiedAt,
       };
 
-      debugPrint('SequenceManager: Saving sequence to cloud: ${sequence.name}');
+      debugPrint('SequenceManager.saveToCloud(): POST to $_cloudApiUrl/tours');
+      debugPrint('SequenceManager.saveToCloud(): Body: ${jsonEncode(cloudData)}');
 
       final response = await http.post(
         Uri.parse('$_cloudApiUrl/tours'),
@@ -774,15 +855,19 @@ class SequenceManager extends ChangeNotifier {
         body: jsonEncode(cloudData),
       ).timeout(const Duration(seconds: 10));
 
+      debugPrint('SequenceManager.saveToCloud(): Response status=${response.statusCode}');
+      debugPrint('SequenceManager.saveToCloud(): Response body=${response.body}');
+
       if (response.statusCode == 200) {
-        debugPrint('SequenceManager: Tour saved to cloud successfully');
+        debugPrint('SequenceManager.saveToCloud(): SUCCESS - Tour saved to cloud');
         return true;
       } else {
-        debugPrint('SequenceManager: Cloud save failed with status ${response.statusCode}');
+        debugPrint('SequenceManager.saveToCloud(): FAILED - status ${response.statusCode}');
         return false;
       }
-    } catch (e) {
-      debugPrint('SequenceManager: Failed to save to cloud: $e');
+    } catch (e, stack) {
+      debugPrint('SequenceManager.saveToCloud(): ERROR: $e');
+      debugPrint('SequenceManager.saveToCloud(): Stack: $stack');
       return false;
     }
   }
@@ -827,13 +912,27 @@ class SequenceManager extends ChangeNotifier {
   Future<void> save() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final toursJson = jsonEncode(
-        _sequences.map((k, v) => MapEntry(k, v.toJson())),
-      );
-      await prefs.setString(_sequencesKey, toursJson);
-      debugPrint('SequenceManager: Saved ${_sequences.length} tours');
-    } catch (e) {
+      final toursMap = _sequences.map((k, v) => MapEntry(k, v.toJson()));
+      final toursJson = jsonEncode(toursMap);
+
+      debugPrint('SequenceManager.save(): Saving ${_sequences.length} tours');
+      debugPrint('SequenceManager.save(): Tours map keys: ${_sequences.keys.toList()}');
+      debugPrint('SequenceManager.save(): JSON length: ${toursJson.length} chars');
+
+      final setResult = await prefs.setString(_sequencesKey, toursJson);
+      debugPrint('SequenceManager.save(): setString result: $setResult');
+
+      // Save tombstones (deleted tour IDs)
+      await prefs.setStringList(_deletedToursKey, _deletedTourIds.toList());
+
+      // VERIFY it was saved by reading it back
+      final verifyJson = prefs.getString(_sequencesKey);
+      debugPrint('SequenceManager.save(): Verify - read back ${verifyJson?.length ?? 0} chars');
+
+      debugPrint('SequenceManager: Saved ${_sequences.length} tours, ${_deletedTourIds.length} tombstones');
+    } catch (e, stack) {
       debugPrint('SequenceManager: Failed to save: $e');
+      debugPrint('SequenceManager: Stack: $stack');
     }
   }
 
@@ -841,13 +940,40 @@ class SequenceManager extends ChangeNotifier {
   Sequence? getSequence(String id) => _sequences[id];
 
   /// Save a sequence (local + cloud if enabled)
+  /// Updates modified_at timestamp to prevent cloud from overwriting this edit
   Future<void> saveSequence(Sequence sequence) async {
-    _sequences[sequence.id] = sequence;
+    debugPrint('SequenceManager.saveSequence(): CALLED with "${sequence.name}" id=${sequence.id}');
+    debugPrint('SequenceManager.saveSequence(): Before save - _sequences has ${_sequences.length} tours');
+
+    // Update modified_at timestamp to mark this as the newest version
+    final updatedSequence = sequence.copyWith(
+      modifiedAt: DateTime.now().millisecondsSinceEpoch,
+    );
+
+    // Remove from tombstones in case user is re-creating a deleted tour
+    _deletedTourIds.remove(updatedSequence.id);
+
+    _sequences[updatedSequence.id] = updatedSequence;
+    debugPrint('SequenceManager.saveSequence(): After adding - _sequences has ${_sequences.length} tours');
+    debugPrint('SequenceManager.saveSequence(): Tour IDs: ${_sequences.keys.toList()}');
+
     await save();
+    debugPrint('SequenceManager.saveSequence(): save() completed for "${updatedSequence.name}" with modifiedAt=${updatedSequence.modifiedAt}');
+
+    // VERIFY PERSISTENCE: Read back immediately to confirm save worked
+    final prefs = await SharedPreferences.getInstance();
+    final verifyJson = prefs.getString(_sequencesKey);
+    debugPrint('SequenceManager.saveSequence(): VERIFY - stored JSON length: ${verifyJson?.length ?? 0}');
+    if (verifyJson != null && verifyJson.isNotEmpty) {
+      final verifyMap = jsonDecode(verifyJson) as Map<String, dynamic>;
+      debugPrint('SequenceManager.saveSequence(): VERIFY - stored ${verifyMap.length} tours: ${verifyMap.keys.toList()}');
+    } else {
+      debugPrint('SequenceManager.saveSequence(): VERIFY FAILED - no data stored!');
+    }
 
     // Also save to cloud if enabled
     if (_cloudSyncEnabled) {
-      await saveToCloud(sequence);
+      await saveToCloud(updatedSequence);
     }
 
     notifyListeners();
@@ -856,6 +982,11 @@ class SequenceManager extends ChangeNotifier {
   /// Delete a tour (local + cloud if enabled)
   Future<void> deleteSequence(String tourId) async {
     _sequences.remove(tourId);
+
+    // Add to tombstones to prevent cloud from re-adding on next sync
+    _deletedTourIds.add(tourId);
+    debugPrint('SequenceManager: Added tombstone for tour $tourId');
+
     await save();
 
     // Also delete from cloud if enabled

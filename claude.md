@@ -82,6 +82,56 @@ Based on "smAiT Upper Computer Communication Protocol" - JSON over WebSocket (ro
 - Linear: max 0.5 m/s (0.25 m/s in SLAM safe mode)
 - Angular: max 1.0 rad/s
 
+## Tour Mode
+
+The system supports automated guided tours with customer-facing tablet display.
+
+### Tour Sequence Execution
+Tours are defined as sequences of stops, each with:
+- **Waypoint** - Navigation destination
+- **Display URL** - Website/image shown on tablet (or default POI branding)
+- **Speak Text** - TTS narration at the stop
+- **Wait Time** - Dwell time AFTER speech completes
+
+**Execution Order per Stop:**
+1. Navigate to waypoint
+2. Display content (custom URL or default POI name)
+3. Arrival sound + announcement (if enabled)
+4. Custom speak text
+5. Wait timer (additional time after speech)
+
+### Tour Configuration
+| Field | Description |
+|-------|-------------|
+| `startWaypoint` | Navigate here before starting tour |
+| `endWaypoint` | Navigate here after completing tour |
+| `restAtEndSeconds` | Wait at end before returning to start (for loops) |
+| `introText` | Spoken before starting tour |
+| `outroText` | Spoken after completing tour |
+| `announceArrival` | Say "Arrived at [waypoint]" at each stop |
+| `loop` | Repeat tour continuously |
+
+### Tablet Lock Screen (Tour Mode)
+When a tour starts, the tablet enters **Tour Mode**:
+- Screen is locked to prevent customer access to controls
+- Displays company branding or custom URLs
+- Shows floating countdown timer (bottom-right corner)
+
+**Unlock Sequence:**
+1. Tap screen 6 times within 2 seconds
+2. First tap triggers TTS: "Please do not touch the screen until asked to do so"
+3. After 3+ taps, shows "Tap X more times..."
+4. After 6 taps, PIN entry appears (default PIN: 1234)
+
+### Tablet WebSocket Commands
+| Command | Description |
+|---------|-------------|
+| `tablet_countdown` | Update countdown timer overlay |
+| `tablet_tour_start` | Start tour mode (lock screen) |
+| `tablet_tour_stop` | Stop tour mode (unlock screen) |
+| `tablet_display` | Show URL in WebView |
+| `tablet_speak` | TTS announcement |
+
 ## Flutter App Structure
 
 ### Key Files
@@ -92,12 +142,17 @@ flutter_app/lib/
 │   ├── robot_connection.dart    # RobotConnection ChangeNotifier
 │   ├── rosbridge_client.dart    # Low-level WebSocket client
 │   ├── fleet_discovery.dart     # Robot fleet management
-│   └── dual_connection.dart     # Direct + relay mode switching
+│   ├── dual_connection.dart     # Direct + relay mode switching
+│   ├── sequence_mode.dart       # Tour/sequence definitions & SequenceManager
+│   ├── buffer_client.dart       # Command buffer client for relay
+│   └── buffer_sequence_executor.dart  # Tour execution via buffer
 ├── screens/
-│   └── home_screen.dart         # Main UI with connection bar
+│   ├── home_screen.dart         # Main UI with connection bar
+│   └── hud_screen.dart          # HUD with tour controls & countdown
 ├── services/
 │   ├── robot_introspection.dart # Capability discovery
-│   └── audio_announcer.dart     # TTS singleton for announcements
+│   ├── audio_announcer.dart     # TTS singleton for announcements
+│   └── sequence_executor.dart   # Tour execution service
 └── widgets/
     ├── widget_factory.dart      # Dynamic UI based on capabilities
     ├── waypoint_grid.dart       # POI navigation buttons
@@ -105,7 +160,8 @@ flutter_app/lib/
     ├── voice_control.dart       # Speech-to-text waypoint selection
     ├── map_view.dart            # Real-time SLAM map display
     ├── status_panel.dart        # Battery, nav status display
-    └── fleet_picker.dart        # Robot selection dialog
+    ├── fleet_picker.dart        # Robot selection dialog
+    └── sequence_editor.dart     # Tour creation/editing UI
 ```
 
 ### State Management
@@ -122,6 +178,7 @@ flutter_app/lib/
 
 ### Overview
 Runs on Android tablet mounted on robot. Bridges house WiFi to robot WiFi.
+Provides both technician controls and customer-facing tour display.
 
 ### Ports
 | Port | Protocol | Description |
@@ -142,14 +199,22 @@ POST /estop    - {"enabled": true/false}
 POST /cancel   - Cancel navigation
 ```
 
+### UI Layers
+The tablet UI has multiple overlays:
+1. **Main Layout** - Technician controls (joystick, status, waypoint buttons)
+2. **WebView** - Customer-facing display (URLs, company branding)
+3. **Countdown Overlay** - Floating timer (bottom-right, above WebView)
+4. **Lock Overlay** - Tour mode lock screen (full screen, above all)
+
 ### Key Files
 ```
 relay_app/app/src/main/java/com/smait/robotrelay/
 ├── ui/
-│   └── MainActivity.kt          # UI with joystick, status display
+│   └── MainActivity.kt          # UI with joystick, tour mode, lock screen
 ├── service/
-│   ├── RelayService.kt          # Foreground service
+│   ├── RelayService.kt          # Foreground service, TTS, tour mode
 │   ├── RelayServer.kt           # HTTP + WebSocket servers
+│   ├── CommandBuffer.kt         # Sequence command execution
 │   └── RobotWebSocketClient.kt  # Connection to robot base
 ├── protocol/
 │   └── SmaitProtocol.kt         # Protocol message builders

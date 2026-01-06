@@ -484,4 +484,145 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
+    <!-- Floating countdown timer overlay - visible above all content (large for crowds) -->
+    <FrameLayout
+        android:id="@+id/countdownOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="48dp"
+        android:layout_marginBottom="48dp"
+        android:background="@drawable/countdown_background"
+        android:padding="32dp"
+        android:elevation="10dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/tvCountdownLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Next stop in"
+                android:textColor="#FFFFFF"
+                android:textSize="28sp"
+                android:alpha="0.9" />
+
+            <TextView
+                android:id="@+id/tvCountdownTimer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00"
+                android:textColor="#FFFFFF"
+                android:textSize="96sp"
+                android:textStyle="bold"
+                android:fontFamily="monospace" />
+
+        </LinearLayout>
+
+    </FrameLayout>
+
+    <!-- Tour mode lock screen overlay - transparent touch interceptor -->
+    <FrameLayout
+        android:id="@+id/lockOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/transparent"
+        android:visibility="gone"
+        android:elevation="20dp"
+        android:clickable="true"
+        android:focusable="true">
+
+        <!-- Lock content - only shown when PIN entry is triggered -->
+        <LinearLayout
+            android:id="@+id/lockContentLayout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="32dp"
+            android:background="#DD000000"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔒"
+                android:textSize="64sp" />
+
+            <TextView
+                android:id="@+id/tvLockMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tour Mode Active"
+                android:textColor="#FFFFFF"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:layout_marginTop="16dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Tap to enter unlock code"
+                android:textColor="#AAAAAA"
+                android:textSize="16sp"
+                android:layout_marginTop="8dp" />
+
+            <!-- PIN entry -->
+            <LinearLayout
+                android:id="@+id/pinEntryLayout"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:layout_marginTop="24dp"
+                android:visibility="gone">
+
+                <EditText
+                    android:id="@+id/etPinCode"
+                    android:layout_width="200dp"
+                    android:layout_height="wrap_content"
+                    android:hint="Enter PIN"
+                    android:inputType="numberPassword"
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#666666"
+                    android:textSize="24sp"
+                    android:gravity="center"
+                    android:background="#333333"
+                    android:padding="16dp" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="16dp">
+
+                    <Button
+                        android:id="@+id/btnPinCancel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Cancel"
+                        android:backgroundTint="#666666" />
+
+                    <Button
+                        android:id="@+id/btnPinSubmit"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Unlock"
+                        android:backgroundTint="#448844"
+                        android:layout_marginStart="16dp" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </FrameLayout>
+
 </FrameLayout>

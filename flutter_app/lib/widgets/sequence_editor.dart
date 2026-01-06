@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/sequence_mode.dart';
+import '../core/task_engine.dart';
 
 /// Sequence Editor widget for creating and managing sequences
 class SequenceEditor extends StatefulWidget {
@@ -34,11 +35,42 @@ class _SequenceEditorState extends State<SequenceEditor> {
   @override
   void initState() {
     super.initState();
-    SequenceManager.instance.load();
+    // Load and auto-select running sequence or first available
+    _initializeSelection();
+    // Listen for running sequence changes (e.g. buffer executor reconnect restore)
+    SequenceManager.instance.addListener(_onSequenceManagerChanged);
+  }
+
+  void _onSequenceManagerChanged() {
+    // Auto-select running sequence if we don't have one selected
+    final manager = SequenceManager.instance;
+    final runningSeq = manager.currentSequence;
+
+    if (runningSeq != null && _selectedSequence?.id != runningSeq.id) {
+      debugPrint('SequenceEditor: Running sequence changed, auto-selecting: ${runningSeq.name}');
+      _selectSequence(runningSeq);
+    }
+  }
+
+  Future<void> _initializeSelection() async {
+    await SequenceManager.instance.load();
+    // Auto-select running sequence, or first available
+    final manager = SequenceManager.instance;
+    final runningSeq = manager.currentSequence;
+    final sequences = manager.sequences;
+
+    if (runningSeq != null) {
+      debugPrint('SequenceEditor: Auto-selecting running sequence: ${runningSeq.name}');
+      _selectSequence(runningSeq);
+    } else if (sequences.isNotEmpty && _selectedSequence == null) {
+      debugPrint('SequenceEditor: Auto-selecting first sequence: ${sequences.first.name}');
+      _selectSequence(sequences.first);
+    }
   }
 
   @override
   void dispose() {
+    SequenceManager.instance.removeListener(_onSequenceManagerChanged);
     _tourNameController.dispose();
     _introTextController.dispose();
     _outroTextController.dispose();
@@ -46,6 +78,15 @@ class _SequenceEditorState extends State<SequenceEditor> {
       c.dispose();
     }
     super.dispose();
+  }
+
+  /// Normalize waypoint value for dropdown - null/empty becomes null,
+  /// invalid waypoints (not in available list) become null
+  String? _normalizeWaypointValue(String? waypoint) {
+    if (waypoint == null || waypoint.isEmpty) return null;
+    // Ensure waypoint exists in available list, otherwise return null
+    if (widget.availableWaypoints.contains(waypoint)) return waypoint;
+    return null;
   }
 
   /// Get or create a controller for a stop field
@@ -56,14 +97,16 @@ class _SequenceEditorState extends State<SequenceEditor> {
     return _stopControllers[stopKey]!;
   }
 
-  void _createNewSequence() {
+  Future<void> _createNewSequence() async {
     final newTour = Sequence(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: 'New Mode',
       description: '',
       stops: [],
     );
-    SequenceManager.instance.saveSequence(newTour);
+    debugPrint('SequenceEditor._createNewSequence: Creating tour "${newTour.name}" id=${newTour.id}');
+    await SequenceManager.instance.saveSequence(newTour);
+    debugPrint('SequenceEditor._createNewSequence: saveSequence completed');
     _tourNameController.text = newTour.name;
     _introTextController.text = '';
     _outroTextController.text = '';
@@ -103,15 +146,15 @@ class _SequenceEditorState extends State<SequenceEditor> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () {
-              SequenceManager.instance.deleteSequence(seq.id);
+            onPressed: () async {
+              await SequenceManager.instance.deleteSequence(seq.id);
               if (_selectedSequence?.id == seq.id) {
                 setState(() {
                   _selectedSequence = null;
                   _isEditing = false;
                 });
               }
-              Navigator.pop(ctx);
+              if (ctx.mounted) Navigator.pop(ctx);
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),
@@ -121,9 +164,11 @@ class _SequenceEditorState extends State<SequenceEditor> {
     );
   }
 
-  void _saveSequence() {
+  Future<void> _saveSequence() async {
     // Build tour from controller values - no model updates during typing!
     if (_selectedSequence == null) return;
+
+    debugPrint('SequenceEditor._saveSequence: Saving tour "${_selectedSequence!.name}"');
 
     // Read all values from controllers
     final stops = <SequenceStop>[];
@@ -145,6 +190,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
       stops: stops,
       loop: _selectedSequence!.loop,
       announceArrival: _selectedSequence!.announceArrival,
+      restAtEndSeconds: _selectedSequence!.restAtEndSeconds,
       introText: _introTextController.text.isEmpty ? null : _introTextController.text,
       outroText: _outroTextController.text.isEmpty ? null : _outroTextController.text,
       startWaypoint: _selectedSequence!.startWaypoint,
@@ -152,11 +198,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
     );
 
     _selectedSequence = updatedTour;
-    SequenceManager.instance.saveSequence(updatedTour);
+    await SequenceManager.instance.saveSequence(updatedTour);
+    debugPrint('SequenceEditor._saveSequence: Save completed for "${updatedTour.name}"');
   }
 
   void _updateTourOptions({bool? loop, bool? announceArrival}) {
-    // Only for checkboxes - these need immediate state update
+    // Only for checkboxes - these need immediate state update AND save
     if (_selectedSequence == null) return;
     setState(() {
       _selectedSequence = _selectedSequence!.copyWith(
@@ -164,6 +211,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
         announceArrival: announceArrival ?? _selectedSequence!.announceArrival,
       );
     });
+    // Auto-save checkbox changes
+    _saveSequence();
   }
 
   void _addStop(SequenceStop stop) {
@@ -171,6 +220,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     setState(() {
       _selectedSequence = _selectedSequence!.addStop(stop);
     });
+    // Auto-save when stop is added
+    _saveSequence();
   }
 
   void _removeStop(int index) {
@@ -190,6 +241,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
     setState(() {
       _selectedSequence = _selectedSequence!.removeStop(index);
     });
+
+    // Save after removing stop
+    _saveSequence();
   }
 
   void _reorderStops(int oldIndex, int newIndex) {
@@ -210,6 +264,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
     setState(() {
       _selectedSequence = _selectedSequence!.reorderStop(oldIndex, newIndex);
     });
+
+    // Save the reordered sequence
+    _saveSequence();
   }
 
   void _showCloudSyncDialog() {
@@ -756,8 +813,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
             children: [
               IconButton(
                 icon: const Icon(Icons.arrow_back),
-                onPressed: () {
-                  _saveSequence();
+                onPressed: () async {
+                  await _saveSequence();
                   setState(() => _isEditing = false);
                 },
               ),
@@ -776,8 +833,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
               TextButton.icon(
                 icon: const Icon(Icons.done),
                 label: const Text('Done'),
-                onPressed: () {
-                  _saveSequence();
+                onPressed: () async {
+                  await _saveSequence();
                   setState(() => _isEditing = false);
                 },
               ),
@@ -816,11 +873,13 @@ class _SequenceEditorState extends State<SequenceEditor> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Start waypoint dropdown
+              // Start waypoint dropdown - use key to force recreation on sequence change
               SizedBox(
                 width: 150,
-                child: DropdownButtonFormField<String>(
-                  initialValue: seq.startWaypoint,
+                child: DropdownButtonFormField<String?>(
+                  key: ValueKey('start_wp_${seq.id}_${_normalizeWaypointValue(seq.startWaypoint)}'),
+                  // Convert empty string to null; ensure value exists in waypoints or use null
+                  initialValue: _normalizeWaypointValue(seq.startWaypoint),
                   decoration: const InputDecoration(
                     labelText: 'Start At',
                     prefixIcon: Icon(Icons.play_arrow, size: 20),
@@ -829,16 +888,18 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                   ),
                   items: [
-                    const DropdownMenuItem(value: null, child: Text('(None)')),
-                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem(
+                    const DropdownMenuItem<String?>(value: null, child: Text('(None)')),
+                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem<String?>(
                       value: wp,
                       child: Text(wp, overflow: TextOverflow.ellipsis),
                     )),
                   ],
                   onChanged: (value) {
                     setState(() {
-                      _selectedSequence = _selectedSequence!.copyWith(startWaypoint: value ?? '');
+                      _selectedSequence = _selectedSequence!.copyWith(startWaypoint: value);
                     });
+                    // Auto-save dropdown changes
+                    _saveSequence();
                   },
                 ),
               ),
@@ -849,7 +910,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   controller: _introTextController,
                   decoration: const InputDecoration(
                     labelText: 'Start Message',
-                    hintText: 'Welcome to our facility seq...',
+                    hintText: 'Welcome to our facility...',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -859,17 +920,19 @@ class _SequenceEditorState extends State<SequenceEditor> {
             ],
           ),
         ),
-        // End waypoint + outro message
+        // End waypoint + rest time + outro message
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // End waypoint dropdown
+              // End waypoint dropdown - use key to force recreation on sequence change
               SizedBox(
                 width: 150,
-                child: DropdownButtonFormField<String>(
-                  initialValue: seq.endWaypoint,
+                child: DropdownButtonFormField<String?>(
+                  key: ValueKey('end_wp_${seq.id}_${_normalizeWaypointValue(seq.endWaypoint)}'),
+                  // Convert empty string to null; ensure value exists in waypoints or use null
+                  initialValue: _normalizeWaypointValue(seq.endWaypoint),
                   decoration: const InputDecoration(
                     labelText: 'End At',
                     prefixIcon: Icon(Icons.stop, size: 20),
@@ -878,16 +941,18 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                   ),
                   items: [
-                    const DropdownMenuItem(value: null, child: Text('(None)')),
-                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem(
+                    const DropdownMenuItem<String?>(value: null, child: Text('(None)')),
+                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem<String?>(
                       value: wp,
                       child: Text(wp, overflow: TextOverflow.ellipsis),
                     )),
                   ],
                   onChanged: (value) {
                     setState(() {
-                      _selectedSequence = _selectedSequence!.copyWith(endWaypoint: value ?? '');
+                      _selectedSequence = _selectedSequence!.copyWith(endWaypoint: value);
                     });
+                    // Auto-save dropdown changes
+                    _saveSequence();
                   },
                 ),
               ),
@@ -908,6 +973,51 @@ class _SequenceEditorState extends State<SequenceEditor> {
             ],
           ),
         ),
+
+        // Rest at end timer (only show if loop is enabled or end waypoint is set)
+        if (seq.loop || (seq.endWaypoint?.isNotEmpty == true))
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.hourglass_bottom, size: 20, color: Colors.orange),
+                const SizedBox(width: 8),
+                const Text('Rest at end:'),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Slider(
+                    value: seq.restAtEndSeconds.toDouble(),
+                    min: 0,
+                    max: 300,
+                    divisions: 30,
+                    label: seq.restAtEndSeconds == 0
+                        ? 'No rest'
+                        : '${seq.restAtEndSeconds} sec',
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedSequence = _selectedSequence!.copyWith(
+                          restAtEndSeconds: value.round(),
+                        );
+                      });
+                    },
+                    onChangeEnd: (value) {
+                      // Auto-save when slider is released (not during drag)
+                      _saveSequence();
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: 60,
+                  child: Text(
+                    seq.restAtEndSeconds == 0
+                        ? 'None'
+                        : '${seq.restAtEndSeconds}s',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          ),
 
         const Divider(),
 
@@ -1060,6 +1170,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
       return;
     }
 
+    final taskEngine = TaskEngine.instance;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1071,11 +1183,21 @@ class _SequenceEditorState extends State<SequenceEditor> {
             itemCount: available.length,
             itemBuilder: (ctx, index) {
               final wp = available[index];
+              final hasTask = taskEngine.hasMode(wp);
               return ListTile(
-                leading: const Icon(Icons.location_on),
+                leading: Icon(
+                  Icons.location_on,
+                  color: hasTask ? Colors.green : null,
+                ),
                 title: Text(wp),
+                subtitle: hasTask
+                    ? const Text('Has task config', style: TextStyle(fontSize: 11, color: Colors.green))
+                    : null,
+                trailing: hasTask ? const Icon(Icons.auto_awesome, size: 16, color: Colors.green) : null,
                 onTap: () {
-                  _addStop(SequenceStop(waypoint: wp));
+                  // Copy task config values to the new SequenceStop
+                  final stop = _createStopFromWaypointTask(wp, taskEngine);
+                  _addStop(stop);
                   Navigator.pop(ctx);
                 },
               );
@@ -1089,6 +1211,27 @@ class _SequenceEditorState extends State<SequenceEditor> {
           ),
         ],
       ),
+    );
+  }
+
+  /// Create a SequenceStop from a waypoint, copying any TaskEngine task config
+  SequenceStop _createStopFromWaypointTask(String waypoint, TaskEngine taskEngine) {
+    final assignment = taskEngine.getAssignment(waypoint);
+
+    if (assignment == null || assignment.modeId == null) {
+      // No task configured - return basic stop
+      return SequenceStop(waypoint: waypoint);
+    }
+
+    final params = assignment.params;
+
+    // Copy speak text and display URL from task config
+    return SequenceStop(
+      waypoint: waypoint,
+      speakText: params['speak_text'],
+      displayUrl: params['display_url'],
+      displayDuration: int.tryParse(params['display_duration'] ?? '0') ?? 0,
+      waitSeconds: int.tryParse(params['wait_seconds'] ?? '0') ?? 0,
     );
   }
 }
