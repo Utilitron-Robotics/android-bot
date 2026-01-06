@@ -1,13 +1,13 @@
 #!/bin/bash
-# TurboTurf Fleet Management - AWS Deployment Script
+# Frontier Tower Fleet Management - AWS Deployment Script
 
 set -e
 
 ENVIRONMENT=${1:-dev}
 REGION=${AWS_REGION:-us-east-1}
-STACK_NAME="turboturf-$ENVIRONMENT"
+STACK_NAME="frontiertower-$ENVIRONMENT"
 
-echo "Deploying TurboTurf Fleet Management"
+echo "Deploying Frontier Tower Fleet Management"
 echo "Environment: $ENVIRONMENT"
 echo "Region: $REGION"
 echo "Stack: $STACK_NAME"
@@ -22,13 +22,13 @@ fi
 # Validate template
 echo "Validating CloudFormation template..."
 aws cloudformation validate-template \
-    --template-body file://turboturf-stack.yaml \
+    --template-body file://frontiertower-stack.yaml \
     --region "$REGION"
 
 # Deploy stack
 echo "Deploying stack..."
 aws cloudformation deploy \
-    --template-file turboturf-stack.yaml \
+    --template-file frontiertower-stack.yaml \
     --stack-name "$STACK_NAME" \
     --parameter-overrides Environment="$ENVIRONMENT" \
     --capabilities CAPABILITY_NAMED_IAM \

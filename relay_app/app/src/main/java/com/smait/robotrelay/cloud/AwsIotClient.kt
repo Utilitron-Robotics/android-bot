@@ -36,8 +36,8 @@ class AwsIotClient(
         const val TOPIC_FLEET_BROADCAST = "fleet/broadcast"
 
         // Default endpoints (configure in settings)
-        const val DEFAULT_API_ENDPOINT = "https://api.turboturf.smait.com"
-        const val DEFAULT_IOT_ENDPOINT = "wss://iot.turboturf.smait.com"
+        const val DEFAULT_API_ENDPOINT = "https://api.frontiertower.io"
+        const val DEFAULT_IOT_ENDPOINT = "wss://iot.frontiertower.io"
     }
 
     // Configuration

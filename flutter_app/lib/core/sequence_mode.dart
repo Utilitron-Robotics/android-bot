@@ -76,6 +76,12 @@ class Sequence {
   final int restAtEndSeconds;   // Wait at end waypoint before returning to start (for loops)
   final int modifiedAt;         // Timestamp for conflict resolution (ms since epoch)
 
+  // Motion trigger settings - start tour when someone approaches
+  final bool motionTriggerStart;    // Enable motion-triggered tour start at start waypoint
+  final String? motionGreeting;     // TTS greeting when motion detected (e.g., "Hello! Would you like a tour?")
+  final String? motionButtonText;   // Button text shown on tablet (e.g., "Start Tour", "Begin Experience")
+  final String? motionDisplayUrl;   // URL to show on tablet when awaiting tour start (start button)
+
   Sequence({
     required this.id,
     required this.name,
@@ -88,6 +94,10 @@ class Sequence {
     this.startWaypoint,
     this.endWaypoint,
     this.restAtEndSeconds = 0,
+    this.motionTriggerStart = false,
+    this.motionGreeting,
+    this.motionButtonText,
+    this.motionDisplayUrl,
     int? modifiedAt,
   }) : modifiedAt = modifiedAt ?? DateTime.now().millisecondsSinceEpoch;
 
@@ -322,10 +332,14 @@ class Sequence {
     'announce_arrival': announceArrival,
     'rest_at_end_seconds': restAtEndSeconds,
     'modified_at': modifiedAt,
+    'motion_trigger_start': motionTriggerStart,
     if (introText != null) 'intro_text': introText,
     if (outroText != null) 'outro_text': outroText,
     if (startWaypoint != null) 'start_waypoint': startWaypoint,
     if (endWaypoint != null) 'end_waypoint': endWaypoint,
+    if (motionGreeting != null) 'motion_greeting': motionGreeting,
+    if (motionButtonText != null) 'motion_button_text': motionButtonText,
+    if (motionDisplayUrl != null) 'motion_display_url': motionDisplayUrl,
   };
 
   factory Sequence.fromJson(Map<String, dynamic> json) => Sequence(
@@ -343,6 +357,10 @@ class Sequence {
     startWaypoint: json['start_waypoint'] as String?,
     endWaypoint: json['end_waypoint'] as String?,
     modifiedAt: json['modified_at'] as int?,
+    motionTriggerStart: json['motion_trigger_start'] as bool? ?? false,
+    motionGreeting: json['motion_greeting'] as String?,
+    motionButtonText: json['motion_button_text'] as String?,
+    motionDisplayUrl: json['motion_display_url'] as String?,
   );
 
   Sequence copyWith({
@@ -358,6 +376,10 @@ class Sequence {
     String? endWaypoint,
     int? restAtEndSeconds,
     int? modifiedAt,
+    bool? motionTriggerStart,
+    String? motionGreeting,
+    String? motionButtonText,
+    String? motionDisplayUrl,
   }) => Sequence(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -371,6 +393,10 @@ class Sequence {
     startWaypoint: startWaypoint ?? this.startWaypoint,
     endWaypoint: endWaypoint ?? this.endWaypoint,
     modifiedAt: modifiedAt ?? this.modifiedAt,
+    motionTriggerStart: motionTriggerStart ?? this.motionTriggerStart,
+    motionGreeting: motionGreeting ?? this.motionGreeting,
+    motionButtonText: motionButtonText ?? this.motionButtonText,
+    motionDisplayUrl: motionDisplayUrl ?? this.motionDisplayUrl,
   );
 
   /// Add a stop
@@ -870,6 +896,27 @@ class SequenceManager extends ChangeNotifier {
       debugPrint('SequenceManager.saveToCloud(): Stack: $stack');
       return false;
     }
+  }
+
+  /// Push ALL local tours to cloud (for seeding)
+  Future<int> pushAllToCloud({String? mapId}) async {
+    if (_cloudApiUrl == null || _cloudApiUrl!.isEmpty) {
+      debugPrint('SequenceManager.pushAllToCloud(): No cloud URL configured');
+      return 0;
+    }
+
+    final targetMapId = mapId ?? _currentMapId ?? '';
+    int pushed = 0;
+
+    debugPrint('SequenceManager.pushAllToCloud(): Pushing ${_sequences.length} tours to cloud');
+
+    for (final seq in _sequences.values) {
+      final success = await saveToCloud(seq, mapId: targetMapId);
+      if (success) pushed++;
+    }
+
+    debugPrint('SequenceManager.pushAllToCloud(): Pushed $pushed/${_sequences.length} tours');
+    return pushed;
   }
 
   /// Delete a tour from cloud

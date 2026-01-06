@@ -945,6 +945,83 @@ class _HudScreenState extends State<HudScreen>
     }
   }
 
+  // Frontier Tower floors (to be populated from cloud)
+  static const List<String> _floors = [
+    'Spaceship',      // Event floor - 2nd floor
+    'Lobby',          // Ground floor
+    'Mezzanine',      // Between floors
+    'Rooftop',        // Top floor events
+  ];
+  String _selectedFloor = 'Spaceship';
+
+  void _showFloorsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1F2E),
+        title: Row(
+          children: [
+            Image.network(
+              'https://frontiertower.io/wp-content/uploads/2024/07/cropped-FT-Logo-Only-Color-2.png',
+              height: 32,
+              width: 32,
+              errorBuilder: (ctx, err, stack) => const Icon(Icons.business, color: Color(0xFF9333EA)),
+            ),
+            const SizedBox(width: 12),
+            const Text('Frontier Tower', style: TextStyle(color: Color(0xFF9333EA))),
+          ],
+        ),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Select Floor', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const SizedBox(height: 8),
+              ...List.generate(_floors.length, (i) {
+                final floor = _floors[i];
+                final isSelected = floor == _selectedFloor;
+                return ListTile(
+                  leading: Icon(
+                    floor == 'Spaceship' ? Icons.rocket_launch :
+                    floor == 'Lobby' ? Icons.door_front_door :
+                    floor == 'Mezzanine' ? Icons.stairs :
+                    Icons.roofing,
+                    color: isSelected ? const Color(0xFF9333EA) : Colors.grey,
+                  ),
+                  title: Text(floor, style: TextStyle(
+                    color: isSelected ? Colors.white : Colors.grey,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  )),
+                  trailing: isSelected ? const Icon(Icons.check, color: Color(0xFF9333EA)) : null,
+                  selected: isSelected,
+                  selectedTileColor: const Color(0xFF9333EA).withValues(alpha: 0.1),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  onTap: () {
+                    setState(() => _selectedFloor = floor);
+                    Navigator.pop(ctx);
+                  },
+                );
+              }),
+              const SizedBox(height: 16),
+              Text(
+                'More floors coming soon as we scan them!',
+                style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTopStatusBar(RobotConnection robot) {
     final status = robot.status;
 
@@ -962,6 +1039,65 @@ class _HudScreenState extends State<HudScreen>
       ),
       child: Row(
         children: [
+          // Frontier Tower Logo
+          GestureDetector(
+            onTap: () => _showFloorsDialog(),
+            child: Row(
+              children: [
+                Image.network(
+                  'https://frontiertower.io/wp-content/uploads/2024/07/cropped-FT-Logo-Only-Color-2.png',
+                  height: 36,
+                  width: 36,
+                  errorBuilder: (ctx, err, stack) => Container(
+                    height: 36,
+                    width: 36,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6B21A8), // Purple
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Center(
+                      child: Text('FT', style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      )),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'FRONTIER TOWER',
+                      style: TextStyle(
+                        color: Color(0xFF9333EA), // Purple
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        const Icon(Icons.layers, size: 12, color: Colors.grey),
+                        const SizedBox(width: 4),
+                        Text(
+                          _selectedFloor,
+                          style: const TextStyle(color: Colors.white70, fontSize: 11),
+                        ),
+                        const Icon(Icons.arrow_drop_down, size: 14, color: Colors.grey),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Container(width: 1, height: 32, color: Colors.grey.withValues(alpha: 0.3)),
+          const SizedBox(width: 12),
+
           // Connection status
           _HudChip(
             icon: Icons.check_circle,
@@ -1628,27 +1764,53 @@ class _HudScreenState extends State<HudScreen>
   }
 
   Widget _buildSettingsPanel(RobotConnection robot) {
-    return ListView(
-      children: [
-        SwitchListTile(
-          title: const Text('Audio Enabled'),
-          subtitle: const Text('Enable/disable robot announcements'),
-          value: true, // TODO: bind to actual setting
-          onChanged: (v) {},
-        ),
-        const ListTile(
-          leading: Icon(Icons.speed),
-          title: Text('Max Speed'),
-          subtitle: Text('0.5 m/s'),
-          trailing: Icon(Icons.chevron_right),
-        ),
-        const ListTile(
-          leading: Icon(Icons.volume_up),
-          title: Text('Volume'),
-          subtitle: Text('80%'),
-          trailing: Icon(Icons.chevron_right),
-        ),
-      ],
+    final announcer = AudioAnnouncer();
+    return StatefulBuilder(
+      builder: (context, setLocalState) => ListView(
+        children: [
+          // Audio enabled toggle
+          SwitchListTile(
+            title: const Text('Audio Enabled'),
+            subtitle: const Text('Enable/disable robot announcements'),
+            value: announcer.enabled,
+            onChanged: (v) {
+              setLocalState(() => announcer.enabled = v);
+            },
+          ),
+          // Volume slider
+          ListTile(
+            leading: const Icon(Icons.volume_up),
+            title: const Text('Volume'),
+            subtitle: Slider(
+              value: announcer.volume,
+              min: 0.0,
+              max: 1.0,
+              divisions: 10,
+              label: '${(announcer.volume * 100).round()}%',
+              onChanged: (v) {
+                setLocalState(() => announcer.volume = v);
+              },
+            ),
+            trailing: Text('${(announcer.volume * 100).round()}%'),
+          ),
+          const Divider(),
+          // Test TTS
+          ListTile(
+            leading: const Icon(Icons.speaker, color: Colors.orange),
+            title: const Text('Test Audio'),
+            subtitle: const Text('Test TTS on tablet'),
+            onTap: () => robot.client.tabletSpeak('Audio test successful.'),
+          ),
+          // Crowd Logic link
+          ListTile(
+            leading: const Icon(Icons.people, color: Colors.blue),
+            title: const Text('Crowd Logic'),
+            subtitle: Text('Current: ${announcer.crowdConfig.venue.label}'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showFeaturePanel('crowd', robot),
+          ),
+        ],
+      ),
     );
   }
 

@@ -1,289 +1,159 @@
-# TourBot - Multi-Platform Service Droid Application
+# Frontier Tower Fleet Management
 
-A cross-platform application for service droids, interactive kiosks, and tour guide robots. Designed to run on Android tablets, iOS devices, and desktop platforms mounted on robot bases.
+A cross-platform robot control system for Pudu/smAiT service robots. Deployed at **Frontier Tower** for multi-floor tour guide and service operations.
 
-## 📱 Applications
+## Architecture
 
-### Flutter App (Cross-Platform) - `flutter_app/`
-Universal robot controller with **dynamic UI generated from rosbridge introspection**.
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    House WiFi Network                       │
+│                                                             │
+│   ┌─────────────┐           ┌───────────────────┐          │
+│   │ Flutter App │ ←───────→ │  Android Tablet   │          │
+│   │ (Controller)│ WebSocket │  (Relay Server)   │          │
+│   └─────────────┘  :8766    │  HTTP :8765       │          │
+│                              └─────────┬─────────┘          │
+└──────────────────────────────────────────────────────────────┘
+                                         │
+                              ┌──────────┴──────────┐
+                              │   Robot WiFi        │
+                              │   10.42.0.1:9090    │
+                              └──────────┬──────────┘
+                                         │
+                              ┌──────────┴──────────┐
+                              │   Pudu/smAiT Robot  │
+                              └─────────────────────┘
+```
 
-- **Auto-discovery**: Connects to robot and discovers available topics, services, and parameters
-- **Dynamic UI**: Generates appropriate controls based on what the robot supports
-- **Waypoint Navigation**: Tap buttons or enter custom waypoints
-- **Voice Control**: "Go to kitchen", "Stop" (on supported devices)
-- **Manual Control**: Virtual joystick for direct velocity control
-- **Cross-platform**: Android, iOS, Windows, macOS, Linux
+## Applications
+
+### Flutter App - `flutter_app/`
+Cross-platform controller with tour management and cloud sync.
+
+- **Tour Mode**: Multi-stop guided tours with TTS narration
+- **Cloud Sync**: Push/Pull tours & waypoints between robots
+- **Crowd Logic**: Smart blocked-path announcements with venue presets
+- **Voice Control**: Speech-to-waypoint navigation
+- **Dynamic UI**: Auto-generated from robot capabilities
 
 ```bash
 cd flutter_app
 flutter pub get
-flutter run
+flutter run -d macos  # or ios, android, chrome
 ```
 
-### Android Native App - `app/`
-Native Kotlin/Jetpack Compose application with advanced features.
+### Relay App - `relay_app/`
+Android tablet bridge mounted on robot. Provides:
 
-- **Animated Robot Face**: Point cloud 3D face with phoneme-based lip sync
-- **Tour Management**: Waypoint navigation with audio narration
-- **Multi-Base Support**: Works with Tibo, robots with Orin Nano, Raspberry Pi bases
-- **WebSocket Communication**: Real-time robot control via ROS bridge
-- **Test Mode**: Full simulation for development without robot hardware
+- **Dual Network Bridge**: House WiFi ↔ Robot WiFi
+- **Tour Display**: Customer-facing WebView with countdown timer
+- **Lock Screen**: Prevents customer access during tours (6-tap + PIN unlock)
+- **TTS Announcements**: Blocked path warnings, arrival notices
+- **HTTP API**: REST endpoints for simple integration
 
 ```bash
-./deploy.sh
-# Or open in Android Studio
+cd relay_app
+./gradlew assembleDebug
+# Install: adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### Legacy Python - `legacy_python_source/`
-Original Python/FastAPI implementation with web UI.
+### Infrastructure - `infrastructure/`
+AWS CloudFormation stack for fleet management.
 
 ```bash
-cd legacy_python_source
-pip install -r requirements.txt
-python main.py
+cd infrastructure
+./deploy.sh dev  # or prod
 ```
 
-## 🚀 Quick Start
+## Key Features
 
-### Flutter (Recommended for New Development)
-```bash
-cd flutter_app
-flutter pub get
-flutter run -d chrome  # Web
-flutter run -d macos   # macOS
-flutter run            # Connected device/emulator
-```
+### Tour Mode
+Automated guided tours with:
+- Start/End waypoints with intro/outro speech
+- Per-stop: navigation, TTS, display URL, wait time
+- Loop mode for continuous operation
+- Motion trigger: greet visitors and show "Start Tour" button
 
-### Android Native
-```bash
-./deploy.sh
-# Or open in Android Studio (Ladybug or newer)
-```
+### Cloud Sync
+Share configurations across robots on the same floor:
 
-## 🤖 Task & Mode Architecture
+| Button | Function |
+|--------|----------|
+| **WP↑** | Push waypoints to cloud |
+| **WP↓** | Pull waypoints from cloud |
+| **Tours↑** | Push tour sequences to cloud |
+| **Tours↓** | Pull tours (replaces local) |
 
-The robot operates on a **Task + Mode** paradigm that separates WHAT happens from HOW it's executed.
+Set **Map ID** to floor name (e.g., "Spaceship", "Mezzanine") for cross-robot sync.
 
-### Architecture Overview
+### Crowd Logic
+Smart blocked-path announcements with escalating urgency:
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          CONCEPTUAL MODEL                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   TASKS (What to do)              MODES (How to execute)                │
-│   ─────────────────               ──────────────────────                │
-│   • Speak text                    • Per-Waypoint Mode                   │
-│   • Display content                 └─ Execute on arrival               │
-│   • Wait for pickup               • Sequence Mode                       │
-│   • Navigate to point               └─ Multi-waypoint tour              │
-│   • Return to origin              • Patrol Mode (future)                │
-│                                     └─ Loop through waypoints           │
-│                                   • Follow Mode (future)                │
-│                                     └─ Track person/object              │
-│                                                                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   WAYPOINT TASK ASSIGNMENT                                              │
-│   ────────────────────────                                              │
-│   Waypoint + Condition + Task = Behavior                                │
-│                                                                         │
-│   Example: "Kitchen" + OnArrival + DeliveryTask                         │
-│            → Robot arrives at Kitchen, announces delivery, waits        │
-│                                                                         │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│   EXECUTION FLOW                                                        │
-│   ──────────────                                                        │
-│                                                                         │
-│   ┌─────────┐    ┌──────────────┐    ┌─────────────┐                   │
-│   │ Trigger │───▶│ TaskManager  │───▶│ TaskMode    │                   │
-│   │ (arrival│    │ (orchestrate)│    │ (execute)   │                   │
-│   │  button)│    │              │    │             │                   │
-│   └─────────┘    └──────────────┘    └─────────────┘                   │
-│                         │                   │                           │
-│                         ▼                   ▼                           │
-│                  ┌──────────────┐    ┌─────────────┐                   │
-│                  │CommandManager│    │  Callbacks  │                   │
-│                  │ (retry/ack)  │    │ (TTS,screen)│                   │
-│                  └──────────────┘    └─────────────┘                   │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+| Venue | Style | Use Case |
+|-------|-------|----------|
+| **Spaceship** | Friendly, audible | Event floors, crowds |
+| **Adult Party** | Faster escalation | Bars, clubs |
+| **Restaurant** | Balanced | Dining service |
+| **Kids Event** | Patient, gentle | Family events |
+| **Hospital** | Quiet, minimal | Healthcare |
 
-### Built-in Mode Examples
+Features LIDAR intelligence to distinguish moving obstacles (people) from static objects.
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| **Delivery** | Announce → Wait → Return | Food delivery, package drops |
-| **Announce** | Speak + Display | Greetings, information |
-| **Comic** | Tell jokes at stops | Entertainment, events |
-| **Busser** | Collect items → Bus station | Restaurant clearing |
-| **Tour** | Multi-stop guided tour | Museums, offices |
-| **Emergency** | Alert + Evacuation route | Safety, fire drills |
-| **Teleop** | Manual joystick control | Setup, debugging |
+## Frontier Tower Floors
 
----
+| Floor | Map ID | Description |
+|-------|--------|-------------|
+| Spaceship | `spaceship` | Event floor (2nd floor) |
+| Lobby | `lobby` | Ground floor |
+| Mezzanine | `mezzanine` | Between floors |
+| Rooftop | `rooftop` | Top floor events |
 
-## 📖 User Stories & Mode Definitions
+## Robot Configuration
 
-### 1. 🍕 Delivery Mode
-**Story**: "As a restaurant server, I want the robot to deliver food to tables and return, so customers get hot food quickly."
+| Robot | SSID | Password | Direct IP |
+|-------|------|----------|-----------|
+| Tibo 1 | TY126AA003F0-005878 | 123456789 | 10.42.0.1:9090 |
+| Tibo 2 | TY126AA003F0-005993 | 123456789 | 10.42.0.1:9090 |
 
-```
-TRIGGER: Assign delivery task to waypoint
-FLOW:
-  1. Navigate to destination
-  2. Announce "Your delivery has arrived"
-  3. Display pickup instructions
-  4. Wait 30 seconds for pickup
-  5. Return to origin (kitchen/bar)
-```
-
-### 2. 🎭 Comic Mode
-**Story**: "As an event planner, I want the robot to roam and tell jokes, so guests are entertained."
-
-```
-TRIGGER: Start Comic sequence
-FLOW:
-  1. Navigate to waypoint (or detected person group)
-  2. Play attention beep
-  3. Tell joke from joke database
-  4. Wait for laughter (3 seconds)
-  5. Display punchline GIF
-  6. Move to next stop
-  7. Repeat until sequence complete
-```
-
-### 3. 🏛️ Tour Guide Mode
-**Story**: "As a museum visitor, I want a guided tour with narration at each exhibit, so I learn about the collection."
-
-```
-TRIGGER: Start Tour sequence
-FLOW:
-  1. Announce tour start
-  2. Navigate to Stop 1
-  3. Play arrival beep
-  4. Speak exhibit description
-  5. Display related media
-  6. Wait for configured time
-  7. Navigate to Stop 2...N
-  8. Announce tour complete
-```
-
-### 4. 🍽️ Busser Mode
-**Story**: "As a restaurant manager, I want the robot to collect dishes from tables, so staff can focus on service."
-
-```
-TRIGGER: Start Busser sequence
-FLOW:
-  1. Navigate to Table 1
-  2. Announce "Place finished items on my tray"
-  3. Display loading animation
-  4. Wait 20 seconds
-  5. Navigate to Table 2...N
-  6. Navigate to Bus Station
-  7. Announce "Ready for unloading"
-  8. Wait for tray clear
-  9. Return to starting position
-```
-
-### 5. 🚨 Emergency Mode
-**Story**: "As a building safety officer, I want the robot to alert occupants and guide evacuation, so everyone exits safely."
-
-```
-TRIGGER: Emergency button / fire alarm integration
-FLOW:
-  1. STOP all other tasks immediately
-  2. Play loud alarm sound
-  3. Announce "EMERGENCY - Please evacuate"
-  4. Display evacuation map
-  5. Navigate toward exit, repeating alerts
-  6. At exit: "Exit this way" with arrow
-  7. Loop until manually stopped
-```
-
-### 6. 🕹️ Teleop Mode
-**Story**: "As a technician, I want manual control of the robot, so I can test movement and calibrate sensors."
-
-```
-TRIGGER: Enable Teleop in app
-FLOW:
-  1. Disable autonomous navigation
-  2. Enable joystick control
-  3. Forward velocity commands directly
-  4. Display live camera feed (if available)
-  5. Show sensor readings
-  6. Exit on disable or timeout
-```
-
-### 7. 👋 Greeter Mode
-**Story**: "As a receptionist, I want the robot to greet visitors at the entrance, so they feel welcomed."
-
-```
-TRIGGER: Assign Greeter task to Entrance waypoint
-FLOW:
-  1. Wait at entrance waypoint
-  2. On person detection (future: vision)
-  3. Play friendly chime
-  4. Announce "Welcome! How can I help you?"
-  5. Display company logo
-  6. Wait for interaction
-  7. Return to idle position
-```
-
----
-
-## 🔧 Robot Configuration
-
-All apps use WebSockets to communicate with the robot base (ROS bridge).
-
-| Mode | Default URL | Description |
-|------|-------------|-------------|
-| Emulator | `ws://10.0.2.2:9090` | Connects to localhost on host machine |
-| Real Robot | `ws://10.42.0.1:9090` | Tibo robot default IP |
-| Custom | `ws://192.168.x.x:9090` | Your robot's IP address |
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 .
-├── flutter_app/                 # Cross-platform Flutter app
+├── flutter_app/                 # Cross-platform controller
 │   ├── lib/
-│   │   ├── core/               # Connection & rosbridge client
-│   │   ├── services/           # Robot introspection
-│   │   ├── screens/            # Home screen
-│   │   └── widgets/            # Dynamic UI components
+│   │   ├── core/               # Connection, sequences, cloud client
+│   │   ├── services/           # Audio announcer, introspection
+│   │   ├── screens/            # HUD, home screen
+│   │   └── widgets/            # Sequence editor, crowd logic settings
 │   └── pubspec.yaml
 │
-├── app/                         # Android native app
-│   └── src/main/java/com/opendroids/tourbot/
-│       ├── data/               # Repository layer, models
-│       ├── di/                 # Hilt dependency injection
-│       ├── logic/              # TourManager business logic
-│       └── ui/                 # Compose UI, 3D face animation
+├── relay_app/                   # Android tablet relay
+│   └── app/src/main/java/com/smait/robotrelay/
+│       ├── service/            # Relay server, command buffer, WebSocket
+│       ├── protocol/           # smAiT protocol messages
+│       ├── ui/                 # MainActivity with tour mode
+│       └── cloud/              # AWS IoT client (future)
 │
-└── legacy_python_source/        # Original Python implementation
-    ├── api/                    # Base API and robot factory
-    ├── adapters/               # Robot-specific adapters
-    ├── apps/                   # Tour bot application
-    └── ui/                     # Web interfaces
+├── infrastructure/              # AWS CloudFormation
+│   ├── frontiertower-stack.yaml
+│   └── deploy.sh
+│
+└── CLAUDE.md                    # Development documentation
 ```
 
-## 📚 Documentation
+## Development
 
-- [**Flutter App README**](flutter_app/README.md) - Cross-platform app details
-- [**HANDOFF_TO_REAL.md**](HANDOFF_TO_REAL.md) - Connecting to real robot hardware
-- [**ANDROID_MIGRATION_PLAN.md**](ANDROID_MIGRATION_PLAN.md) - Architecture documentation
-- [**PRODUCTION_READINESS_REVIEW.md**](PRODUCTION_READINESS_REVIEW.md) - Deployment checklist
+See [CLAUDE.md](CLAUDE.md) for detailed protocol documentation, navigation status codes, and development notes.
 
-## 🔐 Security Note
+### Quick Test
+```bash
+# Test robot connection
+nc -z -w 3 10.42.0.1 9090 && echo "ROBOT ONLINE"
 
-These apps use cleartext WebSocket (`ws://`) for local robot communication. This is intentional for LAN-only robot control. For production deployments requiring internet connectivity, implement `wss://` with proper certificate handling.
+# Test relay API
+curl http://tablet-ip:8765/status
+```
 
-## 🤝 Contributing
+## Security Note
 
-1. Choose the appropriate platform for your changes
-2. Follow existing code patterns and architecture
-3. Test on at least one platform before submitting
-4. Update documentation if adding new features
+Uses cleartext WebSocket (`ws://`) for local robot communication. For internet-exposed deployments, implement `wss://` with proper certificates.

@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../core/robot_connection.dart';
 import '../core/sequence_mode.dart';
 import '../core/task_engine.dart';
+import '../core/fleet_cloud.dart';
 
 /// Sequence Editor widget for creating and managing sequences
 class SequenceEditor extends StatefulWidget {
@@ -25,6 +28,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
   final TextEditingController _tourNameController = TextEditingController();
   final TextEditingController _introTextController = TextEditingController();
   final TextEditingController _outroTextController = TextEditingController();
+  final TextEditingController _motionGreetingController = TextEditingController();
+  final TextEditingController _motionButtonTextController = TextEditingController();
   final Map<String, TextEditingController> _stopControllers = {};
 
   // Cache to reduce unnecessary rebuilds - only rebuild when these actually change
@@ -74,6 +79,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.dispose();
     _introTextController.dispose();
     _outroTextController.dispose();
+    _motionGreetingController.dispose();
+    _motionButtonTextController.dispose();
     for (final c in _stopControllers.values) {
       c.dispose();
     }
@@ -110,6 +117,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.text = newTour.name;
     _introTextController.text = '';
     _outroTextController.text = '';
+    _motionGreetingController.text = '';
+    _motionButtonTextController.text = '';
     setState(() {
       _selectedSequence = newTour;
       _isEditing = true;
@@ -127,6 +136,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.text = seq.name;
     _introTextController.text = seq.introText ?? '';
     _outroTextController.text = seq.outroText ?? '';
+    _motionGreetingController.text = seq.motionGreeting ?? '';
+    _motionButtonTextController.text = seq.motionButtonText ?? '';
 
     setState(() {
       _selectedSequence = seq;
@@ -195,6 +206,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
       outroText: _outroTextController.text.isEmpty ? null : _outroTextController.text,
       startWaypoint: _selectedSequence!.startWaypoint,
       endWaypoint: _selectedSequence!.endWaypoint,
+      motionTriggerStart: _selectedSequence!.motionTriggerStart,
+      motionGreeting: _motionGreetingController.text.isEmpty ? null : _motionGreetingController.text,
+      motionButtonText: _motionButtonTextController.text.isEmpty ? null : _motionButtonTextController.text,
     );
 
     _selectedSequence = updatedTour;
@@ -202,13 +216,14 @@ class _SequenceEditorState extends State<SequenceEditor> {
     debugPrint('SequenceEditor._saveSequence: Save completed for "${updatedTour.name}"');
   }
 
-  void _updateTourOptions({bool? loop, bool? announceArrival}) {
+  void _updateTourOptions({bool? loop, bool? announceArrival, bool? motionTriggerStart}) {
     // Only for checkboxes - these need immediate state update AND save
     if (_selectedSequence == null) return;
     setState(() {
       _selectedSequence = _selectedSequence!.copyWith(
         loop: loop ?? _selectedSequence!.loop,
         announceArrival: announceArrival ?? _selectedSequence!.announceArrival,
+        motionTriggerStart: motionTriggerStart ?? _selectedSequence!.motionTriggerStart,
       );
     });
     // Auto-save checkbox changes
@@ -270,11 +285,20 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 
   void _showCloudSyncDialog() {
+    // Default to Frontier Tower API
+    const defaultApiUrl = 'https://api.frontiertower.io/dev';
     final apiUrlController = TextEditingController(
-      text: SequenceManager.instance.cloudApiUrl ?? '',
+      text: SequenceManager.instance.cloudApiUrl ?? defaultApiUrl,
     );
+
+    // Auto-detect map ID from connected robot
+    final robotConnection = context.read<RobotConnection>();
+    final robotStatus = robotConnection.status;
+    final autoMapId = (robotStatus.buildingName.isNotEmpty && robotStatus.floorName.isNotEmpty)
+        ? '${robotStatus.buildingName}_${robotStatus.floorName}'
+        : null;
     final mapIdController = TextEditingController(
-      text: SequenceManager.instance.currentMapId ?? '',
+      text: SequenceManager.instance.currentMapId ?? autoMapId ?? '',
     );
 
     showDialog(
@@ -377,9 +401,84 @@ class _SequenceEditorState extends State<SequenceEditor> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Modes are shared between robots on the same map',
+                'Tours are shared between all robots on the same floor',
                 style: TextStyle(color: Colors.grey[500], fontSize: 12),
               ),
+              // Push/Pull explanation
+              if (SequenceManager.instance.cloudSyncEnabled) ...[
+                const SizedBox(height: 16),
+                // Tours section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.route, size: 18),
+                          const SizedBox(width: 8),
+                          const Text('TOURS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(Icons.cloud_upload, color: Colors.blue, size: 16),
+                          const SizedBox(width: 4),
+                          const Text('PUSH', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 12)),
+                          const Text(' - Upload local tours', style: TextStyle(fontSize: 11)),
+                          const Spacer(),
+                          const Icon(Icons.cloud_download, color: Colors.green, size: 16),
+                          const SizedBox(width: 4),
+                          const Text('PULL', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 12)),
+                          const Text(' - Download from cloud', style: TextStyle(fontSize: 11)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Waypoints section
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on, size: 18, color: Colors.purple),
+                          const SizedBox(width: 8),
+                          const Text('WAYPOINTS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(Icons.cloud_upload, color: Colors.blue, size: 16),
+                          const SizedBox(width: 4),
+                          const Text('PUSH', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 12)),
+                          const Text(' - Upload POI list', style: TextStyle(fontSize: 11)),
+                          const Spacer(),
+                          const Icon(Icons.cloud_download, color: Colors.green, size: 16),
+                          const SizedBox(width: 4),
+                          const Text('PULL', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 12)),
+                          const Text(' - Download POI list', style: TextStyle(fontSize: 11)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -388,24 +487,212 @@ class _SequenceEditorState extends State<SequenceEditor> {
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancel'),
           ),
-          if (SequenceManager.instance.cloudSyncEnabled)
+          // Push/Pull buttons when connected
+          if (SequenceManager.instance.cloudSyncEnabled) ...[
+            // Waypoint Push button (purple)
             TextButton.icon(
-              icon: const Icon(Icons.sync),
-              label: const Text('Sync Now'),
+              icon: const Icon(Icons.location_on, color: Colors.purple, size: 18),
+              label: const Text('WP↑', style: TextStyle(color: Colors.purple, fontSize: 12)),
               onPressed: () async {
                 Navigator.pop(ctx);
-                await SequenceManager.instance.syncWithCloud();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Modes synced with cloud')),
-                  );
-                  setState(() {}); // Refresh UI
+                final waypoints = widget.availableWaypoints;
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Row(
+                      children: [
+                        Icon(Icons.location_on, color: Colors.purple),
+                        SizedBox(width: 8),
+                        Text('Push Waypoints?'),
+                      ],
+                    ),
+                    content: Text(
+                      'This will upload ${waypoints.length} waypoint(s) to the cloud.\n\n'
+                      'Other robots on this floor can then pull this POI list.',
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: Colors.purple),
+                        onPressed: () => Navigator.pop(c, true),
+                        child: const Text('Push'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  final mapId = mapIdController.text.trim().isEmpty
+                      ? null
+                      : mapIdController.text.trim();
+                  final cloud = FleetCloudClient();
+                  cloud.configure(apiEndpoint: apiUrlController.text.trim());
+                  if (mapId != null) cloud.setMapId(mapId);
+                  final success = await cloud.pushWaypoints(waypoints, mapId: mapId);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success
+                            ? 'Pushed ${waypoints.length} waypoint(s) to cloud!'
+                            : 'Failed to push waypoints'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                      ),
+                    );
+                  }
                 }
               },
             ),
+            // Waypoint Pull button (purple/green)
+            TextButton.icon(
+              icon: const Icon(Icons.location_on, color: Colors.teal, size: 18),
+              label: const Text('WP↓', style: TextStyle(color: Colors.teal, fontSize: 12)),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Row(
+                      children: [
+                        Icon(Icons.location_on, color: Colors.teal),
+                        SizedBox(width: 8),
+                        Text('Pull Waypoints?'),
+                      ],
+                    ),
+                    content: const Text(
+                      'This will download the POI list from the cloud.\n\n'
+                      'NOTE: Waypoints are stored on the robot base. '
+                      'Pull only shows what\'s in the cloud for reference.',
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: Colors.teal),
+                        onPressed: () => Navigator.pop(c, true),
+                        child: const Text('Pull'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  final mapId = mapIdController.text.trim().isEmpty
+                      ? null
+                      : mapIdController.text.trim();
+                  final cloud = FleetCloudClient();
+                  cloud.configure(apiEndpoint: apiUrlController.text.trim());
+                  if (mapId != null) cloud.setMapId(mapId);
+                  final cloudWaypoints = await cloud.getWaypoints(mapId: mapId);
+                  if (mounted) {
+                    if (cloudWaypoints.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('No waypoints found in cloud for this map'),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                    } else {
+                      // Show the waypoints (informational only - can't write to robot base)
+                      showDialog(
+                        context: context,
+                        builder: (c) => AlertDialog(
+                          title: Text('Cloud Waypoints (${cloudWaypoints.length})'),
+                          content: SizedBox(
+                            width: 300,
+                            height: 300,
+                            child: ListView.builder(
+                              itemCount: cloudWaypoints.length,
+                              itemBuilder: (ctx, i) => ListTile(
+                                leading: const Icon(Icons.location_on, size: 18),
+                                title: Text(cloudWaypoints[i]),
+                                dense: true,
+                              ),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(c),
+                              child: const Text('OK'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+                  }
+                }
+              },
+            ),
+            const SizedBox(width: 8),
+            // Tour Push button
+            TextButton.icon(
+              icon: const Icon(Icons.cloud_upload, color: Colors.blue, size: 18),
+              label: const Text('Tours↑', style: TextStyle(color: Colors.blue, fontSize: 12)),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                // Confirm push
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Text('Push Tours to Cloud?'),
+                    content: Text(
+                      'This will upload ${SequenceManager.instance.sequences.length} local tour(s) to the cloud.\n\n'
+                      'Cloud tours will be updated with your local versions.',
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Push')),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  final pushed = await SequenceManager.instance.pushAllToCloud();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Pushed $pushed tour(s) to cloud!')),
+                    );
+                    setState(() {});
+                  }
+                }
+              },
+            ),
+            // Tour Pull button
+            TextButton.icon(
+              icon: const Icon(Icons.cloud_download, color: Colors.green, size: 18),
+              label: const Text('Tours↓', style: TextStyle(color: Colors.green, fontSize: 12)),
+              onPressed: () async {
+                Navigator.pop(ctx);
+                // Confirm pull
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Text('Pull Tours from Cloud?'),
+                    content: const Text(
+                      'This will download tours from the cloud and REPLACE your local tours.\n\n'
+                      'Any local-only tours will be lost!',
+                    ),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      FilledButton(
+                        style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+                        onPressed: () => Navigator.pop(c, true),
+                        child: const Text('Pull & Replace'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await SequenceManager.instance.loadFromCloud();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Pulled ${SequenceManager.instance.sequences.length} tours from cloud!')),
+                    );
+                    setState(() {});
+                  }
+                }
+              },
+            ),
+          ],
+          // Save & Connect button
           FilledButton.icon(
             icon: const Icon(Icons.save),
-            label: const Text('Save & Connect'),
+            label: Text(SequenceManager.instance.cloudSyncEnabled ? 'Update' : 'Connect'),
             onPressed: () async {
               Navigator.pop(ctx);
               await SequenceManager.instance.configureCloud(
@@ -414,16 +701,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     ? null
                     : mapIdController.text.trim(),
               );
-              // Auto-sync after connecting
-              if (SequenceManager.instance.cloudSyncEnabled) {
-                await SequenceManager.instance.loadFromCloud();
-              }
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(
                       SequenceManager.instance.cloudSyncEnabled
-                          ? 'Connected! Modes loaded from cloud.'
+                          ? 'Connected! Use PUSH or PULL to sync.'
                           : 'Cloud sync disabled',
                     ),
                   ),
@@ -863,6 +1146,73 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   onChanged: (v) => _updateTourOptions(announceArrival: v),
                 ),
               ),
+            ],
+          ),
+        ),
+
+        // Motion Trigger - Start tour when someone approaches
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: seq.motionTriggerStart
+                ? Colors.blue.withValues(alpha: 0.1)
+                : Colors.grey.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: seq.motionTriggerStart ? Colors.blue : Colors.grey.shade700,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    seq.motionTriggerStart ? Icons.sensors : Icons.sensors_off,
+                    color: seq.motionTriggerStart ? Colors.blue : Colors.grey,
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Motion Trigger',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Switch(
+                    value: seq.motionTriggerStart,
+                    onChanged: (v) => _updateTourOptions(motionTriggerStart: v),
+                  ),
+                ],
+              ),
+              if (seq.motionTriggerStart) ...[
+                Text(
+                  'Robot greets visitors at Start location and shows Start button',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _motionGreetingController,
+                  decoration: const InputDecoration(
+                    labelText: 'Greeting Message (TTS)',
+                    hintText: 'Would you like a Tour of the Robotics Floor?',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    prefixIcon: Icon(Icons.record_voice_over, size: 18),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _motionButtonTextController,
+                  decoration: const InputDecoration(
+                    labelText: 'Button Text',
+                    hintText: 'Start Tour',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    prefixIcon: Icon(Icons.touch_app, size: 18),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

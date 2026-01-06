@@ -4,12 +4,19 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 /// Fleet Cloud Client for Flutter controller app
-/// Connects to TurboTurf fleet management backend
+/// Connects to Frontier Tower fleet management backend
 class FleetCloudClient extends ChangeNotifier {
-  // Configuration
-  String _apiEndpoint = 'https://api.turboturf.smait.com';
+  // Singleton
+  static final FleetCloudClient _instance = FleetCloudClient._internal();
+  factory FleetCloudClient() => _instance;
+  FleetCloudClient._internal();
+
+  // Configuration - branded for Frontier Tower
+  static const String defaultEndpoint = 'https://api.frontiertower.io';
+  String _apiEndpoint = defaultEndpoint;
   String? _apiKey;
   bool _isConnected = false;
+  String? _currentMapId;  // Selected map for tour sync
 
   // State
   final Map<String, RobotFleetStatus> _robots = {};
@@ -18,7 +25,23 @@ class FleetCloudClient extends ChangeNotifier {
   // Getters
   bool get isConnected => _isConnected;
   String get apiEndpoint => _apiEndpoint;
+  String? get currentMapId => _currentMapId;
   List<RobotFleetStatus> get robots => _robots.values.toList();
+
+  /// Set the current map ID (auto-detected from robot or manually set)
+  void setMapId(String? mapId) {
+    _currentMapId = mapId;
+    notifyListeners();
+  }
+
+  /// Auto-detect map ID from robot status (building_floor format)
+  void autoDetectMapId(String? buildingName, String? floorName) {
+    if (buildingName != null && floorName != null) {
+      _currentMapId = '${buildingName}_$floorName';
+      debugPrint('FleetCloud: Auto-detected map ID: $_currentMapId');
+      notifyListeners();
+    }
+  }
 
   /// Configure cloud connection
   void configure({
@@ -199,6 +222,222 @@ class FleetCloudClient extends ChangeNotifier {
     'Content-Type': 'application/json',
     if (_apiKey != null) 'X-API-Key': _apiKey!,
   };
+
+  // ============================================
+  // TOUR SYNC API - Shared across all robots on a map
+  // ============================================
+
+  /// Get all tours for the current map
+  Future<List<Map<String, dynamic>>> getTours() async {
+    if (_currentMapId == null) {
+      debugPrint('FleetCloud: No map ID set, cannot fetch tours');
+      return [];
+    }
+    try {
+      final response = await _get('/tours?map_id=$_currentMapId');
+      if (response != null) {
+        final tours = response['tours'] as List<dynamic>? ?? [];
+        debugPrint('FleetCloud: Fetched ${tours.length} tours for map $_currentMapId');
+        return tours.cast<Map<String, dynamic>>();
+      }
+    } catch (e) {
+      debugPrint('FleetCloud: Get tours failed: $e');
+    }
+    return [];
+  }
+
+  /// Get a specific tour by ID
+  Future<Map<String, dynamic>?> getTour(String tourId) async {
+    try {
+      final response = await _get('/tours/$tourId');
+      return response;
+    } catch (e) {
+      debugPrint('FleetCloud: Get tour $tourId failed: $e');
+      return null;
+    }
+  }
+
+  /// Save/update a tour (creates if new, updates if exists)
+  Future<bool> saveTour(Map<String, dynamic> tourData) async {
+    if (_currentMapId == null) {
+      debugPrint('FleetCloud: No map ID set, cannot save tour');
+      return false;
+    }
+    try {
+      // Ensure map_id is set
+      final data = Map<String, dynamic>.from(tourData);
+      data['map_id'] = _currentMapId;
+
+      final tourId = data['tour_id'] ?? data['id'];
+      if (tourId != null) {
+        // Update existing tour
+        data['tour_id'] = tourId;
+        final response = await _put('/tours/$tourId', data);
+        if (response != null) {
+          debugPrint('FleetCloud: Updated tour $tourId');
+          return true;
+        }
+      } else {
+        // Create new tour
+        final response = await _post('/tours', data);
+        if (response != null) {
+          debugPrint('FleetCloud: Created tour ${response['tour_id']}');
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('FleetCloud: Save tour failed: $e');
+    }
+    return false;
+  }
+
+  /// Delete a tour
+  Future<bool> deleteTour(String tourId) async {
+    try {
+      final response = await _delete('/tours/$tourId');
+      if (response != null) {
+        debugPrint('FleetCloud: Deleted tour $tourId');
+        return true;
+      }
+    } catch (e) {
+      debugPrint('FleetCloud: Delete tour failed: $e');
+    }
+    return false;
+  }
+
+  /// Sync local tours with cloud (pull + push)
+  /// Returns list of cloud tours after sync
+  Future<List<Map<String, dynamic>>> syncTours(List<Map<String, dynamic>> localTours) async {
+    if (_currentMapId == null) {
+      debugPrint('FleetCloud: No map ID set, cannot sync');
+      return localTours;
+    }
+
+    try {
+      // Get cloud tours
+      final cloudTours = await getTours();
+      final cloudById = {for (var t in cloudTours) t['tour_id'] as String: t};
+
+      // Merge: cloud wins if newer, push local if newer
+      for (final local in localTours) {
+        final localId = (local['id'] ?? local['tour_id']) as String;
+        final localModified = local['modified_at'] as int? ?? 0;
+        final cloud = cloudById[localId];
+
+        if (cloud == null) {
+          // Local only - push to cloud
+          debugPrint('FleetCloud: Pushing new tour $localId to cloud');
+          await saveTour({...local, 'tour_id': localId});
+        } else {
+          final cloudModified = cloud['modified_at'] as int? ?? 0;
+          if (localModified > cloudModified) {
+            // Local is newer - push
+            debugPrint('FleetCloud: Pushing updated tour $localId (local: $localModified > cloud: $cloudModified)');
+            await saveTour({...local, 'tour_id': localId});
+          }
+        }
+      }
+
+      // Fetch final state from cloud
+      return await getTours();
+    } catch (e) {
+      debugPrint('FleetCloud: Sync failed: $e');
+      return localTours;
+    }
+  }
+
+  // ============================================
+  // WAYPOINT SYNC API - Shared waypoint lists across robots
+  // ============================================
+
+  /// Get waypoints for a map from cloud
+  Future<List<String>> getWaypoints({String? mapId}) async {
+    final targetMapId = mapId ?? _currentMapId;
+    if (targetMapId == null) {
+      debugPrint('FleetCloud: No map ID set, cannot fetch waypoints');
+      return [];
+    }
+    try {
+      final response = await _get('/maps/$targetMapId');
+      if (response != null) {
+        final waypoints = response['waypoints'] as List<dynamic>? ?? [];
+        debugPrint('FleetCloud: Fetched ${waypoints.length} waypoints for map $targetMapId');
+        return waypoints.cast<String>();
+      }
+    } catch (e) {
+      debugPrint('FleetCloud: Get waypoints failed: $e');
+    }
+    return [];
+  }
+
+  /// Push waypoints to cloud for a map
+  Future<bool> pushWaypoints(List<String> waypoints, {String? mapId}) async {
+    final targetMapId = mapId ?? _currentMapId;
+    if (targetMapId == null) {
+      debugPrint('FleetCloud: No map ID set, cannot push waypoints');
+      return false;
+    }
+    try {
+      // First try to get existing map
+      final existing = await _get('/maps/$targetMapId');
+      if (existing != null) {
+        // Update existing map
+        final response = await _put('/maps/$targetMapId', {
+          'waypoints': waypoints,
+        });
+        if (response != null) {
+          debugPrint('FleetCloud: Updated waypoints for map $targetMapId');
+          return true;
+        }
+      } else {
+        // Create new map entry
+        final response = await _post('/maps', {
+          'map_id': targetMapId,
+          'name': targetMapId,
+          'waypoints': waypoints,
+        });
+        if (response != null) {
+          debugPrint('FleetCloud: Created map $targetMapId with ${waypoints.length} waypoints');
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('FleetCloud: Push waypoints failed: $e');
+    }
+    return false;
+  }
+
+  // HTTP helpers
+  Future<Map<String, dynamic>?> _put(String path, Map<String, dynamic> body) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$_apiEndpoint$path'),
+        headers: _headers,
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('FleetCloud: PUT $path failed: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _delete(String path) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$_apiEndpoint$path'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('FleetCloud: DELETE $path failed: $e');
+    }
+    return null;
+  }
 
   @override
   void dispose() {

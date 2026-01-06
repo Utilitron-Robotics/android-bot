@@ -63,6 +63,23 @@ class BufferCommand {
         type: 'sound',
         data: {'sound': sound},
       );
+
+  /// Enter motion standby mode - wait for motion detection to trigger tour start
+  /// When motion is detected, speaks greeting and shows start button
+  factory BufferCommand.motionStandby({
+    required String greeting,
+    required String sequenceId,
+    String? buttonText,
+    String? displayUrl,
+  }) => BufferCommand(
+        type: 'motion_standby',
+        data: {
+          'greeting': greeting,
+          'sequence_id': sequenceId,
+          if (buttonText != null) 'button_text': buttonText,
+          if (displayUrl != null) 'display_url': displayUrl,
+        },
+      );
 }
 
 /// Current buffer state from relay
@@ -171,7 +188,8 @@ class CommandResult {
         timestamp: json['timestamp'] as int? ?? 0,
       );
 
-  bool get isSuccess => result == 'success';
+  bool get isSuccess => result == 'success' || result == 'skipped';
+  bool get isSkipped => result == 'skipped';
   bool get isFailure =>
       result == 'robot_failed' || result == 'error' || result == 'timeout';
 }

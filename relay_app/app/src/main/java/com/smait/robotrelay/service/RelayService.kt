@@ -99,6 +99,14 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private lateinit var fleetClient: FleetApiClient
     private var fleetSyncJob: Job? = null
 
+    // Obstacle intelligence - DISABLED by default to avoid constant LIDAR processing
+    // Only enable explicitly for motion-triggered tours (greeting visitors)
+    private var obstacleIntelligenceEnabled = false  // OFF by default
+    private var obstacleAnnouncementsEnabled = false  // TTS announcements OFF
+    private var lastObstacleAnnouncement: Long = 0
+    private var lastObstacleType: ObstacleType? = null
+    private val OBSTACLE_ANNOUNCE_COOLDOWN = 5000L  // 5 seconds between same-type announcements
+
     lateinit var robotClient: RobotWebSocketClient
         private set
     lateinit var relayServer: RelayServer
@@ -269,6 +277,13 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
         // Connect to robot
         robotClient.connect()
+
+        // Enable obstacle intelligence for smart crowd handling
+        if (obstacleIntelligenceEnabled) {
+            robotClient.enableObstacleIntelligence { classification ->
+                handleObstacleClassification(classification)
+            }
+        }
 
         // Start relay server
         relayServer.start()
@@ -578,6 +593,115 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             // This will be picked up by Flutter via buffer_heartbeat
         }
         // TODO: Send explicit event to Flutter when tour is unlocked
+    }
+
+    /**
+     * Called when "Start Tour" button is pressed on motion standby screen.
+     * Completes the motion_standby command in CommandBuffer.
+     */
+    fun notifyTourStarted(sequenceId: String) {
+        Log.i(TAG, "Tour started via button press for sequence: $sequenceId")
+        relayServer.commandBuffer.notifyTourStarted()
+    }
+
+    // === Obstacle Intelligence ===
+
+    /**
+     * Handle obstacle classification from LIDAR intelligence.
+     *
+     * KEY INSIGHT: Only announce for:
+     * - MOVING objects (person, other robot, falling item) - they might move
+     * - UNEXPECTED STATIC objects in path that SHOULD be open
+     *
+     * NEVER announce for:
+     * - Walls, corners, map obstacles (robot should just navigate around)
+     * - Reflections, self-detection
+     * - Anything the path planner should handle quietly
+     *
+     * CRITICAL: Only announce obstacles when ACTIVELY NAVIGATING (navStatus == 601)
+     * When idle, we should be looking for people to greet, not yelling at walls!
+     */
+    private fun handleObstacleClassification(classification: ObstacleClassification) {
+        if (!obstacleAnnouncementsEnabled) return
+        if (classification.type == ObstacleType.CLEAR) return
+
+        // THE SIMPLE CHECK: Only announce during ACTIVE NAVIGATION (601)
+        val navStatus = robotClient.robotStatus.value?.navStatus ?: 0
+        if (navStatus != 601) return  // Not navigating = no announcements
+
+        // Must be in the robot's path
+        if (!classification.inPath) return
+
+        // Only announce for MOVING obstacles (walls don't move)
+        if (!classification.isMoving) return
+
+        // Check cooldown to avoid spamming announcements
+        // Use TWO cooldowns:
+        // 1. Short cooldown for ANY announcement (prevents rapid fire)
+        // 2. Longer cooldown for same-type (avoids repeating the same thing)
+        val now = System.currentTimeMillis()
+        val timeSinceLastAnnouncement = now - lastObstacleAnnouncement
+
+        // Always wait at least 3 seconds between ANY announcements
+        if (timeSinceLastAnnouncement < 3000L) {
+            return
+        }
+
+        // Wait 5 seconds before repeating same type
+        if (classification.type == lastObstacleType && timeSinceLastAnnouncement < OBSTACLE_ANNOUNCE_COOLDOWN) {
+            return
+        }
+
+        // Determine announcement based on type
+        val announcement = when (classification.suggestedAction) {
+            SuggestedAction.WAIT_PATIENTLY -> {
+                // Moving person - they'll likely move on their own
+                Log.i(TAG, "Obstacle: Moving person detected, waiting patiently")
+                null  // Don't announce yet, just wait
+            }
+            SuggestedAction.WAIT_AND_OBSERVE -> {
+                // Unknown moving thing - could be another robot
+                Log.i(TAG, "Obstacle: Unknown moving object, observing")
+                null  // Don't announce, just observe
+            }
+            SuggestedAction.POLITE_REQUEST -> {
+                // Person standing still - ask nicely
+                Log.i(TAG, "Obstacle: Static person in path, polite request")
+                "Excuse me, you're in my path. Please step aside."
+            }
+            SuggestedAction.ANNOUNCE_CROWD -> {
+                // Multiple people blocking - louder announcement
+                Log.i(TAG, "Obstacle: Crowd detected, announcing")
+                "Attention please. The path is blocked. Please make way."
+            }
+            SuggestedAction.REQUEST_HELP -> {
+                // Unexpected static obstacle - need human help
+                Log.i(TAG, "Obstacle: Unexpected static obstacle, requesting help")
+                "There's an obstacle blocking my path. I need assistance."
+            }
+            SuggestedAction.ESCALATE_NORMALLY -> {
+                // Can't classify - let time-based system handle it
+                Log.i(TAG, "Obstacle: Unknown, falling back to normal escalation")
+                null
+            }
+            SuggestedAction.NONE -> null
+        }
+
+        // Make announcement if we have one
+        if (announcement != null) {
+            lastObstacleAnnouncement = now
+            lastObstacleType = classification.type
+            speak(announcement)
+        }
+    }
+
+    /**
+     * Enable/disable obstacle intelligence
+     */
+    fun setObstacleIntelligenceEnabled(enabled: Boolean) {
+        obstacleIntelligenceEnabled = enabled
+        robotClient.setObstacleIntelligenceEnabled(enabled)
+        Log.i(TAG, "Obstacle intelligence ${if (enabled) "enabled" else "disabled"}")
     }
 
     fun executeTask(task: WaypointTask, onComplete: (() -> Unit)? = null) {

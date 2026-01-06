@@ -297,7 +297,7 @@ Toggle audio in joystick widget.
 - Route planning interface
 
 ### Infrastructure
-AWS CloudFormation stack defined in `infrastructure/turboturf-stack.yaml` for:
+AWS CloudFormation stack defined in `infrastructure/frontiertower-stack.yaml` for:
 - IoT Core for robot fleet
 - Lambda for command processing
 - DynamoDB for telemetry storage
