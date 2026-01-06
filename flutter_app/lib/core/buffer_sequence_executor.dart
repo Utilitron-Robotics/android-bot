@@ -161,7 +161,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
   }
 
   void _onCommandCompleted(CommandResult result) {
-    debugPrint('BufferSequenceExecutor: Command completed: ${result.result}');
+    _completedCommandCount++;
+    debugPrint('BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
 
     // Handle navigation failures with retry logic (ALL in Flutter)
     if (result.isFailure) {
@@ -250,12 +251,15 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _currentSequence = sequence;
     _currentStopIndex = -1;
     _navRetryCount = 0;
+    _completedCommandCount = 0;
     _status = SequenceExecutorStatus.running;
 
     _callback.onSequenceStarted(sequence);
 
     // Build command list for the entire sequence
     final commands = _buildSequenceCommands(sequence);
+    _totalCommandCount = commands.length;
+    debugPrint('BufferSequenceExecutor: Loading $_totalCommandCount commands into buffer');
 
     // Load all commands into the relay buffer
     _bufferClient.loadCommands(commands, clearExisting: true);
