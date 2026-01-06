@@ -69,7 +69,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 
   void _selectSequence(Sequence seq) {
-    // Clear ALL stop controllers when switching tours to ensure fresh state
+    // Clear ALL stop controllers when switching sequences to ensure fresh state
     for (final controller in _stopControllers.values) {
       controller.dispose();
     }
@@ -90,7 +90,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Tour'),
+        title: const Text('Delete Sequence'),
         content: Text('Delete "${seq.name}"?'),
         actions: [
           TextButton(
@@ -308,7 +308,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 controller: mapIdController,
                 decoration: const InputDecoration(
                   labelText: 'Map ID (for tour filtering)',
-                  hintText: 'Leave blank for all tours',
+                  hintText: 'Leave blank for all sequences',
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.map),
                 ),
@@ -377,34 +377,34 @@ class _SequenceEditorState extends State<SequenceEditor> {
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('TourEditor: build() - isEditing=$_isEditing, selectedTour=${_selectedSequence?.name}');
+    debugPrint('SequenceEditor: build() - isEditing=$_isEditing, selectedSequence=${_selectedSequence?.name}');
 
     // When editing, DON'T use ListenableBuilder - completely isolate from rebuilds
     // This prevents the text input chaos caused by rebuilds resetting cursor position
     if (_isEditing && _selectedSequence != null) {
-      debugPrint('TourEditor: Showing edit form');
+      debugPrint('SequenceEditor: Showing edit form');
       // Return the form directly - don't wrap in Column (causes Expanded layout issues)
-      return _buildTourEditForm(_selectedSequence!);
+      return _buildSequenceEditForm(_selectedSequence!);
     }
 
     // When not editing, use ListenableBuilder for reactive updates
     return ListenableBuilder(
       listenable: SequenceManager.instance,
       builder: (context, _) {
-        final tours = SequenceManager.instance.sequences;
+        final sequences = SequenceManager.instance.sequences;
         final status = SequenceManager.instance.status;
         final runningSequence = SequenceManager.instance.currentSequence;
-        debugPrint('TourEditor: ListenableBuilder - ${tours.length} tours, status=$status, running=${runningSequence?.name}');
+        debugPrint('SequenceEditor: ListenableBuilder - ${sequences.length} sequences, status=$status, running=${runningSequence?.name}');
 
         // When a tour is running, show prominent status and collapse editor
         if (status == SequenceStatus.running && runningSequence != null) {
           return Column(
             children: [
-              // Running tour takes center stage
+              // Running sequence takes center stage
               const Expanded(
-                child: TourRunnerWidget(),
+                child: SequenceRunnerWidget(),
               ),
-              // Collapsed header - just show we have tours available
+              // Collapsed header - just show we have sequences available
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
@@ -416,12 +416,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     Icon(Icons.folder, size: 16, color: Colors.grey[500]),
                     const SizedBox(width: 8),
                     Text(
-                      '${tours.length} tour${tours.length == 1 ? '' : 's'} available',
+                      '${sequences.length} sequence${sequences.length == 1 ? '' : 's'} available',
                       style: TextStyle(color: Colors.grey[500], fontSize: 12),
                     ),
                     const Spacer(),
                     Text(
-                      'Stop tour to edit',
+                      'Stop sequence to edit',
                       style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic),
                     ),
                   ],
@@ -437,13 +437,13 @@ class _SequenceEditorState extends State<SequenceEditor> {
         return Column(
           children: [
             // Header with tour list
-            _buildHeader(tours, status),
+            _buildHeader(sequences, status),
 
-            // Tour content - show selected tour or empty state
+            // Sequence content - show selected sequence or empty state
             Expanded(
               child: displayTour == null
                   ? _buildEmptyState()
-                  : _buildTourPreview(displayTour),
+                  : _buildSequencePreview(displayTour),
             ),
           ],
         );
@@ -451,7 +451,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     );
   }
 
-  Widget _buildHeader(List<Sequence> tours, SequenceStatus status) {
+  Widget _buildHeader(List<Sequence> sequences, SequenceStatus status) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -467,10 +467,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
           // Title row
           Row(
             children: [
-              const Icon(Icons.tour, size: 18),
+              const Icon(Icons.route, size: 18),
               const SizedBox(width: 6),
               const Text(
-                'Tour',
+                'Sequence',
                 style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
@@ -539,23 +539,23 @@ class _SequenceEditorState extends State<SequenceEditor> {
             ],
           ),
           // Controls row (when not running)
-          if (status != SequenceStatus.running && tours.isNotEmpty) ...[
+          if (status != SequenceStatus.running && sequences.isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(
                   child: DropdownButton<String>(
                     value: _selectedSequence?.id,
-                    hint: const Text('Select Tour', style: TextStyle(fontSize: 13)),
+                    hint: const Text('Select Sequence', style: TextStyle(fontSize: 13)),
                     isExpanded: true,
                     isDense: true,
-                    items: tours.map((t) => DropdownMenuItem(
+                    items: sequences.map((t) => DropdownMenuItem(
                       value: t.id,
                       child: Text(t.name, overflow: TextOverflow.ellipsis),
                     )).toList(),
                     onChanged: (id) {
                       if (id != null) {
-                        _selectSequence(tours.firstWhere((t) => t.id == id));
+                        _selectSequence(sequences.firstWhere((t) => t.id == id));
                       }
                     },
                   ),
@@ -564,7 +564,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   IconButton(
                     icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
                     onPressed: () => _deleteSequence(_selectedSequence!),
-                    tooltip: 'Delete Tour',
+                    tooltip: 'Delete Sequence',
                     visualDensity: VisualDensity.compact,
                   ),
               ],
@@ -576,21 +576,21 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 
   Widget _buildEmptyState() {
-    debugPrint('TourEditor: Building empty state');
+    debugPrint('SequenceEditor: Building empty state');
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.tour_outlined, size: 64, color: Colors.white70),
+          const Icon(Icons.route_outlined, size: 64, color: Colors.white70),
           const SizedBox(height: 16),
           const Text(
-            'No tour selected',
+            'No sequence selected',
             style: TextStyle(fontSize: 18, color: Colors.white70),
           ),
           const SizedBox(height: 8),
           ElevatedButton.icon(
             icon: const Icon(Icons.add),
-            label: const Text('Create Tour'),
+            label: const Text('Create Sequence'),
             onPressed: _createNewSequence,
           ),
         ],
@@ -598,7 +598,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     );
   }
 
-  Widget _buildTourPreview(Sequence seq) {
+  Widget _buildSequencePreview(Sequence seq) {
     return Column(
       children: [
         // Tour info header
@@ -629,12 +629,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
               IconButton(
                 icon: const Icon(Icons.edit),
                 onPressed: () => setState(() => _isEditing = true),
-                tooltip: 'Edit Tour',
+                tooltip: 'Edit Sequence',
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () => _deleteSequence(seq),
-                tooltip: 'Delete Tour',
+                tooltip: 'Delete Sequence',
               ),
               const SizedBox(width: 8),
               ElevatedButton.icon(
@@ -728,7 +728,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     );
   }
 
-  Widget _buildTourEditForm(Sequence seq) {
+  Widget _buildSequenceEditForm(Sequence seq) {
     return Column(
       children: [
         // Edit header
@@ -748,7 +748,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 child: TextField(
                   controller: _tourNameController,
                   decoration: const InputDecoration(
-                    labelText: 'Tour Name',
+                    labelText: 'Sequence Name',
                     border: OutlineInputBorder(),
                     isDense: true,
                   ),
@@ -1075,9 +1075,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 }
 
-/// Tour runner widget - expands to fill space when tour is active
-class TourRunnerWidget extends StatelessWidget {
-  const TourRunnerWidget({super.key});
+/// Sequence runner widget - expands to fill space when sequence is active
+class SequenceRunnerWidget extends StatelessWidget {
+  const SequenceRunnerWidget({super.key});
 
   @override
   Widget build(BuildContext context) {

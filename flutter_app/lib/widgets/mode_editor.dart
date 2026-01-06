@@ -19,7 +19,7 @@ class ModeEditor extends StatefulWidget {
 }
 
 class _ModeEditorState extends State<ModeEditor> {
-  TaskMode? _selectedMode;
+  WaypointTask? _selectedMode;
   Sequence? _selectedSequence;
   bool _isEditing = false;
   String? _assigningToWaypoint;
@@ -53,7 +53,7 @@ class _ModeEditorState extends State<ModeEditor> {
   }
 
   void _createNewMode() {
-    final newMode = TaskMode(
+    final newMode = WaypointTask(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       name: 'New Mode',
       description: '',
@@ -68,7 +68,7 @@ class _ModeEditorState extends State<ModeEditor> {
     });
   }
 
-  void _selectMode(TaskMode mode) {
+  void _selectMode(WaypointTask mode) {
     _modeNameController.text = mode.name;
     _modeDescController.text = mode.description;
     setState(() {
@@ -77,7 +77,7 @@ class _ModeEditorState extends State<ModeEditor> {
     });
   }
 
-  void _deleteMode(TaskMode mode) {
+  void _deleteMode(WaypointTask mode) {
     if (mode.isBuiltIn) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cannot delete built-in modes')),
@@ -130,7 +130,7 @@ class _ModeEditorState extends State<ModeEditor> {
       ));
     }
 
-    final updatedMode = TaskMode(
+    final updatedMode = WaypointTask(
       id: _selectedMode!.id,
       name: _modeNameController.text,
       description: _modeDescController.text,
@@ -336,7 +336,7 @@ class _ModeEditorState extends State<ModeEditor> {
     );
   }
 
-  Widget _buildHeader(List<TaskMode> modes) {
+  Widget _buildHeader(List<WaypointTask> modes) {
     final sequences = SequenceManager.instance.sequences;
 
     return Container(
@@ -455,7 +455,7 @@ class _ModeEditorState extends State<ModeEditor> {
     );
   }
 
-  Widget _buildModePreview(TaskMode mode) {
+  Widget _buildModePreview(WaypointTask mode) {
     return Column(
       children: [
         // Mode info header
@@ -595,7 +595,7 @@ class _ModeEditorState extends State<ModeEditor> {
     );
   }
 
-  Widget _buildEditForm(TaskMode mode) {
+  Widget _buildEditForm(WaypointTask mode) {
     return Column(
       children: [
         // Edit header
@@ -725,7 +725,7 @@ class _ModeEditorState extends State<ModeEditor> {
     );
   }
 
-  Widget _buildStepEditCard(TaskMode mode, TaskStep step, int index) {
+  Widget _buildStepEditCard(WaypointTask mode, TaskStep step, int index) {
     final isLastStep = index == mode.steps.length - 1;
 
     return Card(

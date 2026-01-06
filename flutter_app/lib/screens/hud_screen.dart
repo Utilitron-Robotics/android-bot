@@ -266,6 +266,11 @@ class _HudScreenState extends State<HudScreen>
           final tourManager = context.watch<SequenceManager>();
           final tourRunning = tourManager.status == SequenceStatus.running;
 
+          // Debug: Log when sequence status changes
+          if (tourRunning || tourManager.status != SequenceStatus.idle) {
+            debugPrint('HUD: Sequence status=${tourManager.status}, tourRunning=$tourRunning, phase=${tourManager.currentPhase}, countdown=${tourManager.countdownSeconds}');
+          }
+
           if (robot.state == RobotConnectionState.disconnected ||
               robot.state == RobotConnectionState.error) {
             return _buildConnectionScreen(robot);
@@ -636,6 +641,8 @@ class _HudScreenState extends State<HudScreen>
     final stop = tourManager.currentStop;
     final status = tourManager.status;
 
+    debugPrint('HUD._buildTourOverlay: seq=${seq?.name}, phase=$phase, countdown=$countdown, stopIndex=$stopIndex, status=$status');
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -985,7 +992,7 @@ class _HudScreenState extends State<HudScreen>
                 child: _leftPanelTab == 0
                     ? _buildWaypointsContent(waypoints)
                     : _leftPanelTab == 1
-                        ? _buildTourContent(waypoints, tourManager)
+                        ? _buildSequenceContent(waypoints, tourManager)
                         : _buildCrowdContent(),
               ),
           ],
@@ -1027,8 +1034,8 @@ class _HudScreenState extends State<HudScreen>
             ),
             const SizedBox(width: 4),
             _PanelTabButton(
-              icon: Icons.tour,
-              label: 'TOUR',
+              icon: Icons.route,
+              label: 'SEQ',
               selected: _leftPanelTab == 1,
               color: _accentSecondary,
               onTap: () => setState(() => _leftPanelTab = 1),
@@ -1097,7 +1104,7 @@ class _HudScreenState extends State<HudScreen>
     );
   }
 
-  Widget _buildTourContent(List<String> waypoints, SequenceManager tourManager) {
+  Widget _buildSequenceContent(List<String> waypoints, SequenceManager tourManager) {
     return Padding(
       padding: const EdgeInsets.all(8),
       child: SequenceEditor(availableWaypoints: waypoints),
