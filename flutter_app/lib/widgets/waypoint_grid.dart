@@ -329,19 +329,7 @@ class _WaypointGridState extends State<WaypointGrid>
   }
 }
 
-/// Task types for the simple waypoint task dialog
-enum _TaskType {
-  none('None', 'Just announce arrival'),
-  deliver('Deliver', 'Wait for pickup, then return'),
-  speak('Speak', 'Text-to-speech announcement'),
-  display('Display', 'Show webpage or video');
-
-  final String label;
-  final String description;
-  const _TaskType(this.label, this.description);
-}
-
-/// Result from task config dialog
+/// Result from task config dialog - supports multiple simultaneous tasks
 class _TaskConfigResult {
   final String? modeId;
   final Map<String, String> params;
@@ -349,7 +337,8 @@ class _TaskConfigResult {
   _TaskConfigResult({this.modeId, this.params = const {}});
 }
 
-/// Dialog to configure a waypoint task (restored simpler UI with SegmentedButton)
+/// Dialog to configure waypoint tasks - allows MULTIPLE options at once
+/// (deliver mode + speak text + display URL can all be enabled simultaneously)
 class _TaskConfigDialog extends StatefulWidget {
   final String waypoint;
   final TaskEngine taskEngine;
@@ -364,112 +353,152 @@ class _TaskConfigDialog extends StatefulWidget {
 }
 
 class _TaskConfigDialogState extends State<_TaskConfigDialog> {
-  _TaskType _selectedType = _TaskType.none;
-  late TextEditingController _dataController;
+  // Individual toggles for each capability
+  bool _enableDelivery = false;  // Wait for pickup + return to origin
+  bool _enableSpeak = false;     // TTS announcement
+  bool _enableDisplay = false;   // Show website/media
+
+  // Data controllers
+  late TextEditingController _speakController;
+  late TextEditingController _displayController;
   int _waitSeconds = 30;
 
   @override
   void initState() {
     super.initState();
-    _dataController = TextEditingController();
+    _speakController = TextEditingController();
+    _displayController = TextEditingController();
 
     // Load existing assignment
     final assignment = widget.taskEngine.getAssignment(widget.waypoint);
     if (assignment != null && assignment.modeId != null) {
-      // Map modeId to TaskType
+      final params = assignment.params;
+
+      // Load speak text
+      if (params['speak_text']?.isNotEmpty == true) {
+        _enableSpeak = true;
+        _speakController.text = params['speak_text']!;
+      }
+
+      // Load display URL
+      if (params['display_url']?.isNotEmpty == true) {
+        _enableDisplay = true;
+        _displayController.text = params['display_url']!;
+      }
+
+      // Load delivery settings
       if (assignment.modeId == 'delivery') {
-        _selectedType = _TaskType.deliver;
-        _dataController.text = assignment.params['speak_text'] ?? '';
-        _waitSeconds =
-            int.tryParse(assignment.params['wait_seconds'] ?? '30') ?? 30;
-      } else if (assignment.modeId == 'announce') {
-        // Check if it's speak or display based on params
-        if (assignment.params['display_url']?.isNotEmpty == true) {
-          _selectedType = _TaskType.display;
-          _dataController.text = assignment.params['display_url'] ?? '';
-        } else {
-          _selectedType = _TaskType.speak;
-          _dataController.text = assignment.params['speak_text'] ?? '';
-        }
+        _enableDelivery = true;
+        _waitSeconds = int.tryParse(params['wait_seconds'] ?? '30') ?? 30;
       }
     }
   }
 
   @override
   void dispose() {
-    _dataController.dispose();
+    _speakController.dispose();
+    _displayController.dispose();
     super.dispose();
   }
+
+  bool get _hasAnyTask => _enableDelivery || _enableSpeak || _enableDisplay;
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Task: ${widget.waypoint}'),
+      title: Row(
+        children: [
+          const Icon(Icons.auto_awesome, size: 24),
+          const SizedBox(width: 8),
+          Expanded(child: Text('Task: ${widget.waypoint}')),
+        ],
+      ),
       content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Task type selector with SegmentedButton
-            const Text('Task Type:',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            SegmentedButton<_TaskType>(
-              segments: _TaskType.values
-                  .map((t) => ButtonSegment(
-                        value: t,
-                        label: Text(t.label, style: const TextStyle(fontSize: 11)),
-                        icon: Icon(_getTaskIcon(t), size: 16),
-                      ))
-                  .toList(),
-              selected: {_selectedType},
-              onSelectionChanged: (selected) {
-                setState(() => _selectedType = selected.first);
-              },
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _selectedType.description,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 16),
-
-            // Data input (only for non-none types)
-            if (_selectedType != _TaskType.none) ...[
-              TextField(
-                controller: _dataController,
-                decoration: InputDecoration(
-                  labelText: _getDataLabel(),
-                  hintText: _getDataHint(),
-                  border: const OutlineInputBorder(),
-                ),
-                maxLines: _selectedType == _TaskType.speak ? 3 : 1,
+        child: SizedBox(
+          width: 350,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Configure actions to perform when arriving at this waypoint. '
+                'Multiple options can be enabled together.',
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 16),
-            ],
 
-            // Wait seconds (for deliver)
-            if (_selectedType == _TaskType.deliver) ...[
-              Row(
-                children: [
-                  const Text('Wait time: '),
-                  Expanded(
-                    child: Slider(
-                      value: _waitSeconds.toDouble(),
-                      min: 10,
-                      max: 120,
-                      divisions: 11,
-                      label: '$_waitSeconds sec',
-                      onChanged: (value) {
-                        setState(() => _waitSeconds = value.round());
-                      },
-                    ),
+              // === SPEAK SECTION ===
+              _buildTaskSection(
+                icon: Icons.volume_up,
+                iconColor: Colors.orange,
+                title: 'Speak',
+                subtitle: 'Text-to-speech announcement',
+                enabled: _enableSpeak,
+                onToggle: (v) => setState(() => _enableSpeak = v),
+                child: TextField(
+                  controller: _speakController,
+                  decoration: const InputDecoration(
+                    hintText: 'What to say at this stop...',
+                    border: OutlineInputBorder(),
+                    isDense: true,
                   ),
-                  Text('$_waitSeconds sec'),
-                ],
+                  maxLines: 3,
+                  enabled: _enableSpeak,
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // === DISPLAY SECTION ===
+              _buildTaskSection(
+                icon: Icons.tv,
+                iconColor: Colors.purple,
+                title: 'Display',
+                subtitle: 'Show website, image, or video on tablet',
+                enabled: _enableDisplay,
+                onToggle: (v) => setState(() => _enableDisplay = v),
+                child: TextField(
+                  controller: _displayController,
+                  decoration: const InputDecoration(
+                    hintText: 'https://example.com/media.mp4',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  enabled: _enableDisplay,
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // === DELIVERY SECTION ===
+              _buildTaskSection(
+                icon: Icons.delivery_dining,
+                iconColor: Colors.green,
+                title: 'Delivery Mode',
+                subtitle: 'Wait for pickup, then return to origin',
+                enabled: _enableDelivery,
+                onToggle: (v) => setState(() => _enableDelivery = v),
+                child: Row(
+                  children: [
+                    const Text('Wait time: '),
+                    Expanded(
+                      child: Slider(
+                        value: _waitSeconds.toDouble(),
+                        min: 10,
+                        max: 120,
+                        divisions: 11,
+                        label: '$_waitSeconds sec',
+                        onChanged: _enableDelivery
+                            ? (v) => setState(() => _waitSeconds = v.round())
+                            : null,
+                      ),
+                    ),
+                    Text('$_waitSeconds sec'),
+                  ],
+                ),
               ),
             ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -477,46 +506,38 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        if (_selectedType != _TaskType.none)
+        if (_hasAnyTask)
           TextButton(
             onPressed: () => Navigator.pop(context, _TaskConfigResult()),
-            child: const Text('Clear Task'),
+            child: const Text('Clear All'),
           ),
         FilledButton(
           onPressed: () {
-            // Convert TaskType to TaskEngine mode and params
+            // Build mode and params from enabled options
             String? modeId;
             Map<String, String> params = {};
 
-            switch (_selectedType) {
-              case _TaskType.none:
-                modeId = null;
-                break;
-              case _TaskType.deliver:
-                modeId = 'delivery';
-                params = {
-                  if (_dataController.text.isNotEmpty)
-                    'speak_text': _dataController.text,
-                  'wait_seconds': _waitSeconds.toString(),
-                };
-                break;
-              case _TaskType.speak:
-                modeId = 'announce';
-                params = {
-                  'speak_text': _dataController.text,
-                };
-                break;
-              case _TaskType.display:
-                modeId = 'announce';
-                params = {
-                  'display_url': _dataController.text,
-                  'display_duration': '0', // Until leave
-                };
-                break;
+            // Collect all enabled params
+            if (_enableSpeak && _speakController.text.isNotEmpty) {
+              params['speak_text'] = _speakController.text;
+            }
+            if (_enableDisplay && _displayController.text.isNotEmpty) {
+              params['display_url'] = _displayController.text;
+              params['display_duration'] = '0'; // Until robot leaves
+            }
+
+            // Determine mode based on delivery toggle
+            if (_enableDelivery) {
+              modeId = 'delivery';
+              params['wait_seconds'] = _waitSeconds.toString();
+            } else if (params.isNotEmpty) {
+              modeId = 'announce';
             }
 
             Navigator.pop(
-                context, _TaskConfigResult(modeId: modeId, params: params));
+              context,
+              _TaskConfigResult(modeId: modeId, params: params),
+            );
           },
           child: const Text('Save'),
         ),
@@ -524,42 +545,77 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
     );
   }
 
-  String _getDataLabel() {
-    switch (_selectedType) {
-      case _TaskType.speak:
-        return 'Speech Text';
-      case _TaskType.display:
-        return 'URL';
-      case _TaskType.deliver:
-        return 'Arrival Message';
-      case _TaskType.none:
-        return '';
-    }
-  }
-
-  String _getDataHint() {
-    switch (_selectedType) {
-      case _TaskType.speak:
-        return 'Your order is ready!';
-      case _TaskType.display:
-        return 'https://example.com/video.mp4';
-      case _TaskType.deliver:
-        return 'Please collect your items';
-      case _TaskType.none:
-        return '';
-    }
-  }
-
-  IconData _getTaskIcon(_TaskType type) {
-    switch (type) {
-      case _TaskType.deliver:
-        return Icons.delivery_dining;
-      case _TaskType.speak:
-        return Icons.volume_up;
-      case _TaskType.display:
-        return Icons.tv;
-      case _TaskType.none:
-        return Icons.block;
-    }
+  /// Build a collapsible task section with toggle
+  Widget _buildTaskSection({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required bool enabled,
+    required ValueChanged<bool> onToggle,
+    required Widget child,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(
+          color: enabled ? iconColor.withValues(alpha: 0.5) : Colors.grey.shade700,
+          width: enabled ? 2 : 1,
+        ),
+        borderRadius: BorderRadius.circular(8),
+        color: enabled ? iconColor.withValues(alpha: 0.1) : null,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header row with toggle
+          InkWell(
+            onTap: () => onToggle(!enabled),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Icon(icon, color: enabled ? iconColor : Colors.grey, size: 24),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: enabled ? iconColor : Colors.grey,
+                          ),
+                        ),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: enabled,
+                    onChanged: onToggle,
+                    activeTrackColor: iconColor.withValues(alpha: 0.5),
+                    activeThumbColor: iconColor,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Content (shown when enabled)
+          if (enabled)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: child,
+            ),
+        ],
+      ),
+    );
   }
 }

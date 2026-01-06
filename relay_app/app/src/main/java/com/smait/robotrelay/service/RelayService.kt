@@ -62,8 +62,14 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         // Broadcast actions for UI updates
         const val ACTION_DISPLAY = "com.smait.robotrelay.DISPLAY"
         const val ACTION_TASK_STATUS = "com.smait.robotrelay.TASK_STATUS"
+        const val ACTION_COUNTDOWN = "com.smait.robotrelay.COUNTDOWN"
+        const val ACTION_TOUR_MODE = "com.smait.robotrelay.TOUR_MODE"
         const val EXTRA_URL = "url"
         const val EXTRA_STATUS = "status"
+        const val EXTRA_COUNTDOWN_SECONDS = "countdown_seconds"
+        const val EXTRA_COUNTDOWN_LABEL = "countdown_label"
+        const val EXTRA_TOUR_ACTION = "tour_action"
+        const val EXTRA_TOUR_PIN = "tour_pin"
 
         // Common phrases to precache for instant playback
         private val PRECACHE_PHRASES = listOf(
@@ -509,6 +515,69 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
             Log.i(TAG, "Close display broadcast sent")
         }
+    }
+
+    /**
+     * Update countdown timer overlay on tablet screen
+     * @param seconds Countdown seconds (0 = hide countdown)
+     * @param label Label text (e.g., "Next stop in", "Waiting...")
+     */
+    override fun updateCountdown(seconds: Int, label: String) {
+        mainHandler.post {
+            val intent = Intent(ACTION_COUNTDOWN).apply {
+                putExtra(EXTRA_COUNTDOWN_SECONDS, seconds)
+                putExtra(EXTRA_COUNTDOWN_LABEL, label)
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+            if (seconds > 0) {
+                Log.d(TAG, "Countdown update: $seconds sec - $label")
+            }
+        }
+    }
+
+    /**
+     * Start tour mode - locks tablet screen to prevent access to controls
+     * @param pin Optional PIN code to unlock (default is 1234)
+     */
+    override fun startTourMode(pin: String?) {
+        Log.i(TAG, "Starting tour mode (pin=${if (pin.isNullOrEmpty()) "default" else "custom"})")
+        mainHandler.post {
+            val intent = Intent(ACTION_TOUR_MODE).apply {
+                putExtra(EXTRA_TOUR_ACTION, "start")
+                if (!pin.isNullOrEmpty()) {
+                    putExtra(EXTRA_TOUR_PIN, pin)
+                }
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        }
+    }
+
+    /**
+     * Stop tour mode - unlocks tablet screen
+     */
+    override fun stopTourMode() {
+        Log.i(TAG, "Stopping tour mode")
+        mainHandler.post {
+            val intent = Intent(ACTION_TOUR_MODE).apply {
+                putExtra(EXTRA_TOUR_ACTION, "stop")
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        }
+        // Also hide countdown
+        updateCountdown(0, "")
+    }
+
+    /**
+     * Called when tour mode is unlocked via PIN entry on tablet
+     * Notifies Flutter that user manually exited tour mode
+     */
+    fun notifyTourUnlocked() {
+        Log.i(TAG, "Tour mode unlocked by user")
+        // Send event to Flutter via WebSocket
+        relayServer.commandBuffer.let { buffer ->
+            // This will be picked up by Flutter via buffer_heartbeat
+        }
+        // TODO: Send explicit event to Flutter when tour is unlocked
     }
 
     fun executeTask(task: WaypointTask, onComplete: (() -> Unit)? = null) {

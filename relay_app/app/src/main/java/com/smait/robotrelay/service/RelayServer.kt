@@ -40,6 +40,11 @@ class RelayServer(
         fun playAlertSound(soundType: String)
         fun setTtsApiKey(apiKey: String?)
         fun hasTtsApiKey(): Boolean
+        // Countdown timer overlay
+        fun updateCountdown(seconds: Int, label: String)
+        // Tour mode lock screen
+        fun startTourMode(pin: String?)
+        fun stopTourMode()
     }
     companion object {
         private const val TAG = "RelayServer"
@@ -799,6 +804,26 @@ class RelayWebSocketServer(
                     "tablet_refresh_map" -> {
                         Log.i(TAG, ">>> Manual map refresh requested by Flutter")
                         robotClient.refreshMap()
+                        return
+                    }
+                    // Countdown timer overlay
+                    "tablet_countdown" -> {
+                        val seconds = json.get("seconds")?.asInt ?: 0
+                        val label = json.get("label")?.asString ?: "Next stop in"
+                        Log.i(TAG, "Tablet countdown: ${seconds}s - $label")
+                        taskExecutor?.updateCountdown(seconds, label)
+                        return
+                    }
+                    // Tour mode lock screen
+                    "tablet_tour_start" -> {
+                        val pin = json.get("pin")?.asString
+                        Log.i(TAG, "Tablet tour start (pin=${if (pin.isNullOrEmpty()) "default" else "custom"})")
+                        taskExecutor?.startTourMode(pin)
+                        return
+                    }
+                    "tablet_tour_stop" -> {
+                        Log.i(TAG, "Tablet tour stop")
+                        taskExecutor?.stopTourMode()
                         return
                     }
                     // Handle rosbridge ping - respond with pong to keep connection alive

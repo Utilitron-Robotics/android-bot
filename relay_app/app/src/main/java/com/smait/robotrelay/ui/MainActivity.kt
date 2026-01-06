@@ -12,6 +12,7 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -60,6 +61,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Tour mode state
+    private var isTourModeActive = false
+    private var tourUnlockPin = "1234"  // Default PIN, can be configured
+
+    // Multi-tap unlock sequence
+    private val requiredTaps = 6
+    private var tapCount = 0
+    private var lastTapTime = 0L
+    private val tapResetTimeMs = 2000L  // Reset tap count if no tap within 2 seconds
+    private var warningSaid = false  // Prevent repeated warnings
+
     private val displayReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val url = intent?.getStringExtra(RelayService.EXTRA_URL)
@@ -77,6 +89,131 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val countdownReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val seconds = intent?.getIntExtra(RelayService.EXTRA_COUNTDOWN_SECONDS, 0) ?: 0
+            val label = intent?.getStringExtra(RelayService.EXTRA_COUNTDOWN_LABEL) ?: "Next stop in"
+
+            Log.i(TAG, ">>> countdownReceiver: seconds=$seconds, label=$label")
+
+            if (seconds > 0) {
+                binding.countdownOverlay.visibility = View.VISIBLE
+                binding.tvCountdownLabel.text = label
+                binding.tvCountdownTimer.text = formatTime(seconds)
+            } else {
+                binding.countdownOverlay.visibility = View.GONE
+            }
+        }
+    }
+
+    private val tourModeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.getStringExtra(RelayService.EXTRA_TOUR_ACTION)
+            val pin = intent?.getStringExtra(RelayService.EXTRA_TOUR_PIN)
+
+            Log.i(TAG, ">>> tourModeReceiver: action=$action")
+
+            when (action) {
+                "start" -> {
+                    isTourModeActive = true
+                    if (!pin.isNullOrEmpty()) {
+                        tourUnlockPin = pin
+                    }
+                    showLockScreen()
+                }
+                "stop" -> {
+                    isTourModeActive = false
+                    hideLockScreen()
+                }
+            }
+        }
+    }
+
+    private fun formatTime(seconds: Int): String {
+        val mins = seconds / 60
+        val secs = seconds % 60
+        return if (mins > 0) {
+            String.format("%d:%02d", mins, secs)
+        } else {
+            String.format("0:%02d", secs)
+        }
+    }
+
+    private fun handleLockScreenTap() {
+        val now = System.currentTimeMillis()
+
+        // Reset tap count if too much time passed
+        if (now - lastTapTime > tapResetTimeMs) {
+            tapCount = 0
+            warningSaid = false
+            // Hide lock content if it was showing progress
+            binding.lockContentLayout.visibility = View.GONE
+        }
+
+        lastTapTime = now
+        tapCount++
+
+        Log.d(TAG, "Lock screen tap: $tapCount / $requiredTaps")
+
+        when {
+            tapCount >= requiredTaps -> {
+                // Enough taps - show PIN entry
+                Log.i(TAG, "Multi-tap sequence complete, showing PIN entry")
+                tapCount = 0
+                warningSaid = false
+                showPinEntry()
+            }
+            tapCount == 1 && !warningSaid -> {
+                // First tap - speak warning
+                warningSaid = true
+                service?.speak("Please do not touch the screen until asked to do so. Thank you!")
+            }
+            tapCount >= 3 -> {
+                // Show lock content and give feedback they're getting close
+                binding.lockContentLayout.visibility = View.VISIBLE
+                binding.tvLockMessage.text = "Tap ${requiredTaps - tapCount} more times..."
+            }
+        }
+    }
+
+    private fun showLockScreen() {
+        binding.lockOverlay.visibility = View.VISIBLE
+        binding.lockContentLayout.visibility = View.GONE  // Start invisible - only show after 3+ taps
+        binding.pinEntryLayout.visibility = View.GONE
+        binding.etPinCode.text?.clear()
+        binding.tvLockMessage.text = "Tour Mode Active"
+        tapCount = 0
+        warningSaid = false
+    }
+
+    private fun hideLockScreen() {
+        binding.lockOverlay.visibility = View.GONE
+        binding.lockContentLayout.visibility = View.GONE
+        binding.pinEntryLayout.visibility = View.GONE
+    }
+
+    private fun showPinEntry() {
+        binding.lockContentLayout.visibility = View.VISIBLE
+        binding.pinEntryLayout.visibility = View.VISIBLE
+        binding.tvLockMessage.text = "Enter Unlock PIN"
+        binding.etPinCode.requestFocus()
+    }
+
+    private fun attemptUnlock() {
+        val enteredPin = binding.etPinCode.text?.toString() ?: ""
+        if (enteredPin == tourUnlockPin) {
+            Log.i(TAG, "Tour mode unlocked with correct PIN")
+            hideLockScreen()
+            isTourModeActive = false
+            // Notify Flutter that tour mode was unlocked
+            service?.notifyTourUnlocked()
+        } else {
+            Log.w(TAG, "Incorrect PIN entered")
+            Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+            binding.etPinCode.text?.clear()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -91,8 +228,10 @@ class MainActivity : AppCompatActivity() {
         Intent(this, RelayService::class.java).also { intent ->
             bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
-        LocalBroadcastManager.getInstance(this)
-            .registerReceiver(displayReceiver, IntentFilter(RelayService.ACTION_DISPLAY))
+        val localBroadcastManager = LocalBroadcastManager.getInstance(this)
+        localBroadcastManager.registerReceiver(displayReceiver, IntentFilter(RelayService.ACTION_DISPLAY))
+        localBroadcastManager.registerReceiver(countdownReceiver, IntentFilter(RelayService.ACTION_COUNTDOWN))
+        localBroadcastManager.registerReceiver(tourModeReceiver, IntentFilter(RelayService.ACTION_TOUR_MODE))
     }
 
     override fun onStop() {
@@ -101,7 +240,10 @@ class MainActivity : AppCompatActivity() {
             unbindService(connection)
             bound = false
         }
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(displayReceiver)
+        val localBroadcastManager = LocalBroadcastManager.getInstance(this)
+        localBroadcastManager.unregisterReceiver(displayReceiver)
+        localBroadcastManager.unregisterReceiver(countdownReceiver)
+        localBroadcastManager.unregisterReceiver(tourModeReceiver)
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
@@ -194,6 +336,22 @@ class MainActivity : AppCompatActivity() {
             if (poi.isNotBlank()) {
                 service?.navigateTo(poi)
             }
+        }
+
+        // Lock screen handlers - multi-tap sequence to unlock
+        binding.lockOverlay.setOnClickListener {
+            handleLockScreenTap()
+        }
+
+        binding.btnPinCancel.setOnClickListener {
+            binding.pinEntryLayout.visibility = View.GONE
+            binding.lockContentLayout.visibility = View.GONE
+            tapCount = 0
+            warningSaid = false
+        }
+
+        binding.btnPinSubmit.setOnClickListener {
+            attemptUnlock()
         }
     }
 
