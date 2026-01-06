@@ -99,19 +99,29 @@ class BufferSequenceExecutor extends ChangeNotifier {
       switch (state.current!.type) {
         case 'navigate':
           _currentPhase = SequencePhase.navigating;
+          _countdownSeconds = 0;
           break;
         case 'speak':
           _currentPhase = SequencePhase.speaking;
+          _countdownSeconds = 0;
           break;
         case 'display':
           _currentPhase = SequencePhase.displaying;
+          _countdownSeconds = 0;
           break;
         case 'wait':
           _currentPhase = SequencePhase.waiting;
+          // Calculate countdown from elapsed time
+          if (_currentWaitDurationMs > 0) {
+            final remainingMs = _currentWaitDurationMs - state.current!.elapsedMs;
+            _countdownSeconds = (remainingMs / 1000).ceil().clamp(0, 9999);
+          }
           break;
         default:
           break;
       }
+    } else {
+      _countdownSeconds = 0;
     }
 
     // Check for paused state
@@ -152,10 +162,23 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
     } else if (type == 'display') {
       _currentPhase = SequencePhase.displaying;
+      _currentWaitDurationMs = 0;
     } else if (type == 'speak') {
       _currentPhase = SequencePhase.speaking;
+      _currentWaitDurationMs = 0;
     } else if (type == 'wait') {
       _currentPhase = SequencePhase.waiting;
+      // Capture wait duration for countdown display
+      int? durationMs = cmd['duration_ms'] as int?;
+      if (durationMs == null) {
+        final data = cmd['data'] as Map<String, dynamic>?;
+        durationMs = data?['duration_ms'] as int?;
+      }
+      _currentWaitDurationMs = durationMs ?? 0;
+      _countdownSeconds = (_currentWaitDurationMs / 1000).ceil();
+      debugPrint('BufferSequenceExecutor: Wait started, duration=${_currentWaitDurationMs}ms, countdown=$_countdownSeconds');
+    } else {
+      _currentWaitDurationMs = 0;
     }
     notifyListeners();
   }
@@ -213,6 +236,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
   // Track completed commands to detect sequence end without relying on stale heartbeat
   int _completedCommandCount = 0;
   int _totalCommandCount = 0;
+
+  // Track current wait duration for countdown display
+  int _currentWaitDurationMs = 0;
 
   /// Check if sequence is complete
   void _checkSequenceCompletion() {
@@ -287,26 +313,27 @@ class BufferSequenceExecutor extends ChangeNotifier {
       // Navigate to waypoint
       commands.add(BufferCommand.navigate(stop.waypoint));
 
-      // Arrival sound + announcement
+      // PARALLEL TASKS: Display first (instant, stays up), then audio plays over it
+      // Display content FIRST with durationMs=0 (instant completion, display stays up)
+      if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
+        commands.add(BufferCommand.display(
+          stop.displayUrl!,
+          durationMs: 0,  // Instant completion - display stays up until next stop
+        ));
+      }
+
+      // Arrival sound + announcement (plays while display is showing)
       if (sequence.announceArrival) {
         commands.add(BufferCommand.sound('arrival'));
         commands.add(BufferCommand.speak('Arrived at ${stop.waypoint}'));
       }
 
-      // Custom speak text
+      // Custom speak text (plays while display is showing)
       if (stop.speakText != null && stop.speakText!.isNotEmpty) {
         commands.add(BufferCommand.speak(stop.speakText!));
       }
 
-      // Display content
-      if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
-        commands.add(BufferCommand.display(
-          stop.displayUrl!,
-          durationMs: stop.displayDuration > 0 ? stop.displayDuration * 1000 : 0,
-        ));
-      }
-
-      // Wait time
+      // Wait time AFTER all audio completes (display still showing)
       if (stop.waitSeconds > 0) {
         commands.add(BufferCommand.wait(stop.waitSeconds * 1000));
       } else if (stop.displayDuration > 0) {
