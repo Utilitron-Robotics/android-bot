@@ -67,6 +67,10 @@ class RobotWebSocketClient(
 
     private val safetyZone = AtomicReference(SafetyZone.CLEAR)
 
+    // Obstacle classifier for intelligent crowd handling
+    private var obstacleClassifier: ObstacleClassifier? = null
+    private var onObstacleClassification: ((ObstacleClassification) -> Unit)? = null
+
     // Build OkHttpClient with optional SocketFactory for network binding
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -171,12 +175,45 @@ class RobotWebSocketClient(
         send(SmaitProtocol.subscribeNaviStatus())
         send(SmaitProtocol.subscribeSensorsCore())
         send(SmaitProtocol.subscribeLaserData())
+        send(SmaitProtocol.subscribeGlobalPath())  // For obstacle path intersection
         // Subscribe to /map so it's always flowing to Flutter clients
         // This ensures map works after Flutter hot restart
         val mapSubMsg = SmaitProtocol.subscribeMapSimple()
         val mapSent = send(mapSubMsg)
         Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
         Log.i(TAG, ">>> /map subscription sent: $mapSent")
+    }
+
+    /**
+     * Enable obstacle intelligence for smart crowd announcements.
+     * Only announces for moving obstacles or unexpected static obstacles.
+     * Never yells at walls, corners, or reflections.
+     */
+    fun enableObstacleIntelligence(callback: (ObstacleClassification) -> Unit) {
+        onObstacleClassification = callback
+        obstacleClassifier = ObstacleClassifier { classification ->
+            // Update robot status with obstacle info for CommandBuffer motion detection
+            _robotStatus.value?.let { current ->
+                _robotStatus.value = current.copy(
+                    obstacleInPath = classification.inPath && classification.type != ObstacleType.CLEAR,
+                    obstacleMoving = classification.isMoving,
+                    obstacleType = classification.type.name
+                )
+            }
+            callback(classification)
+        }
+        Log.i(TAG, "Obstacle intelligence enabled")
+    }
+
+    fun disableObstacleIntelligence() {
+        obstacleClassifier?.destroy()
+        obstacleClassifier = null
+        onObstacleClassification = null
+        Log.i(TAG, "Obstacle intelligence disabled")
+    }
+
+    fun setObstacleIntelligenceEnabled(enabled: Boolean) {
+        obstacleClassifier?.enabled = enabled
     }
 
     /**
@@ -226,6 +263,7 @@ class RobotWebSocketClient(
 
             when (topic) {
                 SmaitProtocol.TOPIC_ROBOT_STATUS -> {
+                    val velocity = msg.get("velocity")?.asJsonArray?.map { it.asDouble } ?: current.velocity
                     _robotStatus.value = current.copy(
                         battery = msg.get("battery")?.asInt ?: current.battery,
                         charger = msg.get("charger")?.asInt ?: current.charger,
@@ -233,18 +271,23 @@ class RobotWebSocketClient(
                         controlState = msg.get("control_state")?.asInt ?: current.controlState,
                         softEstop = msg.get("soft_estop")?.asBoolean ?: current.softEstop,
                         hardEstop = msg.get("hard_estop")?.asBoolean ?: current.hardEstop,
-                        velocity = msg.get("velocity")?.asJsonArray?.map { it.asDouble } ?: current.velocity,
+                        velocity = velocity,
                         buildingName = msg.get("current_building_name")?.asString,
                         floorName = msg.get("current_floor_name")?.asString,
                         currentGoalName = msg.get("current_goal_name")?.asString
                     )
+                    // Feed velocity to obstacle classifier
+                    if (velocity.size >= 2) {
+                        obstacleClassifier?.updateRobotVelocity(velocity[0], velocity[1])
+                    }
                 }
                 SmaitProtocol.TOPIC_ROBOT_POSE -> {
-                    _robotStatus.value = current.copy(
-                        x = msg.get("x")?.asDouble ?: current.x,
-                        y = msg.get("y")?.asDouble ?: current.y,
-                        theta = msg.get("theta")?.asDouble ?: current.theta
-                    )
+                    val x = msg.get("x")?.asDouble ?: current.x
+                    val y = msg.get("y")?.asDouble ?: current.y
+                    val theta = msg.get("theta")?.asDouble ?: current.theta
+                    _robotStatus.value = current.copy(x = x, y = y, theta = theta)
+                    // Feed to obstacle classifier
+                    obstacleClassifier?.updateRobotPose(x, y, theta)
                 }
                 SmaitProtocol.TOPIC_SENSORS_CORE -> {
                     val bumper = msg.get("bumper")?.asInt ?: 0
@@ -266,8 +309,35 @@ class RobotWebSocketClient(
                     )
                 }
                 SmaitProtocol.TOPIC_LASER_DATA -> {
-                    val points = msg.get("points")?.asJsonArray?.mapNotNull { it.asFloat.takeIf { f -> f > 0.01 } } ?: emptyList()
-                    checkLaserData(points)
+                    // Try px/py format first (coordinate arrays)
+                    val px = msg.get("px")?.asJsonArray?.map { it.asDouble }
+                    val py = msg.get("py")?.asJsonArray?.map { it.asDouble }
+
+                    if (px != null && py != null && px.size == py.size) {
+                        // Feed coordinate data to obstacle classifier
+                        obstacleClassifier?.processLidarScan(px, py)
+
+                        // Convert to distances for safety zone check
+                        val distances = px.zip(py).map { (x, y) ->
+                            kotlin.math.sqrt(x * x + y * y).toFloat()
+                        }.filter { it > 0.01f }
+                        checkLaserData(distances)
+                    } else {
+                        // Fallback to points array (distance format)
+                        val points = msg.get("points")?.asJsonArray?.mapNotNull {
+                            it.asFloat.takeIf { f -> f > 0.01 }
+                        } ?: emptyList()
+                        checkLaserData(points)
+                    }
+                }
+                SmaitProtocol.TOPIC_GLOBAL_PATH -> {
+                    // Navigation path for obstacle-in-path detection
+                    val px = msg.get("px")?.asJsonArray?.map { it.asDouble }
+                    val py = msg.get("py")?.asJsonArray?.map { it.asDouble }
+                    if (px != null && py != null && px.size == py.size) {
+                        val pathPoints = px.zip(py).map { (x, y) -> Point2D(x, y) }
+                        obstacleClassifier?.updateGlobalPath(pathPoints)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -312,6 +382,7 @@ class RobotWebSocketClient(
     }
 
     fun destroy() {
+        obstacleClassifier?.destroy()
         disconnect()
         scope.cancel()
     }
@@ -401,5 +472,9 @@ data class RobotStatusData(
     val floorName: String? = null,
     val currentGoalName: String? = null,
     val sensors: SensorStatus = SensorStatus(),
-    val safetyZone: SafetyZone = SafetyZone.CLEAR
+    val safetyZone: SafetyZone = SafetyZone.CLEAR,
+    // Obstacle intelligence fields (from ObstacleClassifier)
+    val obstacleInPath: Boolean = false,
+    val obstacleMoving: Boolean = false,
+    val obstacleType: String = "CLEAR"
 )

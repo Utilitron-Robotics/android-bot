@@ -79,6 +79,13 @@ object SmaitProtocol {
         type = "yutong_assistance/point_array"
     ))
 
+    fun subscribeGlobalPath(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_global_path",
+        topic = TOPIC_GLOBAL_PATH,
+        type = "yutong_assistance/point_array"
+    ))
+
     fun subscribeNaviStatus(): String = toJson(SubscribeMsg(
         op = OP_SUBSCRIBE,
         id = "get_navi_status",

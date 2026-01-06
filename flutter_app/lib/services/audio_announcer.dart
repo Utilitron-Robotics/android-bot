@@ -17,6 +17,7 @@ enum AnnouncementCategory {
 
 /// Crowd Logic venue presets
 enum CrowdLogicVenue {
+  spaceship('Spaceship', 'Open event floor - friendly but audible over crowds'),
   adultParty('Adult Party', 'Aggressive - robot pushes through quickly'),
   restaurant('Restaurant', 'Balanced - polite but persistent'),
   kidsEvent('Kids Event', 'Gentle - patient and friendly'),
@@ -40,45 +41,69 @@ class CrowdLogicConfig {
   final int warning6;          // Seconds until level 6 (emergency - repeats)
   final int repeatInterval;    // Seconds between level 6 repeats
   final bool enableSounds;     // Play beep/horn sounds
+  final bool enableIntelligence; // LIDAR-based smart obstacle detection
+  final bool announceMoving;     // Announce for moving obstacles
+  final bool announceStatic;     // Announce for unexpected static obstacles
 
   const CrowdLogicConfig({
     this.venue = CrowdLogicVenue.restaurant,
     this.checkInterval = 3,
-    this.warning1 = 8,
-    this.warning2 = 15,
-    this.warning3 = 22,
-    this.warning4 = 30,
-    this.warning5 = 40,
-    this.warning6 = 50,
-    this.repeatInterval = 8,
+    this.warning1 = 30,   // Patient first warning
+    this.warning2 = 45,
+    this.warning3 = 60,
+    this.warning4 = 90,
+    this.warning5 = 120,
+    this.warning6 = 180,
+    this.repeatInterval = 15,
     this.enableSounds = true,
+    this.enableIntelligence = true,  // Smart LIDAR detection ON by default
+    this.announceMoving = true,       // Announce for moving obstacles
+    this.announceStatic = true,       // Announce for static obstacles in path
   });
 
-  /// Preset for adult parties - aggressive, quick escalation
+  /// Preset for Spaceship (Frontier Tower event floor) - open venue, crowds moving
+  /// Needs to be heard over ambient noise but stay friendly and engaging
+  static const spaceship = CrowdLogicConfig(
+    venue: CrowdLogicVenue.spaceship,
+    checkInterval: 3,
+    warning1: 20,   // Friendly first ask - people are exploring
+    warning2: 35,   // Polite reminder
+    warning3: 50,   // Getting urgent
+    warning4: 70,   // Beep to cut through crowd noise
+    warning5: 90,   // Horn for stubborn blockers
+    warning6: 120,  // Emergency - repeat with sounds
+    repeatInterval: 12,
+    enableSounds: true,  // Need sounds to cut through event noise
+    enableIntelligence: true,  // Smart detection for moving crowds
+    announceMoving: true,
+    announceStatic: true,
+  );
+
+  /// Preset for adult parties - faster escalation, but still reasonable
   static const adultParty = CrowdLogicConfig(
     venue: CrowdLogicVenue.adultParty,
     checkInterval: 2,
-    warning1: 5,
-    warning2: 10,
-    warning3: 15,
-    warning4: 20,
-    warning5: 25,
-    warning6: 30,
-    repeatInterval: 5,
+    warning1: 15,   // Was 5 - too aggressive
+    warning2: 25,   // Was 10
+    warning3: 35,   // Was 15
+    warning4: 50,   // Was 20
+    warning5: 70,   // Was 25
+    warning6: 90,   // Was 30
+    repeatInterval: 10,
     enableSounds: true,
   );
 
-  /// Preset for restaurants - balanced
+  /// Preset for restaurants - balanced (patient first warning, then escalates)
   static const restaurant = CrowdLogicConfig(
     venue: CrowdLogicVenue.restaurant,
     checkInterval: 3,
-    warning1: 8,
-    warning2: 15,
-    warning3: 22,
-    warning4: 30,
-    warning5: 40,
-    warning6: 50,
-    repeatInterval: 8,
+    warning1: 30,   // Was 8 - give robot time to navigate normally
+    warning2: 45,   // Was 15
+    warning3: 60,   // Was 22
+    warning4: 90,   // Was 30
+    warning5: 120,  // Was 40
+    warning6: 180,  // Was 50
+    repeatInterval: 15,
     enableSounds: true,
   );
 
@@ -113,6 +138,8 @@ class CrowdLogicConfig {
   /// Get preset by venue type
   static CrowdLogicConfig forVenue(CrowdLogicVenue venue) {
     switch (venue) {
+      case CrowdLogicVenue.spaceship:
+        return spaceship;
       case CrowdLogicVenue.adultParty:
         return adultParty;
       case CrowdLogicVenue.restaurant:
@@ -137,6 +164,9 @@ class CrowdLogicConfig {
     'warning6': warning6,
     'repeat_interval': repeatInterval,
     'enable_sounds': enableSounds,
+    'enable_intelligence': enableIntelligence,
+    'announce_moving': announceMoving,
+    'announce_static': announceStatic,
   };
 
   factory CrowdLogicConfig.fromJson(Map<String, dynamic> json) => CrowdLogicConfig(
@@ -153,6 +183,9 @@ class CrowdLogicConfig {
     warning6: json['warning6'] as int? ?? 50,
     repeatInterval: json['repeat_interval'] as int? ?? 8,
     enableSounds: json['enable_sounds'] as bool? ?? true,
+    enableIntelligence: json['enable_intelligence'] as bool? ?? true,
+    announceMoving: json['announce_moving'] as bool? ?? true,
+    announceStatic: json['announce_static'] as bool? ?? true,
   );
 
   CrowdLogicConfig copyWith({
@@ -166,6 +199,9 @@ class CrowdLogicConfig {
     int? warning6,
     int? repeatInterval,
     bool? enableSounds,
+    bool? enableIntelligence,
+    bool? announceMoving,
+    bool? announceStatic,
   }) => CrowdLogicConfig(
     venue: venue ?? this.venue,
     checkInterval: checkInterval ?? this.checkInterval,
@@ -177,6 +213,9 @@ class CrowdLogicConfig {
     warning6: warning6 ?? this.warning6,
     repeatInterval: repeatInterval ?? this.repeatInterval,
     enableSounds: enableSounds ?? this.enableSounds,
+    enableIntelligence: enableIntelligence ?? this.enableIntelligence,
+    announceMoving: announceMoving ?? this.announceMoving,
+    announceStatic: announceStatic ?? this.announceStatic,
   );
 }
 
@@ -229,11 +268,12 @@ class AudioAnnouncer {
   // Reference to RobotConnection for tablet forwarding
   RobotConnection? _robotConnection;
 
-  // Blocked path detection - aggressive escalation system
+  // Blocked path detection - VELOCITY-BASED (escalate only when STUCK)
   Timer? _blockedTimer;
-  DateTime? _navStartTime;
+  DateTime? _stuckSince;         // When velocity dropped to ~0 (null = moving)
   int _blockedWarningLevel = 0;  // Escalation level (0-6, increasingly aggressive)
-  DateTime? _lastWarningTime;     // Track when last warning was spoken
+  DateTime? _lastWarningTime;    // Track when last warning was spoken
+  double _lastVelocity = 0.0;    // Track robot velocity
 
   // Crowd Logic configuration (replaces hardcoded timing)
   CrowdLogicConfig _crowdConfig = CrowdLogicConfig.restaurant;
@@ -252,49 +292,49 @@ class AudioAnnouncer {
   List<AnnouncementPreset> _presets = [];
   static const String _presetsKey = 'announcement_presets';
 
-  // Default blocked path announcements (escalating aggressively)
+  // Default blocked path announcements (escalating, but patient at first)
   static const List<AnnouncementPreset> defaultBlockedPresets = [
-    // Level 1: Polite
+    // Level 1: Polite (30s - give robot time to navigate)
     AnnouncementPreset(
       id: 'blocked_1',
       text: 'Excuse me, please clear the path.',
       category: AnnouncementCategory.blockedPath,
-      delaySeconds: 8,
+      delaySeconds: 30,
     ),
     // Level 2: Firm
     AnnouncementPreset(
       id: 'blocked_2',
       text: 'Please move out of the way. I need to pass through.',
       category: AnnouncementCategory.blockedPath,
-      delaySeconds: 15,
+      delaySeconds: 45,
     ),
     // Level 3: Urgent
     AnnouncementPreset(
       id: 'blocked_3',
       text: 'Attention! You are blocking my route. Please step aside now.',
       category: AnnouncementCategory.blockedPath,
-      delaySeconds: 22,
+      delaySeconds: 60,
     ),
     // Level 4: Demanding
     AnnouncementPreset(
       id: 'blocked_4',
       text: 'Warning! I must pass through immediately. Clear the path now!',
       category: AnnouncementCategory.blockedPath,
-      delaySeconds: 30,
+      delaySeconds: 90,
     ),
     // Level 5: Aggressive
     AnnouncementPreset(
       id: 'blocked_5',
       text: 'ALERT! You are obstructing robot movement! Move immediately!',
       category: AnnouncementCategory.blockedPath,
-      delaySeconds: 40,
+      delaySeconds: 120,
     ),
     // Level 6: Emergency (repeats)
     AnnouncementPreset(
       id: 'blocked_6',
       text: 'EMERGENCY! Path blocked! This is your final warning! MOVE NOW!',
       category: AnnouncementCategory.blockedPath,
-      delaySeconds: 50,
+      delaySeconds: 180,
     ),
   ];
 
@@ -558,13 +598,35 @@ class AudioAnnouncer {
     }
   }
 
+  /// Called by RobotConnection when velocity updates
+  void onVelocityChanged(double linearVelocity) {
+    _lastVelocity = linearVelocity;
+
+    // Only track stuck state during active navigation
+    if (_lastNavStatus != 601) return;
+
+    const stuckThreshold = 0.05; // Less than 5cm/s = stuck
+
+    if (linearVelocity.abs() < stuckThreshold) {
+      // Robot stopped - start tracking stuck time
+      _stuckSince ??= DateTime.now();
+    } else {
+      // Robot moving - reset stuck tracking and warning level
+      if (_stuckSince != null) {
+        debugPrint('AudioAnnouncer: Robot moving again, resetting stuck timer');
+        _stuckSince = null;
+        _blockedWarningLevel = 0;
+      }
+    }
+  }
+
   /// Start blocked path detection timer
   void _startBlockedDetection() {
     _stopBlockedDetection();  // Clear any existing timer
-    _navStartTime = DateTime.now();
+    _stuckSince = null;  // Not stuck yet
     _blockedWarningLevel = 0;
 
-    // Check periodically for blocked path
+    // Check periodically for blocked path (only announces when STUCK)
     _blockedTimer = Timer.periodic(
       Duration(seconds: blockedCheckInterval),
       (_) => _checkBlockedPath(),
@@ -575,22 +637,26 @@ class AudioAnnouncer {
   void _stopBlockedDetection() {
     _blockedTimer?.cancel();
     _blockedTimer = null;
-    _navStartTime = null;
+    _stuckSince = null;
     _blockedWarningLevel = 0;
     _lastWarningTime = null;
   }
 
   /// Check if path has been blocked too long and announce with escalating aggression
   void _checkBlockedPath() {
-    if (_navStartTime == null) return;
     if (_lastNavStatus != 601) {
-      // No longer moving, stop checking
+      // No longer navigating, stop checking
       _stopBlockedDetection();
       return;
     }
 
+    // Only escalate warnings when robot is STUCK (velocity ~0)
+    if (_stuckSince == null) {
+      return; // Robot is moving, don't warn
+    }
+
     final now = DateTime.now();
-    final elapsed = now.difference(_navStartTime!).inSeconds;
+    final elapsed = now.difference(_stuckSince!).inSeconds;
     final blockedPresets = getPresetsByCategory(AnnouncementCategory.blockedPath);
 
     // Helper to get preset or default

@@ -135,6 +135,92 @@ class _CrowdLogicSettingsState extends State<CrowdLogicSettings> {
 
         const SizedBox(height: 16),
 
+        // Smart Intelligence Toggle (THE KEY FEATURE!)
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: _config.enableIntelligence ? Colors.green.withValues(alpha: 0.1) : Colors.grey.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _config.enableIntelligence ? Colors.green : Colors.grey,
+              width: 2,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _config.enableIntelligence ? Icons.psychology : Icons.psychology_outlined,
+                    color: _config.enableIntelligence ? Colors.green : Colors.grey,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'LIDAR Intelligence',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        Text(
+                          _config.enableIntelligence
+                              ? 'Smart: Only announces for moving/unexpected obstacles'
+                              : 'Disabled: Uses time-based escalation only',
+                          style: TextStyle(color: Colors.grey[400], fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _config.enableIntelligence,
+                    activeTrackColor: Colors.green,
+                    onChanged: (value) {
+                      _applyConfig(_config.copyWith(enableIntelligence: value));
+                    },
+                  ),
+                ],
+              ),
+              if (_config.enableIntelligence) ...[
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: CheckboxListTile(
+                        title: const Text('Moving', style: TextStyle(fontSize: 12)),
+                        subtitle: const Text('People, robots', style: TextStyle(fontSize: 10)),
+                        value: _config.announceMoving,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          _applyConfig(_config.copyWith(announceMoving: value ?? true));
+                        },
+                      ),
+                    ),
+                    Expanded(
+                      child: CheckboxListTile(
+                        title: const Text('Static', style: TextStyle(fontSize: 12)),
+                        subtitle: const Text('Crates, fallen items', style: TextStyle(fontSize: 10)),
+                        value: _config.announceStatic,
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        onChanged: (value) {
+                          _applyConfig(_config.copyWith(announceStatic: value ?? true));
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+
         // Quick settings
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -342,6 +428,8 @@ class _CrowdLogicSettingsState extends State<CrowdLogicSettings> {
 
   Color _getVenueColor(CrowdLogicVenue venue) {
     switch (venue) {
+      case CrowdLogicVenue.spaceship:
+        return Colors.cyan;
       case CrowdLogicVenue.adultParty:
         return Colors.red;
       case CrowdLogicVenue.restaurant:
@@ -357,6 +445,8 @@ class _CrowdLogicSettingsState extends State<CrowdLogicSettings> {
 
   IconData _getVenueIcon(CrowdLogicVenue venue) {
     switch (venue) {
+      case CrowdLogicVenue.spaceship:
+        return Icons.rocket_launch;
       case CrowdLogicVenue.adultParty:
         return Icons.celebration;
       case CrowdLogicVenue.restaurant:

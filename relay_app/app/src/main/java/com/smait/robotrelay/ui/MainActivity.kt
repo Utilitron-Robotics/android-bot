@@ -72,21 +72,128 @@ class MainActivity : AppCompatActivity() {
     private val tapResetTimeMs = 2000L  // Reset tap count if no tap within 2 seconds
     private var warningSaid = false  // Prevent repeated warnings
 
+    // Motion standby state
+    private var currentMotionSequenceId: String? = null
+
     private val displayReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val url = intent?.getStringExtra(RelayService.EXTRA_URL)
             Log.i(TAG, ">>> displayReceiver.onReceive: url='${url?.take(100) ?: "null"}...'")
             if (url.isNullOrEmpty()) {
-                Log.i(TAG, "Hiding WebView, showing main layout")
+                Log.i(TAG, "Hiding WebView and motion overlay, showing main layout")
                 binding.webView.visibility = View.GONE
+                binding.motionOverlay.visibility = View.GONE
                 binding.mainLayout.visibility = View.VISIBLE
+            } else if (url.startsWith("motion://")) {
+                // Handle motion standby URLs
+                handleMotionUrl(url)
+            } else if (url.startsWith("default://")) {
+                // Handle default POI display (could be custom branding)
+                handleDefaultDisplay(url)
             } else {
                 Log.i(TAG, "Showing WebView, loading URL")
                 binding.mainLayout.visibility = View.GONE
+                binding.motionOverlay.visibility = View.GONE
                 binding.webView.visibility = View.VISIBLE
                 binding.webView.loadUrl(url)
             }
         }
+    }
+
+    private fun handleMotionUrl(url: String) {
+        Log.i(TAG, "Handling motion URL: $url")
+        binding.mainLayout.visibility = View.GONE
+        binding.webView.visibility = View.GONE
+        binding.motionOverlay.visibility = View.VISIBLE
+
+        when {
+            url.startsWith("motion://standby") -> {
+                // Extract sequence ID from URL
+                val sequenceId = url.substringAfter("sequence=", "")
+                currentMotionSequenceId = sequenceId
+                Log.i(TAG, "Motion standby mode for sequence: $sequenceId")
+
+                // Show waiting state
+                binding.motionWaitingLayout.visibility = View.VISIBLE
+                binding.motionStartLayout.visibility = View.GONE
+            }
+            url.startsWith("motion://start_tour") -> {
+                // Extract sequence ID and button text from URL
+                // Format: motion://start_tour?sequence=xxx&button=Start%20Tour
+                val params = url.substringAfter("?").split("&").associate {
+                    val parts = it.split("=", limit = 2)
+                    if (parts.size == 2) parts[0] to parts[1] else parts[0] to ""
+                }
+                val sequenceId = params["sequence"] ?: ""
+                val buttonText = try {
+                    java.net.URLDecoder.decode(params["button"] ?: "Start Tour", "UTF-8")
+                } catch (e: Exception) {
+                    "Start Tour"
+                }
+                currentMotionSequenceId = sequenceId
+                Log.i(TAG, "Motion start_tour mode for sequence: $sequenceId, button: $buttonText")
+
+                // Show start tour button with custom text
+                binding.motionWaitingLayout.visibility = View.GONE
+                binding.motionStartLayout.visibility = View.VISIBLE
+                binding.btnStartTour.text = buttonText
+            }
+        }
+    }
+
+    private fun handleDefaultDisplay(url: String) {
+        // default://waypoint/KitchenArea -> show POI name with branding
+        val waypoint = url.substringAfter("default://waypoint/", "Unknown")
+        Log.i(TAG, "Default display for waypoint: $waypoint")
+
+        // For now, use WebView with a simple data URL showing the waypoint name
+        // In production, this could load a company branding page
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                        color: white;
+                        font-family: Arial, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                        text-align: center;
+                    }
+                    .container {
+                        padding: 48px;
+                    }
+                    .icon { font-size: 128px; }
+                    .waypoint {
+                        font-size: 64px;
+                        font-weight: bold;
+                        margin-top: 32px;
+                    }
+                    .subtitle {
+                        font-size: 24px;
+                        color: #888;
+                        margin-top: 16px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">📍</div>
+                    <div class="waypoint">$waypoint</div>
+                    <div class="subtitle">Welcome to this location</div>
+                </div>
+            </body>
+            </html>
+        """.trimIndent()
+
+        binding.mainLayout.visibility = View.GONE
+        binding.motionOverlay.visibility = View.GONE
+        binding.webView.visibility = View.VISIBLE
+        binding.webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
     }
 
     private val countdownReceiver = object : BroadcastReceiver() {
@@ -353,6 +460,17 @@ class MainActivity : AppCompatActivity() {
         binding.btnPinSubmit.setOnClickListener {
             attemptUnlock()
         }
+
+        // Motion standby "Start Tour" button handler
+        binding.btnStartTour.setOnClickListener {
+            Log.i(TAG, "Start Tour button pressed for sequence: $currentMotionSequenceId")
+            // Notify the service that the tour was started by button press
+            service?.notifyTourStarted(currentMotionSequenceId ?: "")
+            // Hide motion overlay
+            binding.motionOverlay.visibility = View.GONE
+            // Engage tour mode lock screen to prevent tampering during tour
+            service?.startTourMode(null)
+        }
     }
 
     private fun setupJoystickButton(button: View, linear: Double, angular: Double) {
@@ -379,7 +497,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun speak(text: String) {
-        lifecycleScope.launch {6
+        lifecycleScope.launch {
             // Wait until TTS is ready before trying to speak
             service?.ttsReady?.filter { it }?.first()
             if (binding.switchAudio.isChecked) {
@@ -422,14 +540,48 @@ class MainActivity : AppCompatActivity() {
             }
 
             lifecycleScope.launch {
-                svc.getRobotStatus().map { it?.safetyZone }.distinctUntilChanged().collect { zone ->
-                    when (zone) {
-                        SafetyZone.STOP -> speak("Stop. Obstacle too close.")
-                        SafetyZone.CREEP -> speak("Obstacle ahead. Creeping.")
-                        SafetyZone.WARN -> speak("Warning. Obstacle detected.")
-                        else -> {}
+                var announcedThisNav = SafetyZone.CLEAR  // Track highest announced this nav session
+                var lastNavStatus = 0
+
+                svc.getRobotStatus()
+                    .collect { status ->
+                        val zone = status?.safetyZone ?: SafetyZone.CLEAR
+                        val navStatus = status?.navStatus ?: 0
+
+                        // Reset when nav starts fresh
+                        if (navStatus == SmaitProtocol.NAV_RUNNING && lastNavStatus != SmaitProtocol.NAV_RUNNING) {
+                            announcedThisNav = SafetyZone.CLEAR
+                        }
+                        lastNavStatus = navStatus
+
+                        // Only announce during active navigation
+                        if (navStatus != SmaitProtocol.NAV_RUNNING) return@collect
+
+                        // Only announce if MORE severe than already announced this session
+                        // Severity: CLEAR(0) < WARN(1) < CREEP(2) < STOP(3)
+                        val zoneSeverity = when (zone) {
+                            SafetyZone.STOP -> 3
+                            SafetyZone.CREEP -> 2
+                            SafetyZone.WARN -> 1
+                            else -> 0
+                        }
+                        val announcedSeverity = when (announcedThisNav) {
+                            SafetyZone.STOP -> 3
+                            SafetyZone.CREEP -> 2
+                            SafetyZone.WARN -> 1
+                            else -> 0
+                        }
+
+                        if (zoneSeverity > announcedSeverity) {
+                            announcedThisNav = zone
+                            when (zone) {
+                                SafetyZone.STOP -> speak("Stop. Obstacle too close.")
+                                SafetyZone.CREEP -> speak("Robot coming through. Make way!")
+                                SafetyZone.WARN -> speak("Warning. Obstacle detected.")
+                                else -> {}
+                            }
+                        }
                     }
-                }
             }
 
             lifecycleScope.launch {

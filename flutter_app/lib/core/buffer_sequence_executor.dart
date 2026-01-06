@@ -439,6 +439,21 @@ class BufferSequenceExecutor extends ChangeNotifier {
       commands.add(BufferCommand.navigate(sequence.startWaypoint!));
     }
 
+    // MOTION TRIGGER - wait for visitor to approach before starting tour
+    // When enabled, robot waits at start position for motion detection,
+    // then greets visitor and shows "Start Tour" button
+    if (sequence.motionTriggerStart) {
+      final greeting = sequence.motionGreeting ?? 'Hello! Would you like a tour?';
+      final buttonText = sequence.motionButtonText ?? 'Start Tour';
+      debugPrint('BufferSequenceExecutor: Adding motion standby with greeting: $greeting, button: $buttonText');
+      commands.add(BufferCommand.motionStandby(
+        greeting: greeting,
+        sequenceId: sequence.id,
+        buttonText: buttonText,
+        displayUrl: sequence.motionDisplayUrl,
+      ));
+    }
+
     // Intro text (spoken at start position)
     if (sequence.introText != null && sequence.introText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.introText!));

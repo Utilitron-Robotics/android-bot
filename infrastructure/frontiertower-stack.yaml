@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'TurboTurf - Robot Fleet Management Backend'
+Description: 'Frontier Tower - Robot Fleet Management Backend'
 
 Parameters:
   Environment:
@@ -17,7 +17,7 @@ Resources:
   RobotsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-robots-${Environment}'
+      TableName: !Sub 'frontiertower-robots-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: robot_id
@@ -40,7 +40,7 @@ Resources:
   CommandsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-commands-${Environment}'
+      TableName: !Sub 'frontiertower-commands-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: robot_id
@@ -59,7 +59,7 @@ Resources:
   AlertsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-alerts-${Environment}'
+      TableName: !Sub 'frontiertower-alerts-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: robot_id
@@ -79,7 +79,7 @@ Resources:
   FleetConfigTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-fleet-config-${Environment}'
+      TableName: !Sub 'frontiertower-fleet-config-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: config_key
@@ -92,7 +92,7 @@ Resources:
   FloorsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-floors-${Environment}'
+      TableName: !Sub 'frontiertower-floors-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: floor_id
@@ -114,7 +114,7 @@ Resources:
   MapsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-maps-${Environment}'
+      TableName: !Sub 'frontiertower-maps-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: map_id
@@ -136,7 +136,7 @@ Resources:
   ToursTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-tours-${Environment}'
+      TableName: !Sub 'frontiertower-tours-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: tour_id
@@ -158,7 +158,7 @@ Resources:
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub 'turboturf-lambda-role-${Environment}'
+      RoleName: !Sub 'frontiertower-lambda-role-${Environment}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -198,7 +198,7 @@ Resources:
   FleetApiFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub 'turboturf-fleet-api-${Environment}'
+      FunctionName: !Sub 'frontiertower-fleet-api-${Environment}'
       Runtime: python3.11
       Handler: index.handler
       Role: !GetAtt LambdaRole.Arn
@@ -694,7 +694,7 @@ Resources:
   FleetApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: !Sub 'turboturf-api-${Environment}'
+      Name: !Sub 'frontiertower-api-${Environment}'
       ProtocolType: HTTP
       CorsConfiguration:
         AllowOrigins:
@@ -742,7 +742,7 @@ Outputs:
     Description: Fleet API Endpoint
     Value: !Sub 'https://${FleetApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
     Export:
-      Name: !Sub 'TurboTurf-ApiEndpoint-${Environment}'
+      Name: !Sub 'FrontierTower-ApiEndpoint-${Environment}'
 
   RobotsTableName:
     Description: DynamoDB Robots Table

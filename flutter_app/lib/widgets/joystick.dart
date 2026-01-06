@@ -209,8 +209,8 @@ class _JoystickControlState extends State<JoystickControl> {
     _obstacleRight = minRight < creepDistance;
     _minFrontRange = minFront;
 
-    // Announce when entering danger zones
-    if (_slamSafe && _audioEnabled) {
+    // Announce when entering danger zones - only when actively using joystick
+    if (_slamSafe && _audioEnabled && _sendTimer != null) {
       if (minFront < stopDistance && !wasObstacle) {
         AudioAnnouncer().speak('Stop! Too close!');
       } else if (_obstacleAhead && !wasObstacle) {

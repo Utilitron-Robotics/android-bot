@@ -48,6 +48,7 @@ class CommandBuffer(
     // Track navigation for completion detection
     private var waitingForNavArrival = false
     private var pendingNavWaypoint: String? = null
+    private var navArrivalPending = false  // 603 received, waiting for robot to actually stop
 
     /**
      * Start the buffer (heartbeat + execution loop)
@@ -122,7 +123,22 @@ class CommandBuffer(
             completeCommand(cmd.id, "skipped")
         }
         waitingForNavArrival = false
+        navArrivalPending = false
         pendingNavWaypoint = null
+    }
+
+    /**
+     * Called when the "Start Tour" button is pressed on the tablet.
+     * Completes the current motion_standby command.
+     */
+    fun notifyTourStarted() {
+        val cmd = currentCommand ?: return
+        if (cmd.type != "motion_standby") {
+            Log.w(TAG, "notifyTourStarted called but current command is ${cmd.type}")
+            return
+        }
+        Log.i(TAG, "Tour started via button press, completing motion_standby")
+        completeCommand(cmd.id, "success")
     }
 
     /**
@@ -137,21 +153,24 @@ class CommandBuffer(
         when (status) {
             603 -> { // Arrived
                 if (goalName == pendingNavWaypoint || pendingNavWaypoint != null) {
-                    Log.i(TAG, "Nav arrived at $goalName")
-                    waitingForNavArrival = false
-                    pendingNavWaypoint = null
-                    completeCommand(cmd.id, "success")
+                    Log.i(TAG, "Nav reported arrival at $goalName, verifying robot has stopped...")
+                    // Don't complete immediately - the robot may still be maneuvering
+                    // The executeCommand loop will verify robot has actually stopped
+                    // by checking velocity before completing the navigation
+                    navArrivalPending = true
                 }
             }
             604 -> { // Failed
                 Log.i(TAG, "Nav failed to $pendingNavWaypoint")
                 waitingForNavArrival = false
+                navArrivalPending = false
                 pendingNavWaypoint = null
                 completeCommand(cmd.id, "robot_failed")
             }
             602 -> { // Cancelled
                 Log.i(TAG, "Nav cancelled to $pendingNavWaypoint")
                 waitingForNavArrival = false
+                navArrivalPending = false
                 pendingNavWaypoint = null
                 completeCommand(cmd.id, "cancelled")
             }
@@ -250,22 +269,130 @@ class CommandBuffer(
                 waitingForNavArrival = true
 
                 robotClient.navigateToPoi(waypoint)
+                navArrivalPending = false
 
                 // Wait for nav completion or timeout
                 val timeout = cmd.timeoutMs ?: 60000L
                 val deadline = System.currentTimeMillis() + timeout
+                var lastProgressTime = System.currentTimeMillis()
+                var lastPosition: Pair<Double, Double>? = null
+                var recoveryAttempts = 0
+                val maxRecoveryAttempts = 3
+                val stuckThresholdMs = 45000L  // 45 seconds stuck = try recovery
+                var stoppedSince: Long? = null  // Track when robot stopped after 603
 
                 while (waitingForNavArrival && System.currentTimeMillis() < deadline) {
                     delay(100)
+
+                    // Check if we're making progress
+                    val status = robotClient.robotStatus.value
+                    val currentPos = status?.let { Pair(it.x, it.y) }
+                    val velocity = status?.velocity?.getOrElse(0) { 0.0 } ?: 0.0
+
+                    // If 603 received, verify robot has actually stopped before completing
+                    if (navArrivalPending) {
+                        if (kotlin.math.abs(velocity) < 0.05) {
+                            // Robot velocity ~0
+                            if (stoppedSince == null) {
+                                stoppedSince = System.currentTimeMillis()
+                                Log.i(TAG, "Robot stopped after arrival report, waiting to confirm...")
+                            } else if (System.currentTimeMillis() - stoppedSince > 500) {
+                                // Stopped for 500ms - actually arrived
+                                Log.i(TAG, "Confirmed arrival at $waypoint (stopped for 500ms)")
+                                waitingForNavArrival = false
+                                navArrivalPending = false
+                                pendingNavWaypoint = null
+                                completeCommand(cmd.id, "success")
+                                break
+                            }
+                        } else {
+                            // Still moving - reset stopped timer
+                            stoppedSince = null
+                        }
+                    }
+
+                    if (currentPos != null && lastPosition != null) {
+                        val dx = currentPos.first - lastPosition!!.first
+                        val dy = currentPos.second - lastPosition!!.second
+                        val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+
+                        if (distance > 0.1) {  // Moved more than 10cm
+                            lastProgressTime = System.currentTimeMillis()
+                        }
+                    }
+                    lastPosition = currentPos
+
+                    // Check if stuck and in obstacle zone
+                    val stuckTime = System.currentTimeMillis() - lastProgressTime
+                    val safetyZone = status?.safetyZone
+                    val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP
+
+                    if (stuckTime > stuckThresholdMs && isBlocked && recoveryAttempts < maxRecoveryAttempts) {
+                        recoveryAttempts++
+                        Log.i(TAG, "Robot stuck for ${stuckTime/1000}s in $safetyZone zone, attempting recovery spin #$recoveryAttempts")
+
+                        // Cancel current navigation before recovery maneuver
+                        robotClient.cancelNavigation()
+                        delay(300)
+
+                        // Announce recovery attempt
+                        withContext(Dispatchers.Main) {
+                            taskExecutor?.speakText("Looking for an alternative path.")
+                        }
+                        delay(1500)
+
+                        // Spin until we find a clear direction (or max 360°)
+                        // The SLAM sees the hole but hesitates - we need to face it and nudge
+                        val spinDuration = 12500L  // Max 360° at 0.5 rad/s
+                        val spinStart = System.currentTimeMillis()
+                        var foundClear = false
+                        Log.i(TAG, "Starting recovery spin, looking for clear path...")
+
+                        while (System.currentTimeMillis() - spinStart < spinDuration && !foundClear) {
+                            robotClient.sendVelocity(0.0, 0.5)  // Spin slowly
+                            delay(400)
+
+                            // Check if we're now facing a clear direction
+                            val currentZone = robotClient.robotStatus.value?.safetyZone
+                            if (currentZone == SafetyZone.CLEAR || currentZone == SafetyZone.WARN) {
+                                foundClear = true
+                                Log.i(TAG, "Found clear direction! Zone: $currentZone")
+                            }
+                        }
+                        robotClient.sendVelocity(0.0, 0.0)  // Stop spinning
+                        delay(300)
+
+                        // Nudge forward into the gap - this kicks the SLAM planner into action
+                        if (foundClear) {
+                            Log.i(TAG, "Nudging forward into the gap...")
+                            val nudgeDuration = 1500L  // ~30cm at 0.2 m/s
+                            val nudgeStart = System.currentTimeMillis()
+                            while (System.currentTimeMillis() - nudgeStart < nudgeDuration) {
+                                robotClient.sendVelocity(0.2, 0.0)  // Slow forward
+                                delay(400)
+                            }
+                            robotClient.sendVelocity(0.0, 0.0)  // Stop
+                            delay(300)
+                        }
+
+                        Log.i(TAG, "Recovery maneuver complete, re-attempting navigation to $waypoint")
+
+                        // Re-attempt navigation
+                        delay(500)
+                        robotClient.navigateToPoi(waypoint)
+                        lastProgressTime = System.currentTimeMillis()  // Reset stuck timer
+                    }
                 }
 
                 if (waitingForNavArrival) {
-                    // Timeout
+                    // Timeout after all attempts
                     waitingForNavArrival = false
+                    navArrivalPending = false
                     pendingNavWaypoint = null
+                    Log.w(TAG, "Navigation to $waypoint timed out after $recoveryAttempts recovery attempts")
                     completeCommand(cmd.id, "timeout")
                 }
-                // Otherwise completed via onNavStatus callback
+                // Otherwise completed via arrival confirmation loop above
             }
 
             "speak" -> {
@@ -349,6 +476,63 @@ class CommandBuffer(
                 }
                 delay(500)  // Brief delay for sound to play
                 completeCommand(cmd.id, "success")
+            }
+
+            "motion_standby" -> {
+                // Wait for motion detection to trigger tour start
+                // When a person approaches, greet them and show start button
+                val greeting = cmd.data["greeting"] as? String ?: "Hello! Would you like a tour?"
+                val sequenceId = cmd.data["sequence_id"] as? String ?: ""
+                val buttonText = cmd.data["button_text"] as? String ?: "Start Tour"
+                val displayUrl = cmd.data["display_url"] as? String
+
+                Log.i(TAG, "Entering motion standby mode for sequence: $sequenceId, button: $buttonText")
+
+                // Show "waiting for visitor" on tablet
+                withContext(Dispatchers.Main) {
+                    taskExecutor?.displayUrl("motion://standby?sequence=$sequenceId")
+                }
+
+                // Monitor for motion (person approaching)
+                var motionDetected = false
+                var greetingSpoken = false
+                val startTime = System.currentTimeMillis()
+                val maxWaitMs = 300000L  // 5 minute max wait
+
+                while (!motionDetected && currentCommand != null &&
+                       System.currentTimeMillis() - startTime < maxWaitMs) {
+                    // Check for motion via obstacle classification
+                    // The classification is updated by RobotWebSocketClient
+                    val status = robotClient.robotStatus.value
+                    if (status?.obstacleInPath == true && status.obstacleMoving == true) {
+                        if (!greetingSpoken) {
+                            Log.i(TAG, "Motion detected! Speaking greeting...")
+                            greetingSpoken = true
+                            withContext(Dispatchers.Main) {
+                                // Play arrival sound first
+                                taskExecutor?.playAlertSound("arrival")
+                                delay(500)
+                                // Speak greeting
+                                taskExecutor?.speakText(greeting)
+                                // Show start tour button with custom text
+                                val encodedButton = java.net.URLEncoder.encode(buttonText, "UTF-8")
+                                taskExecutor?.displayUrl("motion://start_tour?sequence=$sequenceId&button=$encodedButton")
+                            }
+                        }
+                        // Wait for tour start button press (handled via tablet event)
+                        // The button press will complete this command
+                        delay(100)
+                    } else {
+                        delay(500)  // Check every 500ms when no motion
+                    }
+                }
+
+                // If we exited due to timeout or skip, mark as such
+                if (currentCommand != null && !motionDetected) {
+                    Log.i(TAG, "Motion standby timed out or skipped")
+                    completeCommand(cmd.id, "timeout")
+                }
+                // If tour was started via button, command is completed by notifyTourStarted()
             }
 
             else -> {
