@@ -307,17 +307,6 @@
                 android:layout_height="match_parent"
                 android:layout_gravity="center" />
 
-            <!-- STOP button in center -->
-            <Button
-                android:id="@+id/btnStop"
-                android:layout_width="60dp"
-                android:layout_height="60dp"
-                android:layout_gravity="center"
-                android:text="■"
-                android:textSize="28sp"
-                android:backgroundTint="#CC4444"
-                android:elevation="5dp" />
-
         </FrameLayout>
 
         <!-- Right Panel: Actions -->
