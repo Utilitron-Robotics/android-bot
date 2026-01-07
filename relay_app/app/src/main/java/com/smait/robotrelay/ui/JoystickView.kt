@@ -1,11 +1,15 @@
 package com.smait.robotrelay.ui
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import com.smait.robotrelay.R
 import kotlin.math.atan2
 import kotlin.math.min
 import kotlin.math.sqrt
@@ -55,6 +59,9 @@ class JoystickView @JvmOverloads constructor(
     private var currentX = 0f
     private var currentY = 0f
 
+    // Logo bitmap
+    private var logoBitmap: Bitmap? = null
+
     // Listener
     var onMoveListener: ((x: Float, y: Float) -> Unit)? = null
 
@@ -65,6 +72,9 @@ class JoystickView @JvmOverloads constructor(
         baseRadius = min(w, h) / 2f - 20f
         stickRadius = baseRadius * 0.35f
         resetStick()
+
+        // Load logo bitmap
+        logoBitmap = BitmapFactory.decodeResource(resources, R.drawable.frontiertowerlogo)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -88,6 +98,15 @@ class JoystickView @JvmOverloads constructor(
         // Draw stick
         canvas.drawCircle(stickX, stickY, stickRadius, stickPaint)
         canvas.drawCircle(stickX, stickY, stickRadius, stickStrokePaint)
+
+        // Draw logo on stick (moves with stick)
+        logoBitmap?.let { logo ->
+            val logoSize = stickRadius * 1.5f
+            val left = stickX - logoSize / 2
+            val top = stickY - logoSize / 2
+            val rect = RectF(left, top, left + logoSize, top + logoSize)
+            canvas.drawBitmap(logo, null, rect, null)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
