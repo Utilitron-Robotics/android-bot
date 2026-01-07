@@ -64,6 +64,9 @@ class MainActivity : AppCompatActivity() {
     // Tour mode state
     private var isTourModeActive = false
     private var tourUnlockPin = "1234"  // Default PIN, can be configured
+    private var standbySequenceId: String? = null
+    private var standbyButtonText: String? = "Start Tour"
+
 
     // Multi-tap unlock sequence
     private val requiredTaps = 6
@@ -236,6 +239,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val tourStandbyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            standbySequenceId = intent?.getStringExtra(RelayService.EXTRA_TOUR_SEQUENCE_ID)
+            standbyButtonText = intent?.getStringExtra(RelayService.EXTRA_TOUR_BUTTON_TEXT) ?: "Start Tour"
+            Log.i(TAG, ">>> tourStandbyReceiver: sequenceId=$standbySequenceId, buttonText=$standbyButtonText")
+
+            // If tour mode is already active, update the lock screen UI
+            if (isTourModeActive) {
+                showLockScreen()
+            }
+        }
+    }
+
+
     private fun formatTime(seconds: Int): String {
         val mins = seconds / 60
         val secs = seconds % 60
@@ -292,9 +309,12 @@ class MainActivity : AppCompatActivity() {
         tapCount = 0
         warningSaid = false
 
-        // Show START TOUR button for visitors if a sequence is loaded
-        if (currentMotionSequenceId != null && currentMotionSequenceId!!.isNotEmpty()) {
+        // Show START TOUR button for visitors if a sequence is in standby
+        if (standbySequenceId != null) {
             binding.lockStartTourLayout.visibility = View.VISIBLE
+            binding.btnLockStartTour.text = standbyButtonText
+        } else {
+            binding.lockStartTourLayout.visibility = View.GONE
         }
     }
 
@@ -303,7 +323,11 @@ class MainActivity : AppCompatActivity() {
         binding.lockContentLayout.visibility = View.GONE
         binding.pinEntryLayout.visibility = View.GONE
         binding.lockStartTourLayout.visibility = View.GONE
+        // Clear standby state when screen is unlocked/hidden
+        standbySequenceId = null
+        standbyButtonText = "Start Tour"
     }
+
 
     private fun showPinEntry() {
         binding.lockContentLayout.visibility = View.VISIBLE
@@ -345,6 +369,7 @@ class MainActivity : AppCompatActivity() {
         localBroadcastManager.registerReceiver(displayReceiver, IntentFilter(RelayService.ACTION_DISPLAY))
         localBroadcastManager.registerReceiver(countdownReceiver, IntentFilter(RelayService.ACTION_COUNTDOWN))
         localBroadcastManager.registerReceiver(tourModeReceiver, IntentFilter(RelayService.ACTION_TOUR_MODE))
+        localBroadcastManager.registerReceiver(tourStandbyReceiver, IntentFilter(RelayService.ACTION_TOUR_STANDBY))
     }
 
     override fun onStop() {
@@ -357,7 +382,9 @@ class MainActivity : AppCompatActivity() {
         localBroadcastManager.unregisterReceiver(displayReceiver)
         localBroadcastManager.unregisterReceiver(countdownReceiver)
         localBroadcastManager.unregisterReceiver(tourModeReceiver)
+        localBroadcastManager.unregisterReceiver(tourStandbyReceiver)
     }
+
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         if (ev?.action == MotionEvent.ACTION_DOWN) {
@@ -503,12 +530,17 @@ class MainActivity : AppCompatActivity() {
 
         // Lock screen START TOUR button - for visitors to manually start tour
         binding.btnLockStartTour.setOnClickListener {
-            Log.i(TAG, "Lock screen START TOUR pressed - starting saved sequence")
-            // Start the currently saved/loaded sequence
-            // The button should only be visible when a sequence is ready to start
-            service?.notifyTourStarted(currentMotionSequenceId ?: "")
-            // Hide the start button after pressing
+            Log.i(TAG, "Lock screen START TOUR pressed - starting sequence: $standbySequenceId")
+            standbySequenceId?.let { seqId ->
+                // Greet the visitor
+                speak("Follow me!")
+                // Start the currently saved/loaded sequence
+                service?.notifyTourStarted(seqId)
+            }
+            // Hide the start button after pressing, tour is now active
             binding.lockStartTourLayout.visibility = View.GONE
+            // Also clear the standby state
+            standbySequenceId = null
         }
     }
 

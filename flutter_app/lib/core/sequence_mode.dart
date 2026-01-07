@@ -1501,8 +1501,9 @@ class SequenceManager extends ChangeNotifier {
 
   /// Stop the current tour
   void stopSequence() {
-    if (_status != SequenceStatus.running && _status != SequenceStatus.paused)
+    if (_status != SequenceStatus.running && _status != SequenceStatus.paused) {
       return;
+    }
 
     // Use buffer executor if active
     if (_useBufferExecutor && _bufferExecutor != null) {
@@ -1582,8 +1583,9 @@ class SequenceManager extends ChangeNotifier {
 
   /// Skip to next stop
   void skipToNextStop() {
-    if (_status != SequenceStatus.running && _status != SequenceStatus.paused)
+    if (_status != SequenceStatus.running && _status != SequenceStatus.paused) {
       return;
+    }
 
     // Use buffer executor if active
     if (_useBufferExecutor && _bufferExecutor != null) {

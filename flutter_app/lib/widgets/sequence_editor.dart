@@ -310,10 +310,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 
   void _showCloudSyncDialog() {
-    // No default API URL - user must deploy CloudFormation and get actual URL
-    // The frontiertower.io domain is a placeholder that may not exist
+    // Default to AWS CloudFormation API Gateway endpoint
     final apiUrlController = TextEditingController(
-      text: SequenceManager.instance.cloudApiUrl ?? '',
+      text: SequenceManager.instance.cloudApiUrl ??
+            'https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev',
     );
 
     // Auto-detect map ID from connected robot

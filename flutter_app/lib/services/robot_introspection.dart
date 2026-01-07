@@ -9,6 +9,8 @@ class TopicInfo {
 
   @override
   String toString() => '$name ($type)';
+
+  Map<String, dynamic> toJson() => {'name': name, 'type': type};
 }
 
 /// Discovered service info
@@ -20,6 +22,8 @@ class ServiceInfo {
 
   @override
   String toString() => '$name ($type)';
+
+  Map<String, dynamic> toJson() => {'name': name, 'type': type};
 }
 
 /// All discovered robot capabilities
@@ -35,6 +39,20 @@ class RobotCapabilities {
     required this.parameters,
     required this.waypoints,
   });
+
+  Map<String, dynamic> toJson() => {
+        'topics': topics.map((t) => t.toJson()).toList(),
+        'services': services.map((s) => s.toJson()).toList(),
+        'parameters': parameters,
+        'waypoints': waypoints,
+        'features': {
+          'navigation': hasNavigation,
+          'velocity_control': hasVelocityControl,
+          'status': hasStatus,
+          'battery': hasBattery,
+          'map': hasMap,
+        }
+      };
 
   // Feature detection helpers
   bool get hasNavigation => services.any((s) => s.name == '/poi');
@@ -84,9 +102,8 @@ class RobotIntrospection {
         timeout: const Duration(seconds: 5),
       );
 
-      final topicNames = (topicsResult['values']?['topics'] as List?)
-              ?.cast<String>() ??
-          [];
+      final topicNames =
+          (topicsResult['values']?['topics'] as List?)?.cast<String>() ?? [];
 
       // Get topic types
       final typesResult = await client.callService(
