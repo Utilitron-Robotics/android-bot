@@ -291,12 +291,18 @@ class MainActivity : AppCompatActivity() {
         binding.tvLockMessage.text = "Tour Mode Active"
         tapCount = 0
         warningSaid = false
+
+        // Show START TOUR button for visitors if a sequence is loaded
+        if (currentMotionSequenceId != null && currentMotionSequenceId!!.isNotEmpty()) {
+            binding.lockStartTourLayout.visibility = View.VISIBLE
+        }
     }
 
     private fun hideLockScreen() {
         binding.lockOverlay.visibility = View.GONE
         binding.lockContentLayout.visibility = View.GONE
         binding.pinEntryLayout.visibility = View.GONE
+        binding.lockStartTourLayout.visibility = View.GONE
     }
 
     private fun showPinEntry() {
@@ -470,6 +476,16 @@ class MainActivity : AppCompatActivity() {
             binding.motionOverlay.visibility = View.GONE
             // Engage tour mode lock screen to prevent tampering during tour
             service?.startTourMode(null)
+        }
+
+        // Lock screen START TOUR button - for visitors to manually start tour
+        binding.btnLockStartTour.setOnClickListener {
+            Log.i(TAG, "Lock screen START TOUR pressed - starting saved sequence")
+            // Start the currently saved/loaded sequence
+            // The button should only be visible when a sequence is ready to start
+            service?.notifyTourStarted(currentMotionSequenceId ?: "")
+            // Hide the start button after pressing
+            binding.lockStartTourLayout.visibility = View.GONE
         }
     }
 
