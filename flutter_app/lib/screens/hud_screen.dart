@@ -949,12 +949,13 @@ class _HudScreenState extends State<HudScreen>
 
   // Frontier Tower floors (to be populated from cloud)
   static const List<String> _floors = [
-    'Spaceship',      // Event floor - 2nd floor
+    'Robotics Floor', // 4th floor - current working floor
+    'Spaceship',      // Event floor - 2nd floor (large, stored in base)
     'Lobby',          // Ground floor
     'Mezzanine',      // Between floors
     'Rooftop',        // Top floor events
   ];
-  String _selectedFloor = 'Spaceship';
+  String _selectedFloor = 'Robotics Floor';
 
   void _showFloorsDialog() {
     showDialog(
@@ -986,6 +987,7 @@ class _HudScreenState extends State<HudScreen>
                 final isSelected = floor == _selectedFloor;
                 return ListTile(
                   leading: Icon(
+                    floor == 'Robotics Floor' ? Icons.precision_manufacturing :
                     floor == 'Spaceship' ? Icons.rocket_launch :
                     floor == 'Lobby' ? Icons.door_front_door :
                     floor == 'Mezzanine' ? Icons.stairs :

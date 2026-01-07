@@ -834,11 +834,16 @@ class SequenceManager extends ChangeNotifier {
       stops: stops,
       loop: cloudData['loop'] as bool? ?? false,
       announceArrival: cloudData['announce_arrival'] as bool? ?? false,
+      restAtEndSeconds: cloudData['rest_at_end_seconds'] as int? ?? 0,
       introText: cloudData['intro_text'] as String?,
       outroText: cloudData['outro_text'] as String?,
       startWaypoint: cloudData['start_waypoint'] as String?,
       endWaypoint: cloudData['end_waypoint'] as String?,
       modifiedAt: cloudData['modified_at'] as int?,
+      motionTriggerStart: cloudData['motion_trigger_start'] as bool? ?? false,
+      motionGreeting: cloudData['motion_greeting'] as String?,
+      motionButtonText: cloudData['motion_button_text'] as String?,
+      motionDisplayUrl: cloudData['motion_display_url'] as String?,
     );
   }
 
