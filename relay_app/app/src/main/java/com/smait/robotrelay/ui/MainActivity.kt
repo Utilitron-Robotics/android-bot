@@ -440,15 +440,23 @@ class MainActivity : AppCompatActivity() {
         // Setup circular joystick
         binding.joystickView.onMoveListener = { x, y ->
             // x and y are -1.0 to 1.0
-            // Y-axis: negative = up (forward), positive = down (backward)
-            // X-axis: negative = left (turn left), positive = right (turn right)
+            // Y-axis: negative = up (reverse away from operator), positive = down (forward toward operator)
+            // X-axis: negative = left, positive = right
+            // When moving FORWARD (toward operator), left/right are inverted (you're facing the robot)
+            // When moving BACKWARD (away from operator), left/right are normal
 
             val maxLinearSpeed = 0.4 * speedMultiplier
             val maxAngularSpeed = 0.8 * speedMultiplier
 
             // Convert joystick position to robot velocities
-            val linearVel = y * maxLinearSpeed  // y positive = down = forward (for operator in front)
-            val angularVel = -x * maxAngularSpeed  // Invert X so left = left turn
+            val linearVel = y * maxLinearSpeed  // y positive = down = forward toward operator
+
+            // Invert angular when moving forward (linearVel > 0), normal when reversing
+            val angularVel = if (linearVel > 0) {
+                x * maxAngularSpeed  // Forward: joystick left = robot turns right (from your perspective)
+            } else {
+                -x * maxAngularSpeed  // Reverse: joystick left = robot turns left (normal)
+            }
 
             if (x == 0f && y == 0f) {
                 // Joystick centered - stop robot
