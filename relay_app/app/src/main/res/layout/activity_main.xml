@@ -285,105 +285,40 @@
 
         </LinearLayout>
 
-        <!-- Center Panel: D-Pad -->
-        <LinearLayout
+        <!-- Center Panel: Joystick -->
+        <FrameLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1.5"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:padding="8dp">
+            android:padding="16dp">
 
-            <!-- Top row -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
+            <!-- Background logo (dimmed) -->
+            <ImageView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:src="@drawable/frontiertowerlogo"
+                android:scaleType="centerInside"
+                android:alpha="0.15" />
 
-                <Button
-                    android:id="@+id/btnForwardLeft"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
-                    android:text="↖"
-                    android:textSize="24sp"
-                    android:backgroundTint="#445566" />
+            <!-- Joystick control -->
+            <com.smait.robotrelay.ui.JoystickView
+                android:id="@+id/joystickView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center" />
 
-                <Button
-                    android:id="@+id/btnForward"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
-                    android:text="↑"
-                    android:textSize="24sp"
-                    android:backgroundTint="#446688"
-                    android:layout_marginHorizontal="4dp" />
+            <!-- STOP button in center -->
+            <Button
+                android:id="@+id/btnStop"
+                android:layout_width="60dp"
+                android:layout_height="60dp"
+                android:layout_gravity="center"
+                android:text="■"
+                android:textSize="28sp"
+                android:backgroundTint="#CC4444"
+                android:elevation="5dp" />
 
-                <Button
-                    android:id="@+id/btnForwardRight"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
-                    android:text="↗"
-                    android:textSize="24sp"
-                    android:backgroundTint="#445566" />
-            </LinearLayout>
-
-            <!-- Middle row -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:layout_marginVertical="4dp">
-
-                <Button
-                    android:id="@+id/btnLeft"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
-                    android:text="↺"
-                    android:textSize="24sp"
-                    android:backgroundTint="#446688" />
-
-                <Button
-                    android:id="@+id/btnStop"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
-                    android:text="■"
-                    android:textSize="24sp"
-                    android:backgroundTint="#884444"
-                    android:layout_marginHorizontal="4dp" />
-
-                <Button
-                    android:id="@+id/btnRight"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
-                    android:text="↻"
-                    android:textSize="24sp"
-                    android:backgroundTint="#446688" />
-            </LinearLayout>
-
-            <!-- Bottom row -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <View
-                    android:layout_width="70dp"
-                    android:layout_height="70dp" />
-
-                <Button
-                    android:id="@+id/btnBackward"
-                    android:layout_width="70dp"
-                    android:layout_height="70dp"
-                    android:text="↓"
-                    android:textSize="24sp"
-                    android:backgroundTint="#446688"
-                    android:layout_marginHorizontal="4dp" />
-
-                <View
-                    android:layout_width="70dp"
-                    android:layout_height="70dp" />
-            </LinearLayout>
-
-        </LinearLayout>
+        </FrameLayout>
 
         <!-- Right Panel: Actions -->
         <LinearLayout
