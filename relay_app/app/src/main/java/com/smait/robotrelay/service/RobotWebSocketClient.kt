@@ -292,6 +292,22 @@ class RobotWebSocketClient(
                 SmaitProtocol.TOPIC_SENSORS_CORE -> {
                     val bumper = msg.get("bumper")?.asInt ?: 0
                     val cliff = msg.get("cliff")?.asInt ?: 0
+
+                    // Parse ultrasonic sensor data (analog_input array)
+                    // Per smAiT protocol: only analog_input[1] is valid (central ultrasonic sensor)
+                    val analogInput = msg.get("analog_input")?.asJsonArray
+                    val ultrasonicMm = if (analogInput != null && analogInput.size() >= 2) {
+                        analogInput.get(1).asInt  // Central ultrasonic in millimeters
+                    } else {
+                        9999  // No data or out of range
+                    }
+                    val ultrasonicMeters = ultrasonicMm / 1000.0
+
+                    // Log ultrasonic data periodically for debugging
+                    if (System.currentTimeMillis() % 2000 < 100) {  // ~Every 2 seconds
+                        Log.d(TAG, "Ultrasonic: ${ultrasonicMm}mm (${String.format("%.2f", ultrasonicMeters)}m)")
+                    }
+
                     if (bumper > 0 || cliff > 0) {
                         safetyZone.set(SafetyZone.STOP)
                         Log.w(TAG, "SAFETY STOP: Bumper or Cliff detected!")
@@ -307,6 +323,7 @@ class RobotWebSocketClient(
                             cliffRight = cliff and 1 != 0
                         )
                     )
+                    // TODO: Add ultrasonic distance to RobotStatusData for motion detection
                 }
                 SmaitProtocol.TOPIC_LASER_DATA -> {
                     // Try px/py format first (coordinate arrays)
