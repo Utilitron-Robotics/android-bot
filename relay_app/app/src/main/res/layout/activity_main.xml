@@ -707,6 +707,38 @@
         android:clickable="true"
         android:focusable="true">
 
+        <!-- Floating START TOUR button - visible when locked, for visitors -->
+        <LinearLayout
+            android:id="@+id/lockStartTourLayout"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_gravity="center"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="👋"
+                android:textSize="120sp"
+                android:layout_marginBottom="16dp" />
+
+            <Button
+                android:id="@+id/btnLockStartTour"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="400dp"
+                android:minHeight="140dp"
+                android:text="START TOUR"
+                android:textSize="46sp"
+                android:textStyle="bold"
+                android:backgroundTint="#00CC00"
+                android:padding="32dp"
+                android:elevation="25dp" />
+
+        </LinearLayout>
+
         <!-- Lock content - only shown when PIN entry is triggered -->
         <LinearLayout
             android:id="@+id/lockContentLayout"
