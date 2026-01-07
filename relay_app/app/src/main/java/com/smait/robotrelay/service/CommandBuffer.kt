@@ -99,12 +99,21 @@ class CommandBuffer(
     }
 
     /**
-     * Clear all pending commands
+     * Clear all pending commands AND stop current command
      */
     fun clear() {
         pendingQueue.clear()
-        Log.i(TAG, "Buffer cleared")
-        sendStatusUpdate()
+
+        // CRITICAL: Also cancel the current command
+        // This breaks out of while loops in commands like motion_standby and wait
+        if (currentCommand != null) {
+            Log.i(TAG, "Buffer cleared - also cancelling current command: ${currentCommand?.type}")
+            // Mark it as cancelled BEFORE clearing it (completeCommand needs currentCommand)
+            completeCommand(currentCommand!!.id, "cancelled")
+        } else {
+            Log.i(TAG, "Buffer cleared")
+            sendStatusUpdate()
+        }
     }
 
     /**
