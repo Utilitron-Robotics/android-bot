@@ -698,6 +698,16 @@ class SequenceManager extends ChangeNotifier {
 
       // Load cloud settings
       _cloudApiUrl = prefs.getString(_cloudUrlKey);
+
+      // BUGFIX: Remove invalid frontiertower.io URL (was accidentally hardcoded)
+      // Replace with correct AWS CloudFormation endpoint
+      if (_cloudApiUrl != null && _cloudApiUrl!.contains('frontiertower.io')) {
+        debugPrint('SequenceManager: Fixing invalid cloud URL: $_cloudApiUrl');
+        _cloudApiUrl = 'https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev';
+        await prefs.setString(_cloudUrlKey, _cloudApiUrl!);
+        debugPrint('SequenceManager: Cloud URL fixed to: $_cloudApiUrl');
+      }
+
       _currentMapId = prefs.getString(_currentMapKey);
       _cloudSyncEnabled = _cloudApiUrl != null && _cloudApiUrl!.isNotEmpty;
 
@@ -992,6 +1002,9 @@ class SequenceManager extends ChangeNotifier {
 
     debugPrint(
         'SequenceManager.pushAllToCloud(): Pushed $pushed/${_sequences.length} tours');
+
+    // Notify listeners to refresh UI
+    notifyListeners();
     return pushed;
   }
 

@@ -684,7 +684,7 @@ Resources:
                   'headers': {
                       'Content-Type': 'application/json',
                       'Access-Control-Allow-Origin': '*',
-                      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
                       'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
                   },
                   'body': json.dumps(body, default=decimal_default)
@@ -702,10 +702,13 @@ Resources:
         AllowMethods:
           - GET
           - POST
+          - PUT
+          - DELETE
           - OPTIONS
         AllowHeaders:
           - Content-Type
           - X-API-Key
+        MaxAge: 300
 
   FleetApiIntegration:
     Type: AWS::ApiGatewayV2::Integration
