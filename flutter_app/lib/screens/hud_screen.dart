@@ -963,8 +963,8 @@ class _HudScreenState extends State<HudScreen>
         backgroundColor: const Color(0xFF1A1F2E),
         title: Row(
           children: [
-            Image.network(
-              'https://frontiertower.io/wp-content/uploads/2024/07/cropped-FT-Logo-Only-Color-2.png',
+            Image.asset(
+              'assets/frontiertowerlogo.jpeg',
               height: 32,
               width: 32,
               errorBuilder: (ctx, err, stack) => const Icon(Icons.business, color: Color(0xFF9333EA)),
@@ -1046,8 +1046,8 @@ class _HudScreenState extends State<HudScreen>
             onTap: () => _showFloorsDialog(),
             child: Row(
               children: [
-                Image.network(
-                  'https://frontiertower.io/wp-content/uploads/2024/07/cropped-FT-Logo-Only-Color-2.png',
+                Image.asset(
+                  'assets/frontiertowerlogo.jpeg',
                   height: 36,
                   width: 36,
                   errorBuilder: (ctx, err, stack) => Container(
