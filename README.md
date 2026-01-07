@@ -89,15 +89,37 @@ Set **Map ID** to floor name (e.g., "Spaceship", "Mezzanine") for cross-robot sy
 ### Crowd Logic
 Smart blocked-path announcements with escalating urgency:
 
-| Venue | Style | Use Case |
-|-------|-------|----------|
-| **Spaceship** | Friendly, audible | Event floors, crowds |
-| **Adult Party** | Faster escalation | Bars, clubs |
-| **Restaurant** | Balanced | Dining service |
-| **Kids Event** | Patient, gentle | Family events |
-| **Hospital** | Quiet, minimal | Healthcare |
+| Venue | Style | Safe Dist | Ramp Rate | Use Case |
+|-------|-------|-----------|-----------|----------|
+| **Spaceship** | Friendly, audible | 4 ft | Gentle | Event floors, crowds |
+| **Adult Party** | Faster escalation | 2.5 ft | Quick | Bars, clubs |
+| **Restaurant** | Balanced | 3 ft | Moderate | Dining service |
+| **Kids Event** | Patient, gentle | 5 ft | Very Gentle | Family events |
+| **Hospital** | Quiet, minimal | 4 ft | Very Gentle | Healthcare |
 
 Features LIDAR intelligence to distinguish moving obstacles (people) from static objects.
+
+#### Speed Ramping
+Configurable velocity reduction as robot approaches obstacles:
+
+- **Safe Distance**: Distance (ft/in) where slowdown begins (1-10 ft range)
+- **Ramp Rate**: How aggressively speed decreases (Gentle → Aggressive)
+  - Gentle (0.1-0.4): Gradual slowdown, smooth deceleration
+  - Aggressive (0.7-1.0): Quick stop, slows early
+
+Settings sync to relay tablet for real-time velocity control in WARN zone.
+
+### Navigation Recovery
+Intelligent recovery when path is blocked or navigation fails (status 604):
+
+1. **Detect** - LIDAR zone (STOP/CREEP), ultrasonic sensors, or nav failure
+2. **Backup** - Reverse slowly (5cm/s tortoise speed) to create space
+3. **Spin Search** - Rotate to find clear direction (LIDAR + ultrasonic must both be clear)
+4. **Nudge Forward** - Move into the clear space
+5. **Retry Nav** - Re-issue navigation command
+6. **Give Up** - After max attempts, play sad R2D2 sounds and ask for help
+
+Ultrasonic sensors detect obstacles LIDAR can't see (glass, cardboard, soft objects).
 
 ## Frontier Tower Floors
 
@@ -114,6 +136,23 @@ Features LIDAR intelligence to distinguish moving obstacles (people) from static
 |-------|------|----------|-----------|
 | Tibo 1 | TY126AA003F0-005878 | 123456789 | 10.42.0.1:9090 |
 | Tibo 2 | TY126AA003F0-005993 | 123456789 | 10.42.0.1:9090 |
+
+### Sensors
+
+| Sensor | Topic | Data |
+|--------|-------|------|
+| LIDAR | `/laser_data` | Point cloud for SafetyZone (STOP/CREEP/WARN/CLEAR) |
+| Ultrasonic | `/mobile_base/sensors/core` → `analog_input` | Distance (mm) - sees glass, cardboard |
+| Battery | `/robot_status` → `battery` | Charge percentage |
+
+### Speed Modes (Native Base)
+
+| Mode | Name | Description |
+|------|------|-------------|
+| 0-2 | Safety Low/Med/High | Cautious, large stop distance |
+| 3-5 | Balance Low/Med/High | Balanced speed/safety |
+| 6-8 | Efficiency Low/Med/High | Speed focused |
+| 60 | Smooth | Food delivery (no sudden stops) |
 
 ## Project Structure
 

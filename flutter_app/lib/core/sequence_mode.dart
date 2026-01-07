@@ -440,7 +440,8 @@ enum SequencePhase {
   arriving('Arriving...', Icons.location_on),
   speaking('Speaking...', Icons.volume_up),
   displaying('Displaying...', Icons.tv),
-  waiting('Waiting...', Icons.timer);
+  waiting('Waiting...', Icons.timer),
+  awaitingVisitor('Waiting for visitor...', Icons.pan_tool);
 
   final String label;
   final IconData icon;
@@ -584,6 +585,12 @@ class SequenceManager extends ChangeNotifier {
     _bufferExecutor = null;
     _useBufferExecutor = false;
   }
+
+  /// Get buffer client for sensor data access (ultrasonic, etc)
+  BufferClient? get bufferClient => _bufferExecutor?.bufferClient;
+
+  /// Get current buffer state (includes ultrasonic sensor data)
+  BufferState? get bufferState => _bufferExecutor?.bufferClient.state;
 
   /// Mirror buffer executor state to SequenceManager
   void _onBufferExecutorChanged() {

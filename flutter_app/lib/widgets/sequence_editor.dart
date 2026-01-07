@@ -28,8 +28,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
   final TextEditingController _tourNameController = TextEditingController();
   final TextEditingController _introTextController = TextEditingController();
   final TextEditingController _outroTextController = TextEditingController();
-  final TextEditingController _motionGreetingController = TextEditingController();
-  final TextEditingController _motionButtonTextController = TextEditingController();
+  final TextEditingController _motionGreetingController =
+      TextEditingController();
+  final TextEditingController _motionButtonTextController =
+      TextEditingController();
   final Map<String, TextEditingController> _stopControllers = {};
 
   // Cache to reduce unnecessary rebuilds - only rebuild when these actually change
@@ -52,7 +54,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     final runningSeq = manager.currentSequence;
 
     if (runningSeq != null && _selectedSequence?.id != runningSeq.id) {
-      debugPrint('SequenceEditor: Running sequence changed, auto-selecting: ${runningSeq.name}');
+      debugPrint(
+          'SequenceEditor: Running sequence changed, auto-selecting: ${runningSeq.name}');
       _selectSequence(runningSeq);
     }
   }
@@ -65,10 +68,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
     final sequences = manager.sequences;
 
     if (runningSeq != null) {
-      debugPrint('SequenceEditor: Auto-selecting running sequence: ${runningSeq.name}');
+      debugPrint(
+          'SequenceEditor: Auto-selecting running sequence: ${runningSeq.name}');
       _selectSequence(runningSeq);
     } else if (sequences.isNotEmpty && _selectedSequence == null) {
-      debugPrint('SequenceEditor: Auto-selecting first sequence: ${sequences.first.name}');
+      debugPrint(
+          'SequenceEditor: Auto-selecting first sequence: ${sequences.first.name}');
       _selectSequence(sequences.first);
     }
   }
@@ -97,7 +102,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 
   /// Get or create a controller for a stop field
-  TextEditingController _getStopController(String stopKey, String initialValue) {
+  TextEditingController _getStopController(
+      String stopKey, String initialValue) {
     if (!_stopControllers.containsKey(stopKey)) {
       _stopControllers[stopKey] = TextEditingController(text: initialValue);
     }
@@ -111,7 +117,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
       description: '',
       stops: [],
     );
-    debugPrint('SequenceEditor._createNewSequence: Creating tour "${newTour.name}" id=${newTour.id}');
+    debugPrint(
+        'SequenceEditor._createNewSequence: Creating tour "${newTour.name}" id=${newTour.id}');
     await SequenceManager.instance.saveSequence(newTour);
     debugPrint('SequenceEditor._createNewSequence: saveSequence completed');
     _tourNameController.text = newTour.name;
@@ -179,7 +186,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     // Build tour from controller values - no model updates during typing!
     if (_selectedSequence == null) return;
 
-    debugPrint('SequenceEditor._saveSequence: Saving tour "${_selectedSequence!.name}"');
+    debugPrint(
+        'SequenceEditor._saveSequence: Saving tour "${_selectedSequence!.name}"');
 
     // Read all values from controllers
     final stops = <SequenceStop>[];
@@ -187,10 +195,18 @@ class _SequenceEditorState extends State<SequenceEditor> {
       final oldStop = _selectedSequence!.stops[i];
       stops.add(SequenceStop(
         waypoint: oldStop.waypoint,
-        speakText: _stopControllers['${_selectedSequence!.id}_${i}_speak']?.text,
+        speakText:
+            _stopControllers['${_selectedSequence!.id}_${i}_speak']?.text,
         displayUrl: _stopControllers['${_selectedSequence!.id}_${i}_url']?.text,
-        displayDuration: int.tryParse(_stopControllers['${_selectedSequence!.id}_${i}_duration']?.text ?? '') ?? 0,
-        waitSeconds: int.tryParse(_stopControllers['${_selectedSequence!.id}_${i}_wait']?.text ?? '') ?? 0,
+        displayDuration: int.tryParse(
+                _stopControllers['${_selectedSequence!.id}_${i}_duration']
+                        ?.text ??
+                    '') ??
+            0,
+        waitSeconds: int.tryParse(
+                _stopControllers['${_selectedSequence!.id}_${i}_wait']?.text ??
+                    '') ??
+            0,
       ));
     }
 
@@ -202,28 +218,37 @@ class _SequenceEditorState extends State<SequenceEditor> {
       loop: _selectedSequence!.loop,
       announceArrival: _selectedSequence!.announceArrival,
       restAtEndSeconds: _selectedSequence!.restAtEndSeconds,
-      introText: _introTextController.text.isEmpty ? null : _introTextController.text,
-      outroText: _outroTextController.text.isEmpty ? null : _outroTextController.text,
+      introText:
+          _introTextController.text.isEmpty ? null : _introTextController.text,
+      outroText:
+          _outroTextController.text.isEmpty ? null : _outroTextController.text,
       startWaypoint: _selectedSequence!.startWaypoint,
       endWaypoint: _selectedSequence!.endWaypoint,
       motionTriggerStart: _selectedSequence!.motionTriggerStart,
-      motionGreeting: _motionGreetingController.text.isEmpty ? null : _motionGreetingController.text,
-      motionButtonText: _motionButtonTextController.text.isEmpty ? null : _motionButtonTextController.text,
+      motionGreeting: _motionGreetingController.text.isEmpty
+          ? null
+          : _motionGreetingController.text,
+      motionButtonText: _motionButtonTextController.text.isEmpty
+          ? null
+          : _motionButtonTextController.text,
     );
 
     _selectedSequence = updatedTour;
     await SequenceManager.instance.saveSequence(updatedTour);
-    debugPrint('SequenceEditor._saveSequence: Save completed for "${updatedTour.name}"');
+    debugPrint(
+        'SequenceEditor._saveSequence: Save completed for "${updatedTour.name}"');
   }
 
-  void _updateTourOptions({bool? loop, bool? announceArrival, bool? motionTriggerStart}) {
+  void _updateTourOptions(
+      {bool? loop, bool? announceArrival, bool? motionTriggerStart}) {
     // Only for checkboxes - these need immediate state update AND save
     if (_selectedSequence == null) return;
     setState(() {
       _selectedSequence = _selectedSequence!.copyWith(
         loop: loop ?? _selectedSequence!.loop,
         announceArrival: announceArrival ?? _selectedSequence!.announceArrival,
-        motionTriggerStart: motionTriggerStart ?? _selectedSequence!.motionTriggerStart,
+        motionTriggerStart:
+            motionTriggerStart ?? _selectedSequence!.motionTriggerStart,
       );
     });
     // Auto-save checkbox changes
@@ -285,16 +310,17 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 
   void _showCloudSyncDialog() {
-    // Default to Frontier Tower API
-    const defaultApiUrl = 'https://api.frontiertower.io/dev';
+    // No default API URL - user must deploy CloudFormation and get actual URL
+    // The frontiertower.io domain is a placeholder that may not exist
     final apiUrlController = TextEditingController(
-      text: SequenceManager.instance.cloudApiUrl ?? defaultApiUrl,
+      text: SequenceManager.instance.cloudApiUrl ?? '',
     );
 
     // Auto-detect map ID from connected robot
     final robotConnection = context.read<RobotConnection>();
     final robotStatus = robotConnection.status;
-    final autoMapId = (robotStatus.buildingName.isNotEmpty && robotStatus.floorName.isNotEmpty)
+    final autoMapId = (robotStatus.buildingName.isNotEmpty &&
+            robotStatus.floorName.isNotEmpty)
         ? '${robotStatus.buildingName}_${robotStatus.floorName}'
         : null;
     final mapIdController = TextEditingController(
@@ -357,35 +383,14 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   ],
                 ),
               ),
-              // Help text explaining where to get the URL
-              Container(
-                padding: const EdgeInsets.all(8),
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, size: 16, color: Colors.blue[300]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Get API URL from CloudFormation stack output: ApiEndpoint',
-                        style: TextStyle(fontSize: 11, color: Colors.blue[300]),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
               // API URL
               TextField(
                 controller: apiUrlController,
                 decoration: const InputDecoration(
-                  labelText: 'API Gateway URL',
-                  hintText: 'https://{api-id}.execute-api.{region}.amazonaws.com/{env}',
+                  labelText: 'Cloud API URL',
+                  hintText: 'Leave empty for local storage',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.link),
+                  prefixIcon: Icon(Icons.cloud),
                 ),
               ),
               const SizedBox(height: 16),
@@ -413,30 +418,45 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   decoration: BoxDecoration(
                     color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                    border:
+                        Border.all(color: Colors.orange.withValues(alpha: 0.3)),
                   ),
-                  child: Column(
+                  child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.route, size: 18),
-                          const SizedBox(width: 8),
-                          const Text('TOURS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          Icon(Icons.route, size: 18),
+                          SizedBox(width: 8),
+                          Text('TOURS',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 14)),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       Row(
                         children: [
-                          const Icon(Icons.cloud_upload, color: Colors.blue, size: 16),
-                          const SizedBox(width: 4),
-                          const Text('PUSH', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 12)),
-                          const Text(' - Upload local tours', style: TextStyle(fontSize: 11)),
-                          const Spacer(),
-                          const Icon(Icons.cloud_download, color: Colors.green, size: 16),
-                          const SizedBox(width: 4),
-                          const Text('PULL', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 12)),
-                          const Text(' - Download from cloud', style: TextStyle(fontSize: 11)),
+                          Icon(Icons.cloud_upload,
+                              color: Colors.blue, size: 16),
+                          SizedBox(width: 4),
+                          Text('PUSH',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue,
+                                  fontSize: 12)),
+                          Text(' - Upload local tours',
+                              style: TextStyle(fontSize: 11)),
+                          Spacer(),
+                          Icon(Icons.cloud_download,
+                              color: Colors.green, size: 16),
+                          SizedBox(width: 4),
+                          Text('PULL',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                  fontSize: 12)),
+                          Text(' - Download from cloud',
+                              style: TextStyle(fontSize: 11)),
                         ],
                       ),
                     ],
@@ -449,30 +469,46 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   decoration: BoxDecoration(
                     color: Colors.purple.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+                    border:
+                        Border.all(color: Colors.purple.withValues(alpha: 0.3)),
                   ),
-                  child: Column(
+                  child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.location_on, size: 18, color: Colors.purple),
-                          const SizedBox(width: 8),
-                          const Text('WAYPOINTS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          Icon(Icons.location_on,
+                              size: 18, color: Colors.purple),
+                          SizedBox(width: 8),
+                          Text('WAYPOINTS',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold, fontSize: 14)),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: 8),
                       Row(
                         children: [
-                          const Icon(Icons.cloud_upload, color: Colors.blue, size: 16),
-                          const SizedBox(width: 4),
-                          const Text('PUSH', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue, fontSize: 12)),
-                          const Text(' - Upload POI list', style: TextStyle(fontSize: 11)),
-                          const Spacer(),
-                          const Icon(Icons.cloud_download, color: Colors.green, size: 16),
-                          const SizedBox(width: 4),
-                          const Text('PULL', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 12)),
-                          const Text(' - Download POI list', style: TextStyle(fontSize: 11)),
+                          Icon(Icons.cloud_upload,
+                              color: Colors.blue, size: 16),
+                          SizedBox(width: 4),
+                          Text('PUSH',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue,
+                                  fontSize: 12)),
+                          Text(' - Upload POI list',
+                              style: TextStyle(fontSize: 11)),
+                          Spacer(),
+                          Icon(Icons.cloud_download,
+                              color: Colors.green, size: 16),
+                          SizedBox(width: 4),
+                          Text('PULL',
+                              style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                  fontSize: 12)),
+                          Text(' - Download POI list',
+                              style: TextStyle(fontSize: 11)),
                         ],
                       ),
                     ],
@@ -491,8 +527,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
           if (SequenceManager.instance.cloudSyncEnabled) ...[
             // Waypoint Push button (purple)
             TextButton.icon(
-              icon: const Icon(Icons.location_on, color: Colors.purple, size: 18),
-              label: const Text('WP↑', style: TextStyle(color: Colors.purple, fontSize: 12)),
+              icon:
+                  const Icon(Icons.location_on, color: Colors.purple, size: 18),
+              label: const Text('WP↑',
+                  style: TextStyle(color: Colors.purple, fontSize: 12)),
               onPressed: () async {
                 Navigator.pop(ctx);
                 final waypoints = widget.availableWaypoints;
@@ -511,9 +549,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       'Other robots on this floor can then pull this POI list.',
                     ),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Cancel')),
                       FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.purple),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: Colors.purple),
                         onPressed: () => Navigator.pop(c, true),
                         child: const Text('Push'),
                       ),
@@ -527,7 +568,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   final cloud = FleetCloudClient();
                   cloud.configure(apiEndpoint: apiUrlController.text.trim());
                   if (mapId != null) cloud.setMapId(mapId);
-                  final success = await cloud.pushWaypoints(waypoints, mapId: mapId);
+                  final success =
+                      await cloud.pushWaypoints(waypoints, mapId: mapId);
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
@@ -544,7 +586,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
             // Waypoint Pull button (purple/green)
             TextButton.icon(
               icon: const Icon(Icons.location_on, color: Colors.teal, size: 18),
-              label: const Text('WP↓', style: TextStyle(color: Colors.teal, fontSize: 12)),
+              label: const Text('WP↓',
+                  style: TextStyle(color: Colors.teal, fontSize: 12)),
               onPressed: () async {
                 Navigator.pop(ctx);
                 final confirm = await showDialog<bool>(
@@ -563,9 +606,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       'Pull only shows what\'s in the cloud for reference.',
                     ),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Cancel')),
                       FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.teal),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: Colors.teal),
                         onPressed: () => Navigator.pop(c, true),
                         child: const Text('Pull'),
                       ),
@@ -584,7 +630,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     if (cloudWaypoints.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('No waypoints found in cloud for this map'),
+                          content:
+                              Text('No waypoints found in cloud for this map'),
                           backgroundColor: Colors.orange,
                         ),
                       );
@@ -593,14 +640,16 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       showDialog(
                         context: context,
                         builder: (c) => AlertDialog(
-                          title: Text('Cloud Waypoints (${cloudWaypoints.length})'),
+                          title: Text(
+                              'Cloud Waypoints (${cloudWaypoints.length})'),
                           content: SizedBox(
                             width: 300,
                             height: 300,
                             child: ListView.builder(
                               itemCount: cloudWaypoints.length,
                               itemBuilder: (ctx, i) => ListTile(
-                                leading: const Icon(Icons.location_on, size: 18),
+                                leading:
+                                    const Icon(Icons.location_on, size: 18),
                                 title: Text(cloudWaypoints[i]),
                                 dense: true,
                               ),
@@ -622,8 +671,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
             const SizedBox(width: 8),
             // Tour Push button
             TextButton.icon(
-              icon: const Icon(Icons.cloud_upload, color: Colors.blue, size: 18),
-              label: const Text('Tours↑', style: TextStyle(color: Colors.blue, fontSize: 12)),
+              icon:
+                  const Icon(Icons.cloud_upload, color: Colors.blue, size: 18),
+              label: const Text('Tours↑',
+                  style: TextStyle(color: Colors.blue, fontSize: 12)),
               onPressed: () async {
                 Navigator.pop(ctx);
                 // Confirm push
@@ -636,16 +687,22 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       'Cloud tours will be updated with your local versions.',
                     ),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
-                      FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Push')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Cancel')),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(c, true),
+                          child: const Text('Push')),
                     ],
                   ),
                 );
                 if (confirm == true) {
-                  final pushed = await SequenceManager.instance.pushAllToCloud();
+                  final pushed =
+                      await SequenceManager.instance.pushAllToCloud();
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Pushed $pushed tour(s) to cloud!')),
+                      SnackBar(
+                          content: Text('Pushed $pushed tour(s) to cloud!')),
                     );
                     setState(() {});
                   }
@@ -654,8 +711,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
             ),
             // Tour Pull button
             TextButton.icon(
-              icon: const Icon(Icons.cloud_download, color: Colors.green, size: 18),
-              label: const Text('Tours↓', style: TextStyle(color: Colors.green, fontSize: 12)),
+              icon: const Icon(Icons.cloud_download,
+                  color: Colors.green, size: 18),
+              label: const Text('Tours↓',
+                  style: TextStyle(color: Colors.green, fontSize: 12)),
               onPressed: () async {
                 Navigator.pop(ctx);
                 // Confirm pull
@@ -668,9 +727,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       'Any local-only tours will be lost!',
                     ),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(c, false),
+                          child: const Text('Cancel')),
                       FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+                        style: FilledButton.styleFrom(
+                            backgroundColor: Colors.orange),
                         onPressed: () => Navigator.pop(c, true),
                         child: const Text('Pull & Replace'),
                       ),
@@ -681,7 +743,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   await SequenceManager.instance.loadFromCloud();
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Pulled ${SequenceManager.instance.sequences.length} tours from cloud!')),
+                      SnackBar(
+                          content: Text(
+                              'Pulled ${SequenceManager.instance.sequences.length} tours from cloud!')),
                     );
                     setState(() {});
                   }
@@ -692,7 +756,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
           // Save & Connect button
           FilledButton.icon(
             icon: const Icon(Icons.save),
-            label: Text(SequenceManager.instance.cloudSyncEnabled ? 'Update' : 'Connect'),
+            label: Text(SequenceManager.instance.cloudSyncEnabled
+                ? 'Update'
+                : 'Connect'),
             onPressed: () async {
               Navigator.pop(ctx);
               await SequenceManager.instance.configureCloud(
@@ -722,7 +788,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('SequenceEditor: build() - isEditing=$_isEditing, selectedSequence=${_selectedSequence?.name}');
+    debugPrint(
+        'SequenceEditor: build() - isEditing=$_isEditing, selectedSequence=${_selectedSequence?.name}');
 
     // When editing, DON'T use ListenableBuilder - completely isolate from rebuilds
     // This prevents the text input chaos caused by rebuilds resetting cursor position
@@ -744,11 +811,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
         final sequenceCount = sequences.length;
         final runningId = runningSequence?.id;
         final shouldLog = sequenceCount != _cachedSequenceCount ||
-                          status != _cachedStatus ||
-                          runningId != _cachedRunningSequenceId;
+            status != _cachedStatus ||
+            runningId != _cachedRunningSequenceId;
 
         if (shouldLog) {
-          debugPrint('SequenceEditor: ListenableBuilder - $sequenceCount sequences, status=$status, running=${runningSequence?.name}');
+          debugPrint(
+              'SequenceEditor: ListenableBuilder - $sequenceCount sequences, status=$status, running=${runningSequence?.name}');
           _cachedSequenceCount = sequenceCount;
           _cachedStatus = status;
           _cachedRunningSequenceId = runningId;
@@ -764,7 +832,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
               ),
               // Collapsed header - just show we have sequences available
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.grey[900],
                   border: Border(top: BorderSide(color: Colors.grey[700]!)),
@@ -780,7 +849,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     const Spacer(),
                     Text(
                       'Stop sequence to edit',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic),
+                      style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic),
                     ),
                   ],
                 ),
@@ -834,7 +906,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
               const Spacer(),
               if (status == SequenceStatus.running) ...[
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                   decoration: BoxDecoration(
                     color: Colors.green,
                     borderRadius: BorderRadius.circular(10),
@@ -851,18 +924,32 @@ class _SequenceEditorState extends State<SequenceEditor> {
                         ),
                       ),
                       SizedBox(width: 4),
-                      Text('On', style: TextStyle(color: Colors.white, fontSize: 11)),
+                      Text('On',
+                          style: TextStyle(color: Colors.white, fontSize: 11)),
                     ],
                   ),
                 ),
-                SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: IconButton(
-                    icon: const Icon(Icons.stop, color: Colors.red, size: 18),
-                    onPressed: () => SequenceManager.instance.stopSequence(),
-                    tooltip: 'Stop',
-                    padding: EdgeInsets.zero,
+                const SizedBox(width: 8),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      debugPrint('SequenceEditor: Stop button pressed!');
+                      SequenceManager.instance.stopSequence();
+                    },
+                    borderRadius: BorderRadius.circular(4),
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.5)),
+                      ),
+                      child:
+                          const Icon(Icons.stop, color: Colors.red, size: 18),
+                    ),
                   ),
                 ),
               ] else ...[
@@ -904,23 +991,29 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 Expanded(
                   child: DropdownButton<String>(
                     value: _selectedSequence?.id,
-                    hint: const Text('Select Sequence', style: TextStyle(fontSize: 13)),
+                    hint: const Text('Select Sequence',
+                        style: TextStyle(fontSize: 13)),
                     isExpanded: true,
                     isDense: true,
-                    items: sequences.map((t) => DropdownMenuItem(
-                      value: t.id,
-                      child: Text(t.name, overflow: TextOverflow.ellipsis),
-                    )).toList(),
+                    items: sequences
+                        .map((t) => DropdownMenuItem(
+                              value: t.id,
+                              child:
+                                  Text(t.name, overflow: TextOverflow.ellipsis),
+                            ))
+                        .toList(),
                     onChanged: (id) {
                       if (id != null) {
-                        _selectSequence(sequences.firstWhere((t) => t.id == id));
+                        _selectSequence(
+                            sequences.firstWhere((t) => t.id == id));
                       }
                     },
                   ),
                 ),
                 if (_selectedSequence != null)
                   IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                    icon: const Icon(Icons.delete_outline,
+                        color: Colors.red, size: 20),
                     onPressed: () => _deleteSequence(_selectedSequence!),
                     tooltip: 'Delete Sequence',
                     visualDensity: VisualDensity.compact,
@@ -970,7 +1063,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   children: [
                     Text(
                       seq.name,
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold),
                     ),
                     if (seq.description.isNotEmpty)
                       Text(
@@ -1160,7 +1254,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 : Colors.grey.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: seq.motionTriggerStart ? Colors.blue : Colors.grey.shade700,
+              color:
+                  seq.motionTriggerStart ? Colors.blue : Colors.grey.shade700,
             ),
           ),
           child: Column(
@@ -1227,7 +1322,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
               SizedBox(
                 width: 150,
                 child: DropdownButtonFormField<String?>(
-                  key: ValueKey('start_wp_${seq.id}_${_normalizeWaypointValue(seq.startWaypoint)}'),
+                  key: ValueKey(
+                      'start_wp_${seq.id}_${_normalizeWaypointValue(seq.startWaypoint)}'),
                   // Convert empty string to null; ensure value exists in waypoints or use null
                   initialValue: _normalizeWaypointValue(seq.startWaypoint),
                   decoration: const InputDecoration(
@@ -1235,18 +1331,22 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     prefixIcon: Icon(Icons.play_arrow, size: 20),
                     border: OutlineInputBorder(),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                   ),
                   items: [
-                    const DropdownMenuItem<String?>(value: null, child: Text('(None)')),
-                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem<String?>(
-                      value: wp,
-                      child: Text(wp, overflow: TextOverflow.ellipsis),
-                    )),
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('(None)')),
+                    ...widget.availableWaypoints
+                        .map((wp) => DropdownMenuItem<String?>(
+                              value: wp,
+                              child: Text(wp, overflow: TextOverflow.ellipsis),
+                            )),
                   ],
                   onChanged: (value) {
                     setState(() {
-                      _selectedSequence = _selectedSequence!.copyWith(startWaypoint: value);
+                      _selectedSequence =
+                          _selectedSequence!.copyWith(startWaypoint: value);
                     });
                     // Auto-save dropdown changes
                     _saveSequence();
@@ -1280,7 +1380,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
               SizedBox(
                 width: 150,
                 child: DropdownButtonFormField<String?>(
-                  key: ValueKey('end_wp_${seq.id}_${_normalizeWaypointValue(seq.endWaypoint)}'),
+                  key: ValueKey(
+                      'end_wp_${seq.id}_${_normalizeWaypointValue(seq.endWaypoint)}'),
                   // Convert empty string to null; ensure value exists in waypoints or use null
                   initialValue: _normalizeWaypointValue(seq.endWaypoint),
                   decoration: const InputDecoration(
@@ -1288,18 +1389,22 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     prefixIcon: Icon(Icons.stop, size: 20),
                     border: OutlineInputBorder(),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 8, vertical: 12),
                   ),
                   items: [
-                    const DropdownMenuItem<String?>(value: null, child: Text('(None)')),
-                    ...widget.availableWaypoints.map((wp) => DropdownMenuItem<String?>(
-                      value: wp,
-                      child: Text(wp, overflow: TextOverflow.ellipsis),
-                    )),
+                    const DropdownMenuItem<String?>(
+                        value: null, child: Text('(None)')),
+                    ...widget.availableWaypoints
+                        .map((wp) => DropdownMenuItem<String?>(
+                              value: wp,
+                              child: Text(wp, overflow: TextOverflow.ellipsis),
+                            )),
                   ],
                   onChanged: (value) {
                     setState(() {
-                      _selectedSequence = _selectedSequence!.copyWith(endWaypoint: value);
+                      _selectedSequence =
+                          _selectedSequence!.copyWith(endWaypoint: value);
                     });
                     // Auto-save dropdown changes
                     _saveSequence();
@@ -1330,7 +1435,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                const Icon(Icons.hourglass_bottom, size: 20, color: Colors.orange),
+                const Icon(Icons.hourglass_bottom,
+                    size: 20, color: Colors.orange),
                 const SizedBox(width: 8),
                 const Text('Rest at end:'),
                 const SizedBox(width: 8),
@@ -1376,7 +1482,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: [
-              const Text('Stops', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('Stops',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               const Spacer(),
               ElevatedButton.icon(
                 icon: const Icon(Icons.add_location, size: 18),
@@ -1431,7 +1538,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
           ],
         ),
         subtitle: stop.hasActions
-            ? const Text('Actions configured', style: TextStyle(fontSize: 11, color: Colors.green))
+            ? const Text('Actions configured',
+                style: TextStyle(fontSize: 11, color: Colors.green))
             : null,
         trailing: IconButton(
           icon: const Icon(Icons.delete, size: 20),
@@ -1445,7 +1553,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
               children: [
                 // Speak text - NO onChanged, read from controller on save
                 TextField(
-                  controller: _getStopController('${seq.id}_${index}_speak', stop.speakText ?? ''),
+                  controller: _getStopController(
+                      '${seq.id}_${index}_speak', stop.speakText ?? ''),
                   decoration: const InputDecoration(
                     labelText: 'Speak Text (TTS)',
                     hintText: 'What to say at this stop...',
@@ -1459,7 +1568,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
 
                 // Display URL - NO onChanged
                 TextField(
-                  controller: _getStopController('${seq.id}_${index}_url', stop.displayUrl ?? ''),
+                  controller: _getStopController(
+                      '${seq.id}_${index}_url', stop.displayUrl ?? ''),
                   decoration: const InputDecoration(
                     labelText: 'Display URL (website/image)',
                     hintText: 'https://...',
@@ -1475,7 +1585,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   children: [
                     Expanded(
                       child: TextField(
-                        controller: _getStopController('${seq.id}_${index}_duration', stop.displayDuration.toString()),
+                        controller: _getStopController(
+                            '${seq.id}_${index}_duration',
+                            stop.displayDuration.toString()),
                         decoration: const InputDecoration(
                           labelText: 'Display (sec)',
                           border: OutlineInputBorder(),
@@ -1487,7 +1599,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: TextField(
-                        controller: _getStopController('${seq.id}_${index}_wait', stop.waitSeconds.toString()),
+                        controller: _getStopController(
+                            '${seq.id}_${index}_wait',
+                            stop.waitSeconds.toString()),
                         decoration: const InputDecoration(
                           labelText: 'Extra Wait (sec)',
                           border: OutlineInputBorder(),
@@ -1541,9 +1655,13 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 ),
                 title: Text(wp),
                 subtitle: hasTask
-                    ? const Text('Has task config', style: TextStyle(fontSize: 11, color: Colors.green))
+                    ? const Text('Has task config',
+                        style: TextStyle(fontSize: 11, color: Colors.green))
                     : null,
-                trailing: hasTask ? const Icon(Icons.auto_awesome, size: 16, color: Colors.green) : null,
+                trailing: hasTask
+                    ? const Icon(Icons.auto_awesome,
+                        size: 16, color: Colors.green)
+                    : null,
                 onTap: () {
                   // Copy task config values to the new SequenceStop
                   final stop = _createStopFromWaypointTask(wp, taskEngine);
@@ -1565,7 +1683,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
   }
 
   /// Create a SequenceStop from a waypoint, copying any TaskEngine task config
-  SequenceStop _createStopFromWaypointTask(String waypoint, TaskEngine taskEngine) {
+  SequenceStop _createStopFromWaypointTask(
+      String waypoint, TaskEngine taskEngine) {
     final assignment = taskEngine.getAssignment(waypoint);
 
     if (assignment == null || assignment.modeId == null) {
@@ -1618,14 +1737,17 @@ class SequenceRunnerWidget extends StatelessWidget {
             children: [
               // Header with tour name and controls
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.2),
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(14)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.play_circle, color: Colors.green, size: 28),
+                    const Icon(Icons.play_circle,
+                        color: Colors.green, size: 28),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1633,11 +1755,13 @@ class SequenceRunnerWidget extends StatelessWidget {
                         children: [
                           Text(
                             seq.name,
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold),
                           ),
                           Text(
                             'Stop ${stopIndex + 1} of ${seq.stops.length}${seq.loop ? ' (looping)' : ''}',
-                            style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[400]),
                           ),
                         ],
                       ),
@@ -1675,9 +1799,11 @@ class SequenceRunnerWidget extends StatelessWidget {
                             width: 70,
                             height: 70,
                             decoration: BoxDecoration(
-                              color: _getPhaseColor(phase).withValues(alpha: 0.2),
+                              color:
+                                  _getPhaseColor(phase).withValues(alpha: 0.2),
                               shape: BoxShape.circle,
-                              border: Border.all(color: _getPhaseColor(phase), width: 2),
+                              border: Border.all(
+                                  color: _getPhaseColor(phase), width: 2),
                             ),
                             child: Stack(
                               alignment: Alignment.center,
@@ -1696,7 +1822,8 @@ class SequenceRunnerWidget extends StatelessWidget {
                                 Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(phase.icon, size: 20, color: _getPhaseColor(phase)),
+                                    Icon(phase.icon,
+                                        size: 20, color: _getPhaseColor(phase)),
                                     if (countdown > 0)
                                       Text(
                                         '${countdown}s',
@@ -1718,7 +1845,8 @@ class SequenceRunnerWidget extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: _getPhaseColor(phase),
                                     borderRadius: BorderRadius.circular(12),
@@ -1726,11 +1854,15 @@ class SequenceRunnerWidget extends StatelessWidget {
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(phase.icon, size: 14, color: Colors.white),
+                                      Icon(phase.icon,
+                                          size: 14, color: Colors.white),
                                       const SizedBox(width: 4),
                                       Text(
                                         phase.label,
-                                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12),
                                       ),
                                     ],
                                   ),
@@ -1744,7 +1876,9 @@ class SequenceRunnerWidget extends StatelessWidget {
                                       Expanded(
                                         child: Text(
                                           stop.waypoint,
-                                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                          style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.bold),
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
@@ -1759,12 +1893,17 @@ class SequenceRunnerWidget extends StatelessWidget {
 
                       // Stop details
                       if (stop != null) ...[
-                        if (stop.speakText != null && stop.speakText!.isNotEmpty)
-                          _buildDetailRow(Icons.volume_up, 'Speech', stop.speakText!),
-                        if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty)
-                          _buildDetailRow(Icons.web, 'Display', stop.displayUrl!),
+                        if (stop.speakText != null &&
+                            stop.speakText!.isNotEmpty)
+                          _buildDetailRow(
+                              Icons.volume_up, 'Speech', stop.speakText!),
+                        if (stop.displayUrl != null &&
+                            stop.displayUrl!.isNotEmpty)
+                          _buildDetailRow(
+                              Icons.web, 'Display', stop.displayUrl!),
                         if (stop.waitSeconds > 0)
-                          _buildDetailRow(Icons.timer, 'Wait', '${stop.waitSeconds} seconds'),
+                          _buildDetailRow(Icons.timer, 'Wait',
+                              '${stop.waitSeconds} seconds'),
                       ],
 
                       const SizedBox(height: 12),
@@ -1789,7 +1928,8 @@ class SequenceRunnerWidget extends StatelessWidget {
         children: [
           Icon(icon, size: 16, color: Colors.grey[500]),
           const SizedBox(width: 8),
-          Text('$label: ', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+          Text('$label: ',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12)),
           Expanded(
             child: Text(
               value,
@@ -1838,6 +1978,8 @@ class SequenceRunnerWidget extends StatelessWidget {
         return Colors.purple;
       case SequencePhase.waiting:
         return Colors.teal;
+      case SequencePhase.awaitingVisitor:
+        return Colors.amber;
     }
   }
 }

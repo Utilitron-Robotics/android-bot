@@ -45,6 +45,13 @@ class CrowdLogicConfig {
   final bool announceMoving;     // Announce for moving obstacles
   final bool announceStatic;     // Announce for unexpected static obstacles
 
+  // Speed ramping settings
+  final double safeDistanceFeet;  // Distance in feet where speed ramping begins
+  final double rampRate;          // How aggressively speed decreases (0.0-1.0, higher = faster slowdown)
+
+  // Helpers for conversion
+  double get safeDistanceMeters => safeDistanceFeet * 0.3048;
+
   const CrowdLogicConfig({
     this.venue = CrowdLogicVenue.restaurant,
     this.checkInterval = 3,
@@ -59,6 +66,8 @@ class CrowdLogicConfig {
     this.enableIntelligence = true,  // Smart LIDAR detection ON by default
     this.announceMoving = true,       // Announce for moving obstacles
     this.announceStatic = true,       // Announce for static obstacles in path
+    this.safeDistanceFeet = 3.0,      // 3 feet = ~0.9m default
+    this.rampRate = 0.5,              // Medium aggression
   });
 
   /// Preset for Spaceship (Frontier Tower event floor) - open venue, crowds moving
@@ -77,6 +86,8 @@ class CrowdLogicConfig {
     enableIntelligence: true,  // Smart detection for moving crowds
     announceMoving: true,
     announceStatic: true,
+    safeDistanceFeet: 4.0,  // 4 feet - give space in crowded venues
+    rampRate: 0.4,          // Gentle slowdown for event floor
   );
 
   /// Preset for adult parties - faster escalation, but still reasonable
@@ -91,6 +102,8 @@ class CrowdLogicConfig {
     warning6: 90,   // Was 30
     repeatInterval: 10,
     enableSounds: true,
+    safeDistanceFeet: 2.5,  // Tighter space at parties
+    rampRate: 0.7,          // More aggressive slowdown
   );
 
   /// Preset for restaurants - balanced (patient first warning, then escalates)
@@ -105,6 +118,8 @@ class CrowdLogicConfig {
     warning6: 180,  // Was 50
     repeatInterval: 15,
     enableSounds: true,
+    safeDistanceFeet: 3.0,  // Standard 3 feet distance
+    rampRate: 0.5,          // Balanced slowdown
   );
 
   /// Preset for kids events - patient and gentle
@@ -119,6 +134,8 @@ class CrowdLogicConfig {
     warning6: 120,
     repeatInterval: 15,
     enableSounds: false,  // No scary sounds for kids
+    safeDistanceFeet: 5.0,  // Extra distance for kids safety
+    rampRate: 0.3,          // Very gentle slowdown
   );
 
   /// Preset for hospitals - quiet and minimal
@@ -133,6 +150,8 @@ class CrowdLogicConfig {
     warning6: 240,
     repeatInterval: 30,
     enableSounds: false,
+    safeDistanceFeet: 4.0,  // Safe distance in medical settings
+    rampRate: 0.2,          // Very slow, cautious approach
   );
 
   /// Get preset by venue type
@@ -167,6 +186,8 @@ class CrowdLogicConfig {
     'enable_intelligence': enableIntelligence,
     'announce_moving': announceMoving,
     'announce_static': announceStatic,
+    'safe_distance_feet': safeDistanceFeet,
+    'ramp_rate': rampRate,
   };
 
   factory CrowdLogicConfig.fromJson(Map<String, dynamic> json) => CrowdLogicConfig(
@@ -175,17 +196,20 @@ class CrowdLogicConfig {
       orElse: () => CrowdLogicVenue.restaurant,
     ),
     checkInterval: json['check_interval'] as int? ?? 3,
-    warning1: json['warning1'] as int? ?? 8,
-    warning2: json['warning2'] as int? ?? 15,
-    warning3: json['warning3'] as int? ?? 22,
-    warning4: json['warning4'] as int? ?? 30,
-    warning5: json['warning5'] as int? ?? 40,
-    warning6: json['warning6'] as int? ?? 50,
-    repeatInterval: json['repeat_interval'] as int? ?? 8,
+    // Use patient restaurant defaults (not aggressive old defaults)
+    warning1: json['warning1'] as int? ?? 30,   // Was 8 - too aggressive
+    warning2: json['warning2'] as int? ?? 45,   // Was 15
+    warning3: json['warning3'] as int? ?? 60,   // Was 22
+    warning4: json['warning4'] as int? ?? 90,   // Was 30
+    warning5: json['warning5'] as int? ?? 120,  // Was 40
+    warning6: json['warning6'] as int? ?? 180,  // Was 50
+    repeatInterval: json['repeat_interval'] as int? ?? 15,  // Was 8
     enableSounds: json['enable_sounds'] as bool? ?? true,
     enableIntelligence: json['enable_intelligence'] as bool? ?? true,
     announceMoving: json['announce_moving'] as bool? ?? true,
     announceStatic: json['announce_static'] as bool? ?? true,
+    safeDistanceFeet: (json['safe_distance_feet'] as num?)?.toDouble() ?? 3.0,
+    rampRate: (json['ramp_rate'] as num?)?.toDouble() ?? 0.5,
   );
 
   CrowdLogicConfig copyWith({
@@ -202,6 +226,8 @@ class CrowdLogicConfig {
     bool? enableIntelligence,
     bool? announceMoving,
     bool? announceStatic,
+    double? safeDistanceFeet,
+    double? rampRate,
   }) => CrowdLogicConfig(
     venue: venue ?? this.venue,
     checkInterval: checkInterval ?? this.checkInterval,
@@ -216,6 +242,8 @@ class CrowdLogicConfig {
     enableIntelligence: enableIntelligence ?? this.enableIntelligence,
     announceMoving: announceMoving ?? this.announceMoving,
     announceStatic: announceStatic ?? this.announceStatic,
+    safeDistanceFeet: safeDistanceFeet ?? this.safeDistanceFeet,
+    rampRate: rampRate ?? this.rampRate,
   );
 }
 
