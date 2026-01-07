@@ -48,10 +48,15 @@ class _HomeScreenState extends State<HomeScreen> {
       _urlController.text = savedUrl;
 
       // Load saved connection mode
-      await _loadConnectionMode();
+      final hadSavedMode = await _loadConnectionMode();
 
-      // Detect mode from saved URL if no saved mode
-      _detectModeFromUrl(savedUrl);
+      // ONLY detect mode from URL if there was NO saved mode
+      if (!hadSavedMode) {
+        debugPrint('HomeScreen: No saved mode found, detecting from URL: $savedUrl');
+        _detectModeFromUrl(savedUrl);
+      } else {
+        debugPrint('HomeScreen: Using saved mode, NOT detecting from URL');
+      }
     });
   }
 
@@ -124,7 +129,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Load connection mode from SharedPreferences
-  Future<void> _loadConnectionMode() async {
+  /// Returns true if a saved mode was found, false otherwise
+  Future<bool> _loadConnectionMode() async {
     final prefs = await SharedPreferences.getInstance();
     final savedMode = prefs.getString('connection_mode');
     if (savedMode != null) {
@@ -134,7 +140,10 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       setState(() => _connectionMode = mode);
       debugPrint('HomeScreen: Loaded connection mode: ${mode.name}');
+      return true;
     }
+    debugPrint('HomeScreen: No saved connection mode found');
+    return false;
   }
 
   @override
