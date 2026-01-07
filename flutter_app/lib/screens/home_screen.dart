@@ -44,19 +44,26 @@ class _HomeScreenState extends State<HomeScreen> {
       final robot = context.read<RobotConnection>();
       final savedUrl = robot.robotUrl;
 
+      debugPrint('=== HOME PAGE INIT ===');
+      debugPrint('Loaded URL from robot: $savedUrl');
+
       // Always display the last used URL, regardless of mode
       _urlController.text = savedUrl;
+      debugPrint('Set URL controller to: ${_urlController.text}');
 
       // Load saved connection mode
       final hadSavedMode = await _loadConnectionMode();
+      debugPrint('Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
 
       // ONLY detect mode from URL if there was NO saved mode
       if (!hadSavedMode) {
         debugPrint('HomeScreen: No saved mode found, detecting from URL: $savedUrl');
         _detectModeFromUrl(savedUrl);
       } else {
-        debugPrint('HomeScreen: Using saved mode, NOT detecting from URL');
+        debugPrint('HomeScreen: Using saved mode: ${_connectionMode.name}, NOT detecting from URL');
       }
+      debugPrint('Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
+      debugPrint('=== END INIT ===');
     });
   }
 
