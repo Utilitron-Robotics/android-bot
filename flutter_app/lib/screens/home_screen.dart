@@ -38,12 +38,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Load saved URL
+    // Load saved URL and connection mode
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final robot = context.read<RobotConnection>();
-      _urlController.text = robot.robotUrl;
-      // Detect mode from saved URL
-      _detectModeFromUrl(robot.robotUrl);
+      final savedUrl = robot.robotUrl;
+
+      // Always display the last used URL, regardless of mode
+      _urlController.text = savedUrl;
+
+      // Detect and set mode from saved URL
+      _detectModeFromUrl(savedUrl);
     });
   }
 
@@ -77,22 +81,31 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onModeChanged(ConnectionMode? mode) {
     if (mode == null) return;
     setState(() => _connectionMode = mode);
-    // Update URL based on mode, preserving IP if it looks like a relay URL
-    final currentUrl = _urlController.text;
+
+    // Preserve the current URL - only update protocol/port if necessary
+    final currentUrl = _urlController.text.trim();
+    if (currentUrl.isEmpty) {
+      // Empty URL - use default for this mode
+      _urlController.text = mode.defaultUrl;
+      return;
+    }
+
     final uri = Uri.tryParse(currentUrl);
     final host = uri?.host ?? '';
 
+    if (host.isEmpty) {
+      // Invalid URL - use default
+      _urlController.text = mode.defaultUrl;
+      return;
+    }
+
+    // Preserve the IP, just update protocol/port to match mode
     if (mode == ConnectionMode.direct) {
-      _urlController.text = mode.defaultUrl;
-    } else if (host.isNotEmpty && host != '10.42.0.1') {
-      // Preserve the relay IP, just change port/protocol
-      if (mode == ConnectionMode.relayWs) {
-        _urlController.text = 'ws://$host:8766';
-      } else {
-        _urlController.text = 'http://$host:8765';
-      }
+      _urlController.text = 'ws://$host:9090';
+    } else if (mode == ConnectionMode.relayWs) {
+      _urlController.text = 'ws://$host:8766';
     } else {
-      _urlController.text = mode.defaultUrl;
+      _urlController.text = 'http://$host:8765';
     }
   }
 

@@ -242,10 +242,7 @@ class CommandBuffer(
                 "nav_status" to (status?.navStatus ?: 0),
                 "nav_goal" to (status?.currentGoalName ?: ""),
                 "battery" to (status?.battery ?: 0),
-                "safety_zone" to (status?.safetyZone?.name ?: "CLEAR"),
-                "ultrasonic" to (status?.sensors?.ultrasonicDistances ?: emptyList<Double>()),
-                "ultrasonic_blocked" to (status?.sensors?.ultrasonicBlocked ?: false),
-                "min_front_distance" to (status?.minFrontDistance ?: 99.0)
+                "safety_zone" to (status?.safetyZone?.name ?: "CLEAR")
             ),
             "crowd_config" to mapOf(
                 "safe_distance_meters" to crowdConfig.safeDistanceMeters,
@@ -364,13 +361,8 @@ class CommandBuffer(
                     // Check if stuck and in obstacle zone, OR if 604 triggered recovery
                     val stuckTime = System.currentTimeMillis() - lastProgressTime
                     val safetyZone = status?.safetyZone
-                    val ultrasonicBlocked = status?.sensors?.ultrasonicBlocked ?: false
-                    // LIDAR blocked OR ultrasonic blocked (cardboard box, glass, etc)
-                    val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP || ultrasonicBlocked
-
-                    if (ultrasonicBlocked) {
-                        Log.d(TAG, "Ultrasonic sees obstacle LIDAR can't - backing off")
-                    }
+                    // Check if LIDAR blocked (STOP or CREEP zones)
+                    val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP
 
                     // Smart recovery: push but if not moving, stop pushing and try something else
                     val shouldRecover = triggerRecovery || (stuckTime > recoveryConfig.stuckThresholdMs && isBlocked)
@@ -441,11 +433,10 @@ class CommandBuffer(
 
                             val currentStatus = robotClient.robotStatus.value
                             val currentZone = currentStatus?.safetyZone
-                            val ultrasonicClear = !(currentStatus?.sensors?.ultrasonicBlocked ?: false)
-                            // BOTH lidar AND ultrasonic must be clear
-                            if ((currentZone == SafetyZone.CLEAR || currentZone == SafetyZone.WARN) && ultrasonicClear) {
+                            // Check if LIDAR shows clear path (CLEAR or WARN zone)
+                            if (currentZone == SafetyZone.CLEAR || currentZone == SafetyZone.WARN) {
                                 foundClear = true
-                                Log.i(TAG, "Found clear direction (LIDAR + ultrasonic clear)!")
+                                Log.i(TAG, "Found clear direction (LIDAR clear)!")
                             }
                         }
                         robotClient.sendVelocity(0.0, 0.0)
@@ -576,9 +567,9 @@ class CommandBuffer(
                 delay(3000)
 
                 // DISABLE then RE-ENABLE obstacle intelligence to clear stale state
-                taskExecutor?.enableObstacleIntelligence(false)
+                robotClient.setObstacleIntelligenceEnabled(false)
                 delay(500)
-                taskExecutor?.enableObstacleIntelligence(true)
+                robotClient.setObstacleIntelligenceEnabled(true)
                 Log.i(TAG, "Cleared and re-enabled obstacle intelligence for motion detection")
 
                 // Show "waiting for visitor" on tablet
@@ -629,64 +620,20 @@ class CommandBuffer(
                     val settledMs = robotStationarySince?.let { System.currentTimeMillis() - it } ?: 0
                     val readyForMotion = settledMs >= settleTimeMs
 
-                    // Get current front obstacle distance (minimum from LIDAR front arc)
-                    val currentDistance = status?.minFrontDistance ?: Double.MAX_VALUE
+                    // TODO: Motion detection disabled - requires minFrontDistance field in RobotStatusData
+                    // This field doesn't exist yet in the sensor data structure
+                    // For now, motion_standby will only complete via button press or timeout
 
-                    // Log periodically to help debug motion detection
+                    // Log periodically to show we're waiting
                     if ((System.currentTimeMillis() - startTime) % 5000 < 500) {
-                        Log.d(TAG, "Motion check: ready=$readyForMotion, baseline=${baselineDistance?.let { "%.2f".format(it) } ?: "none"}, current=${"%.2f".format(currentDistance)}, frames=$motionFrameCount")
-                    }
-
-                    if (readyForMotion) {
-                        // First frame after settling - capture baseline
-                        if (baselineDistance == null) {
-                            baselineDistance = currentDistance
-                            Log.i(TAG, "Captured baseline distance: ${"%.2f".format(baselineDistance)}m")
-                        }
-
-                        // Only consider objects within detection range
-                        val inRange = currentDistance < maxDetectionRange
-
-                        // Calculate how much closer something is compared to baseline
-                        val approachAmount = (baselineDistance ?: 999.0) - currentDistance
-                        val isApproaching = approachAmount > approachThreshold && inRange
-
-                        if (isApproaching) {
-                            motionFrameCount++
-                            Log.d(TAG, "Approach detected: ${("%.2f".format(approachAmount))}m closer, frame $motionFrameCount/$requiredMotionFrames")
-
-                            if (motionFrameCount >= requiredMotionFrames && !greetingSpoken) {
-                                Log.i(TAG, "Motion detected! Something approached ${("%.2f".format(approachAmount))}m - AUTO-STARTING TOUR!")
-                                greetingSpoken = true
-                                motionDetected = true
-                                withContext(Dispatchers.Main) {
-                                    // Play arrival sound
-                                    taskExecutor?.playAlertSound("arrival")
-                                    delay(300)
-                                    // Speak "Human detected, starting tour!"
-                                    taskExecutor?.speakText("Human detected. Starting tour!")
-                                    delay(500)
-                                    // Hide motion overlay and start tour lock screen
-                                    taskExecutor?.displayUrl("motion://hide")
-                                }
-                                // AUTO-START: Complete the motion_standby command immediately
-                                Log.i(TAG, "Auto-completing motion_standby, tour will proceed")
-                                completeCommand(cmd.id, "motion_detected")
-                            }
-                        } else {
-                            // No approach - reset frame count (must be consecutive)
-                            if (motionFrameCount > 0) {
-                                Log.d(TAG, "Approach stopped, resetting frame count from $motionFrameCount")
-                            }
-                            motionFrameCount = 0
-                        }
+                        Log.d(TAG, "Motion standby waiting (motion detection not yet implemented)")
                     }
 
                     delay(500)  // Check every 500ms
                 }
 
                 // Disable obstacle intelligence now that motion detection is done
-                taskExecutor?.enableObstacleIntelligence(false)
+                robotClient.setObstacleIntelligenceEnabled(false)
                 Log.i(TAG, "Disabled obstacle intelligence after motion standby")
 
                 // If we exited due to timeout or skip, mark as such
@@ -733,8 +680,8 @@ class CommandBuffer(
                     rampRate = rate.coerceIn(0.1, 1.0)
                 )
 
-                // Forward to robot client for velocity ramping in WARN zone
-                robotClient.setCrowdConfig(crowdConfig.safeDistanceMeters, crowdConfig.rampRate)
+                // TODO: Forward to robot client for velocity ramping in WARN zone
+                // robotClient.setCrowdConfig method doesn't exist yet
 
                 Log.i(TAG, "Crowd config updated: safeDistance=${crowdConfig.safeDistanceMeters}m, rampRate=${crowdConfig.rampRate}")
                 completeCommand(cmd.id, "success")
