@@ -401,7 +401,7 @@ class MainActivity : AppCompatActivity() {
         updateIpAddress()
         binding.etRobotIp.setText(getRobotIp())
 
-        binding.btnStop.setOnClickListener { service?.stop() }
+        // btnStop removed - joystick auto-stops when released
         binding.btnEstop.setOnClickListener { service?.emergencyStop(true) }
         binding.btnReleaseEstop.setOnClickListener { service?.emergencyStop(false) }
 
@@ -447,7 +447,7 @@ class MainActivity : AppCompatActivity() {
             val maxAngularSpeed = 0.8 * speedMultiplier
 
             // Convert joystick position to robot velocities
-            val linearVel = -y * maxLinearSpeed  // Invert Y so up = forward
+            val linearVel = y * maxLinearSpeed  // y positive = down = forward (for operator in front)
             val angularVel = -x * maxAngularSpeed  // Invert X so left = left turn
 
             if (x == 0f && y == 0f) {
