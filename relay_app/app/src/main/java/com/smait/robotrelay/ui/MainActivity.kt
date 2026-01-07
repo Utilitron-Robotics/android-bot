@@ -437,12 +437,27 @@ class MainActivity : AppCompatActivity() {
             binding.ivSlamIcon.visibility = View.GONE
         }
 
-        setupJoystickButton(binding.btnForward, 0.3, 0.0)
-        setupJoystickButton(binding.btnBackward, -0.3, 0.0)
-        setupJoystickButton(binding.btnLeft, 0.0, 0.5)
-        setupJoystickButton(binding.btnRight, 0.0, -0.5)
-        setupJoystickButton(binding.btnForwardLeft, 0.2, 0.3)
-        setupJoystickButton(binding.btnForwardRight, 0.2, -0.3)
+        // Setup circular joystick
+        binding.joystickView.onMoveListener = { x, y ->
+            // x and y are -1.0 to 1.0
+            // Y-axis: negative = up (forward), positive = down (backward)
+            // X-axis: negative = left (turn left), positive = right (turn right)
+
+            val maxLinearSpeed = 0.4 * speedMultiplier
+            val maxAngularSpeed = 0.8 * speedMultiplier
+
+            // Convert joystick position to robot velocities
+            val linearVel = -y * maxLinearSpeed  // Invert Y so up = forward
+            val angularVel = -x * maxAngularSpeed  // Invert X so left = left turn
+
+            if (x == 0f && y == 0f) {
+                // Joystick centered - stop robot
+                service?.stop()
+            } else {
+                // Send velocity command
+                service?.sendVelocity(linearVel.toDouble(), angularVel.toDouble())
+            }
+        }
 
         binding.btnGoPoi.setOnClickListener {
             val poi = binding.etPoi.text.toString()
