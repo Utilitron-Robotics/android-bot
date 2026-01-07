@@ -3,9 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/robot_connection.dart';
-import '../core/sequence_mode.dart' show SequenceManager, SequenceStatus, SequencePhase, Sequence;
+import '../core/sequence_mode.dart'
+    show SequenceManager, SequenceStatus, SequencePhase, Sequence;
 import '../core/smait_protocol.dart' as protocol;
 import '../core/task_engine.dart';
+import '../utils/file_utils.dart';
 import '../services/audio_announcer.dart';
 import '../widgets/map_view.dart';
 import '../widgets/joystick.dart';
@@ -114,7 +116,8 @@ class _HudScreenState extends State<HudScreen>
 
       // Load saved connection mode
       final hadSavedMode = await _loadConnectionMode();
-      debugPrint('Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
+      debugPrint(
+          'Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
 
       // ONLY detect mode from URL if there was NO saved mode
       if (!hadSavedMode) {
@@ -123,7 +126,8 @@ class _HudScreenState extends State<HudScreen>
       } else {
         debugPrint('HUD: Using saved mode: ${_connectionMode.name}');
       }
-      debugPrint('Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
+      debugPrint(
+          'Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
       debugPrint('=== END HUD INIT ===');
     });
   }
@@ -288,7 +292,8 @@ class _HudScreenState extends State<HudScreen>
 
           // Debug: Log when sequence status changes
           if (tourRunning || tourManager.status != SequenceStatus.idle) {
-            debugPrint('HUD: Sequence status=${tourManager.status}, tourRunning=$tourRunning, phase=${tourManager.currentPhase}, countdown=${tourManager.countdownSeconds}');
+            debugPrint(
+                'HUD: Sequence status=${tourManager.status}, tourRunning=$tourRunning, phase=${tourManager.currentPhase}, countdown=${tourManager.countdownSeconds}');
           }
 
           if (robot.state == RobotConnectionState.disconnected ||
@@ -368,15 +373,6 @@ class _HudScreenState extends State<HudScreen>
                   child: _buildTourOverlay(tourManager),
                 ),
 
-              // === LAYER 2c: Large countdown timer (bottom right, visible from distance) ===
-              if (tourRunning && tourManager.countdownSeconds > 0)
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 200),
-                  bottom: 60,
-                  right: _rightPanelExpanded ? 280 : 72,
-                  child: _buildLargeCountdownTimer(tourManager),
-                ),
-
               // === LAYER 3: Glass panels on top ===
               // Top Status Bar
               Positioned(
@@ -409,6 +405,15 @@ class _HudScreenState extends State<HudScreen>
                 right: 0,
                 child: _buildBottomBar(robot),
               ),
+
+              // === LAYER 4: Countdown timer (must be above glass panels) ===
+              if (tourRunning && tourManager.countdownSeconds > 0)
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 200),
+                  bottom: 60,
+                  right: _rightPanelExpanded ? 280 : 72,
+                  child: _buildLargeCountdownTimer(tourManager),
+                ),
             ],
           );
         },
@@ -691,14 +696,16 @@ class _HudScreenState extends State<HudScreen>
     final stop = tourManager.currentStop;
     final status = tourManager.status;
 
-    debugPrint('HUD._buildTourOverlay: seq=${seq?.name}, phase=$phase, countdown=$countdown, stopIndex=$stopIndex, status=$status');
+    debugPrint(
+        'HUD._buildTourOverlay: seq=${seq?.name}, phase=$phase, countdown=$countdown, stopIndex=$stopIndex, status=$status');
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.9),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _accentSecondary.withValues(alpha: 0.6), width: 2),
+        border: Border.all(
+            color: _accentSecondary.withValues(alpha: 0.6), width: 2),
         boxShadow: [
           BoxShadow(
             color: _accentSecondary.withValues(alpha: 0.2),
@@ -739,7 +746,8 @@ class _HudScreenState extends State<HudScreen>
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(phase.icon, size: 16, color: _getPhaseColor(phase)),
+                        Icon(phase.icon,
+                            size: 16, color: _getPhaseColor(phase)),
                         if (countdown > 0)
                           Text(
                             '${countdown}s',
@@ -765,7 +773,8 @@ class _HudScreenState extends State<HudScreen>
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: _getPhaseColor(phase),
                             borderRadius: BorderRadius.circular(8),
@@ -797,12 +806,14 @@ class _HudScreenState extends State<HudScreen>
                     if (stop != null)
                       Row(
                         children: [
-                          Icon(Icons.location_on, size: 12, color: Colors.grey.shade400),
+                          Icon(Icons.location_on,
+                              size: 12, color: Colors.grey.shade400),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               stop.waypoint,
-                              style: TextStyle(color: Colors.grey.shade300, fontSize: 11),
+                              style: TextStyle(
+                                  color: Colors.grey.shade300, fontSize: 11),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -834,12 +845,15 @@ class _HudScreenState extends State<HudScreen>
                   const SizedBox(width: 4),
                   // Pause/Resume button
                   _MiniControlButton(
-                    icon: status == SequenceStatus.paused ? Icons.play_arrow : Icons.pause,
+                    icon: status == SequenceStatus.paused
+                        ? Icons.play_arrow
+                        : Icons.pause,
                     color: Colors.orange,
                     onTap: status == SequenceStatus.paused
                         ? tourManager.resumeSequence
                         : tourManager.pauseSequence,
-                    tooltip: status == SequenceStatus.paused ? 'Resume' : 'Pause',
+                    tooltip:
+                        status == SequenceStatus.paused ? 'Resume' : 'Pause',
                   ),
                   const SizedBox(width: 4),
                   // Stop button
@@ -991,10 +1005,10 @@ class _HudScreenState extends State<HudScreen>
   // Frontier Tower floors (to be populated from cloud)
   static const List<String> _floors = [
     'Robotics Floor', // 4th floor - current working floor
-    'Spaceship',      // Event floor - 2nd floor (large, stored in base)
-    'Lobby',          // Ground floor
-    'Mezzanine',      // Between floors
-    'Rooftop',        // Top floor events
+    'Spaceship', // Event floor - 2nd floor (large, stored in base)
+    'Lobby', // Ground floor
+    'Mezzanine', // Between floors
+    'Rooftop', // Top floor events
   ];
   String _selectedFloor = 'Robotics Floor';
 
@@ -1009,10 +1023,12 @@ class _HudScreenState extends State<HudScreen>
               'assets/frontiertowerlogo.jpeg',
               height: 32,
               width: 32,
-              errorBuilder: (ctx, err, stack) => const Icon(Icons.business, color: Color(0xFF9333EA)),
+              errorBuilder: (ctx, err, stack) =>
+                  const Icon(Icons.business, color: Color(0xFF9333EA)),
             ),
             const SizedBox(width: 12),
-            const Text('Frontier Tower', style: TextStyle(color: Color(0xFF9333EA))),
+            const Text('Frontier Tower',
+                style: TextStyle(color: Color(0xFF9333EA))),
           ],
         ),
         content: SizedBox(
@@ -1021,28 +1037,39 @@ class _HudScreenState extends State<HudScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Select Floor', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const Text('Select Floor',
+                  style: TextStyle(color: Colors.grey, fontSize: 12)),
               const SizedBox(height: 8),
               ...List.generate(_floors.length, (i) {
                 final floor = _floors[i];
                 final isSelected = floor == _selectedFloor;
                 return ListTile(
                   leading: Icon(
-                    floor == 'Robotics Floor' ? Icons.precision_manufacturing :
-                    floor == 'Spaceship' ? Icons.rocket_launch :
-                    floor == 'Lobby' ? Icons.door_front_door :
-                    floor == 'Mezzanine' ? Icons.stairs :
-                    Icons.roofing,
+                    floor == 'Robotics Floor'
+                        ? Icons.precision_manufacturing
+                        : floor == 'Spaceship'
+                            ? Icons.rocket_launch
+                            : floor == 'Lobby'
+                                ? Icons.door_front_door
+                                : floor == 'Mezzanine'
+                                    ? Icons.stairs
+                                    : Icons.roofing,
                     color: isSelected ? const Color(0xFF9333EA) : Colors.grey,
                   ),
-                  title: Text(floor, style: TextStyle(
-                    color: isSelected ? Colors.white : Colors.grey,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  )),
-                  trailing: isSelected ? const Icon(Icons.check, color: Color(0xFF9333EA)) : null,
+                  title: Text(floor,
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.grey,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.normal,
+                      )),
+                  trailing: isSelected
+                      ? const Icon(Icons.check, color: Color(0xFF9333EA))
+                      : null,
                   selected: isSelected,
-                  selectedTileColor: const Color(0xFF9333EA).withValues(alpha: 0.1),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  selectedTileColor:
+                      const Color(0xFF9333EA).withValues(alpha: 0.1),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
                   onTap: () {
                     setState(() => _selectedFloor = floor);
                     Navigator.pop(ctx);
@@ -1052,7 +1079,10 @@ class _HudScreenState extends State<HudScreen>
               const SizedBox(height: 16),
               Text(
                 'More floors coming soon as we scan them!',
-                style: TextStyle(color: Colors.grey[600], fontSize: 11, fontStyle: FontStyle.italic),
+                style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic),
               ),
             ],
           ),
@@ -1101,11 +1131,12 @@ class _HudScreenState extends State<HudScreen>
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Center(
-                      child: Text('FT', style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      )),
+                      child: Text('FT',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          )),
                     ),
                   ),
                 ),
@@ -1129,9 +1160,11 @@ class _HudScreenState extends State<HudScreen>
                         const SizedBox(width: 4),
                         Text(
                           _selectedFloor,
-                          style: const TextStyle(color: Colors.white70, fontSize: 11),
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 11),
                         ),
-                        const Icon(Icons.arrow_drop_down, size: 14, color: Colors.grey),
+                        const Icon(Icons.arrow_drop_down,
+                            size: 14, color: Colors.grey),
                       ],
                     ),
                   ],
@@ -1140,7 +1173,8 @@ class _HudScreenState extends State<HudScreen>
             ),
           ),
           const SizedBox(width: 16),
-          Container(width: 1, height: 32, color: Colors.grey.withValues(alpha: 0.3)),
+          Container(
+              width: 1, height: 32, color: Colors.grey.withValues(alpha: 0.3)),
           const SizedBox(width: 12),
 
           // Connection status
@@ -1377,7 +1411,8 @@ class _HudScreenState extends State<HudScreen>
     );
   }
 
-  Widget _buildSequenceContent(List<String> waypoints, SequenceManager tourManager) {
+  Widget _buildSequenceContent(
+      List<String> waypoints, SequenceManager tourManager) {
     return Padding(
       padding: const EdgeInsets.all(8),
       child: SequenceEditor(availableWaypoints: waypoints),
@@ -1483,7 +1518,8 @@ class _HudScreenState extends State<HudScreen>
             label: 'STOP',
             color: _dangerColor,
             onTap: () {
-              debugPrint('HUD: STOP pressed - cancelling nav and stopping movement');
+              debugPrint(
+                  'HUD: STOP pressed - cancelling nav and stopping movement');
               // Stop velocity immediately
               robot.sendVelocity(0, 0);
               // Cancel any active navigation
@@ -1721,7 +1757,8 @@ class _HudScreenState extends State<HudScreen>
                     borderRadius: BorderRadius.circular(8),
                     borderSide: BorderSide.none,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 ),
                 onSubmitted: (text) {
                   if (text.trim().isNotEmpty) {
@@ -1746,7 +1783,8 @@ class _HudScreenState extends State<HudScreen>
           ],
         ),
         const SizedBox(height: 16),
-        Text('Quick Phrases', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+        Text('Quick Phrases',
+            style: TextStyle(color: Colors.grey[500], fontSize: 12)),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -1866,6 +1904,16 @@ class _HudScreenState extends State<HudScreen>
           child: Text('No parameters discovered',
               style: TextStyle(color: Colors.grey)));
     }
+
+    // LOG ALL PARAMETERS TO CONSOLE
+    debugPrint('=== ROBOT PARAMETERS (${params.length}) ===');
+
+    // Also write to file for analysis of large lists
+    _writeLogToFile('robot_parameters.txt', params.join('\n'));
+
+    for (var p in params) debugPrint(p);
+    debugPrint('==========================================');
+
     return ListView.builder(
       itemCount: params.length,
       itemBuilder: (ctx, i) {
@@ -1885,6 +1933,32 @@ class _HudScreenState extends State<HudScreen>
       return const Center(
           child: Text('Not connected', style: TextStyle(color: Colors.grey)));
     }
+
+    // Build log buffer
+    final buffer = StringBuffer();
+    buffer.writeln('TOPICS (${caps.topics.length}):');
+    for (final topic in caps.topics) {
+      buffer.writeln('${topic.name}|${topic.type}');
+    }
+    buffer.writeln('\nSERVICES (${caps.services.length}):');
+    for (final service in caps.services) {
+      buffer.writeln('${service.name}|${service.type}');
+    }
+    buffer.writeln('\nWAYPOINTS (${caps.waypoints.length}):');
+    for (final wp in caps.waypoints) {
+      buffer.writeln(wp);
+    }
+
+    // LOG ALL CAPABILITIES TO CONSOLE
+    debugPrint(
+        '=== ROBOT CAPABILITIES (${caps.topics.length} topics, ${caps.services.length} services) ===');
+
+    // Also write to file for analysis
+    _writeLogToFile('robot_capabilities.txt', buffer.toString());
+
+    debugPrint(buffer.toString());
+    debugPrint('================================================');
+
     return ListView(
       children: [
         _CapabilityTile(
@@ -1959,6 +2033,12 @@ class _HudScreenState extends State<HudScreen>
     }
     debugPrint('HUD: No saved connection mode found');
     return false;
+  }
+
+  /// Write log data to file for debugging large datasets
+  Future<void> _writeLogToFile(String filename, String content) async {
+    // Delegate to cross-platform utility
+    await FileUtils.saveFile(context, filename, content);
   }
 
   void _navigateTo(String waypoint) {
@@ -2176,7 +2256,9 @@ class _WaypointButton extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: isNavigating ? activeColor.withValues(alpha: 0.15) : null,
-              border: Border.all(color: activeColor.withValues(alpha: isNavigating ? 0.6 : 0.3)),
+              border: Border.all(
+                  color:
+                      activeColor.withValues(alpha: isNavigating ? 0.6 : 0.3)),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Row(
@@ -2185,10 +2267,12 @@ class _WaypointButton extends StatelessWidget {
                   const SizedBox(
                     width: 14,
                     height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00FF88)),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Color(0xFF00FF88)),
                   )
                 else if (hasMode)
-                  Icon(Icons.auto_awesome, size: 14, color: Colors.amber.shade400)
+                  Icon(Icons.auto_awesome,
+                      size: 14, color: Colors.amber.shade400)
                 else
                   Icon(Icons.location_on, size: 16, color: activeColor),
                 const SizedBox(width: 8),
@@ -2470,9 +2554,9 @@ class _TaskConfigDialog extends StatefulWidget {
 
 class _TaskConfigDialogState extends State<_TaskConfigDialog> {
   // Individual toggles for each capability
-  bool _enableDelivery = false;  // Wait for pickup + return to origin
-  bool _enableSpeak = false;     // TTS announcement
-  bool _enableDisplay = false;   // Show website/media
+  bool _enableDelivery = false; // Wait for pickup + return to origin
+  bool _enableSpeak = false; // TTS announcement
+  bool _enableDisplay = false; // Show website/media
 
   // Data controllers
   late TextEditingController _speakController;
@@ -2606,7 +2690,8 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
                 onToggle: (v) => setState(() => _enableDelivery = v),
                 child: Row(
                   children: [
-                    const Text('Wait: ', style: TextStyle(color: Colors.white70)),
+                    const Text('Wait: ',
+                        style: TextStyle(color: Colors.white70)),
                     Expanded(
                       child: Slider(
                         value: _waitSeconds.toDouble(),
@@ -2619,7 +2704,8 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
                             : null,
                       ),
                     ),
-                    Text('$_waitSeconds s', style: const TextStyle(color: Colors.white70)),
+                    Text('$_waitSeconds s',
+                        style: const TextStyle(color: Colors.white70)),
                   ],
                 ),
               ),
@@ -2684,7 +2770,8 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
     return Container(
       decoration: BoxDecoration(
         border: Border.all(
-          color: enabled ? iconColor.withValues(alpha: 0.5) : Colors.grey.shade700,
+          color:
+              enabled ? iconColor.withValues(alpha: 0.5) : Colors.grey.shade700,
           width: enabled ? 2 : 1,
         ),
         borderRadius: BorderRadius.circular(8),
@@ -2701,7 +2788,8 @@ class _TaskConfigDialogState extends State<_TaskConfigDialog> {
               padding: const EdgeInsets.all(12),
               child: Row(
                 children: [
-                  Icon(icon, color: enabled ? iconColor : Colors.grey, size: 24),
+                  Icon(icon,
+                      color: enabled ? iconColor : Colors.grey, size: 24),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(

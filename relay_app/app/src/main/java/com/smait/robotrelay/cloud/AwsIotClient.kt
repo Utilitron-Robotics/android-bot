@@ -35,9 +35,9 @@ class AwsIotClient(
         const val TOPIC_COMMANDS = "robots/{id}/commands"
         const val TOPIC_FLEET_BROADCAST = "fleet/broadcast"
 
-        // Default endpoints (configure in settings)
-        const val DEFAULT_API_ENDPOINT = "https://api.frontiertower.io"
-        const val DEFAULT_IOT_ENDPOINT = "wss://iot.frontiertower.io"
+        // Default endpoints - CloudFormation-deployed API Gateway
+        const val DEFAULT_API_ENDPOINT = "https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev"
+        const val DEFAULT_IOT_ENDPOINT = ""  // Future: AWS IoT Core WebSocket endpoint (not configured yet)
     }
 
     // Configuration

@@ -28,8 +28,10 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
   DateTime? _lastStatusUpdate;
   DateTime? get lastStatusUpdate => _lastStatusUpdate;
   @override
-  bool get isStale => _lastStatusUpdate != null &&
-      DateTime.now().difference(_lastStatusUpdate!) > const Duration(seconds: 5);
+  bool get isStale =>
+      _lastStatusUpdate != null &&
+      DateTime.now().difference(_lastStatusUpdate!) >
+          const Duration(seconds: 5);
 
   // Nav status deduplication - only forward CHANGED status to task manager
   int _lastForwardedNavStatus = -1;
@@ -159,6 +161,18 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
     }
   }
 
+  /// Refresh capabilities (re-run discovery)
+  Future<void> refreshCapabilities() async {
+    if (_introspection != null && isConnected) {
+      try {
+        _capabilities = await _introspection!.discover();
+        notifyListeners();
+      } catch (e) {
+        debugPrint('RobotConnection: Error refreshing capabilities: $e');
+      }
+    }
+  }
+
   /// Called when the WebSocket connection is lost (only after silent retries fail)
   void _onClientDisconnect() {
     debugPrint('RobotConnection: Connection lost after silent retries');
@@ -227,7 +241,8 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
           if (newStatus.navStatus != _lastForwardedNavStatus) {
             _lastForwardedNavStatus = newStatus.navStatus;
             _taskManager.onNavStatus(newStatus.navStatus);
-            if (newStatus.navStatus == 603 && newStatus.currentGoal.isNotEmpty) {
+            if (newStatus.navStatus == 603 &&
+                newStatus.currentGoal.isNotEmpty) {
               // Arrived at waypoint
               _taskManager.onArrived(newStatus.currentGoal);
             }
@@ -250,7 +265,8 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   /// Navigate to a waypoint (POI)
   Future<void> goToWaypoint(String poi) async {
-    debugPrint('RobotConnection.goToWaypoint: poi=$poi, isConnected=$isConnected');
+    debugPrint(
+        'RobotConnection.goToWaypoint: poi=$poi, isConnected=$isConnected');
     if (!isConnected) {
       debugPrint('RobotConnection.goToWaypoint: NOT CONNECTED - aborting!');
       return;

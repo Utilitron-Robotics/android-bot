@@ -539,16 +539,41 @@ class CommandBuffer(
 
             "wait" -> {
                 val durationMs = (cmd.data["duration_ms"] as? Number)?.toLong() ?: 0L
+                val showCountdown = cmd.data["show_countdown"] as? Boolean ?: false
+                val label = cmd.data["label"] as? String ?: "Next stop in"
                 val deadline = System.currentTimeMillis() + durationMs
-                // Check every 100ms if we've been skipped (currentCommand becomes null)
+
+                if (showCountdown) {
+                    // Initial countdown update
+                    withContext(Dispatchers.Main) {
+                        taskExecutor?.updateCountdown((durationMs / 1000).toInt(), label)
+                    }
+                }
+
+                var lastUpdate = System.currentTimeMillis()
                 while (System.currentTimeMillis() < deadline && currentCommand != null) {
                     delay(100)
+                    if (showCountdown && System.currentTimeMillis() - lastUpdate >= 1000) {
+                        val remainingMs = deadline - System.currentTimeMillis()
+                        withContext(Dispatchers.Main) {
+                            taskExecutor?.updateCountdown((remainingMs / 1000).toInt().coerceAtLeast(0), label)
+                        }
+                        lastUpdate = System.currentTimeMillis()
+                    }
                 }
-                // Only complete if we weren't skipped
+
+                if (showCountdown) {
+                    // Hide countdown when done
+                    withContext(Dispatchers.Main) {
+                        taskExecutor?.updateCountdown(0, "")
+                    }
+                }
+
                 if (currentCommand != null) {
                     completeCommand(cmd.id, "success")
                 }
             }
+
 
             "sound" -> {
                 val sound = cmd.data["sound"] as? String ?: "beep"
@@ -560,98 +585,29 @@ class CommandBuffer(
             }
 
             "motion_standby" -> {
-                // Wait for motion detection to trigger tour start
-                // When a person approaches, greet them and show start button
                 val greeting = cmd.data["greeting"] as? String ?: "Hello! Would you like a tour?"
                 val sequenceId = cmd.data["sequence_id"] as? String ?: ""
                 val buttonText = cmd.data["button_text"] as? String ?: "Start Tour"
-                val displayUrl = cmd.data["display_url"] as? String
+                val pin = cmd.data["pin"] as? String
 
-                Log.i(TAG, "Entering motion standby mode for sequence: $sequenceId, button: $buttonText")
+                Log.i(TAG, "Entering motion standby for sequence: $sequenceId, button: $buttonText")
 
-                // CRITICAL: Pause and CLEAR stale obstacle data before motion detection
-                // Robot may have just arrived from a navigation with obstacle events (door hits, recovery)
-                // Those stale values would cause false motion triggers
-                Log.i(TAG, "Pausing 3s to let robot fully settle before motion detection...")
-                delay(3000)
-
-                // DISABLE then RE-ENABLE obstacle intelligence to clear stale state
-                robotClient.setObstacleIntelligenceEnabled(false)
-                delay(500)
-                robotClient.setObstacleIntelligenceEnabled(true)
-                Log.i(TAG, "Cleared and re-enabled obstacle intelligence for motion detection")
-
-                // Show "waiting for visitor" on tablet
+                // Activate tour mode to lock the screen
                 withContext(Dispatchers.Main) {
-                    taskExecutor?.displayUrl("motion://standby?sequence=$sequenceId")
+                    taskExecutor?.startTourMode(pin)
+                    // Notify UI to show the "Start Tour" button on the lock screen
+                    taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }
 
-                // Monitor for motion (person approaching)
-                var motionDetected = false
-                var greetingSpoken = false
-                val startTime = System.currentTimeMillis()
-                val maxWaitMs = 300000L  // 5 minute max wait
-
-                // IMPORTANT: Wait for robot to be stationary before detecting motion
-                // This prevents false triggers when robot arrives at waypoint
-                // After hitting obstacles (door, wall), robot needs time to settle + LIDAR history to stabilize
-                val settleTimeMs = 8000L  // 8 second settle time - extra time after impacts
-                var robotStationarySince: Long? = null
-                var motionFrameCount = 0  // Require sustained motion, not just 1 frame
-                val requiredMotionFrames = 8  // Must see motion for 8 consecutive checks (~4s)
-
-                // DISTANCE-BASED motion detection (immune to LIDAR jitter)
-                // After settling, capture baseline distance. Only trigger if something APPROACHES (gets closer).
-                var baselineDistance: Double? = null
-                val approachThreshold = 0.25  // 25cm - something must get 25cm closer than baseline
-                val maxDetectionRange = 3.0   // Only consider objects within 3m
-
-                while (!motionDetected && currentCommand != null &&
-                       System.currentTimeMillis() - startTime < maxWaitMs) {
-                    val status = robotClient.robotStatus.value
-                    val robotVelocity = status?.velocity?.getOrElse(0) { 0.0 } ?: 0.0
-                    val isRobotStationary = kotlin.math.abs(robotVelocity) < 0.05
-
-                    // Track when robot became stationary
-                    if (isRobotStationary) {
-                        if (robotStationarySince == null) {
-                            robotStationarySince = System.currentTimeMillis()
-                            baselineDistance = null  // Reset baseline when robot stops
-                            Log.i(TAG, "Robot stopped, waiting ${settleTimeMs}ms before motion detection...")
-                        }
-                    } else {
-                        robotStationarySince = null
-                        baselineDistance = null
-                        motionFrameCount = 0  // Reset if robot moves
-                    }
-
-                    // Only check for motion after robot has been stationary for settle time
-                    val settledMs = robotStationarySince?.let { System.currentTimeMillis() - it } ?: 0
-                    val readyForMotion = settledMs >= settleTimeMs
-
-                    // TODO: Motion detection disabled - requires minFrontDistance field in RobotStatusData
-                    // This field doesn't exist yet in the sensor data structure
-                    // For now, motion_standby will only complete via button press or timeout
-
-                    // Log periodically to show we're waiting
-                    if ((System.currentTimeMillis() - startTime) % 5000 < 500) {
-                        Log.d(TAG, "Motion standby waiting (motion detection not yet implemented)")
-                    }
-
-                    delay(500)  // Check every 500ms
+                // Wait indefinitely until the command is completed by a button press or skipped
+                while (currentCommand != null) {
+                    delay(500)
                 }
 
-                // Disable obstacle intelligence now that motion detection is done
-                robotClient.setObstacleIntelligenceEnabled(false)
-                Log.i(TAG, "Disabled obstacle intelligence after motion standby")
-
-                // If we exited due to timeout or skip, mark as such
-                if (currentCommand != null && !motionDetected) {
-                    Log.i(TAG, "Motion standby timed out or skipped")
-                    completeCommand(cmd.id, "timeout")
-                }
-                // If tour was started via button, command is completed by notifyTourStarted()
+                // Command was completed externally (e.g., button press, skip, clear)
+                Log.i(TAG, "Exiting motion standby for sequence: $sequenceId")
             }
+
 
             "set_recovery_config" -> {
                 // Update recovery configuration from Flutter

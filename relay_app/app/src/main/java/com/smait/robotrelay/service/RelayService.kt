@@ -64,12 +64,16 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         const val ACTION_TASK_STATUS = "com.smait.robotrelay.TASK_STATUS"
         const val ACTION_COUNTDOWN = "com.smait.robotrelay.COUNTDOWN"
         const val ACTION_TOUR_MODE = "com.smait.robotrelay.TOUR_MODE"
+        const val ACTION_TOUR_STANDBY = "com.smait.robotrelay.TOUR_STANDBY"
         const val EXTRA_URL = "url"
         const val EXTRA_STATUS = "status"
         const val EXTRA_COUNTDOWN_SECONDS = "countdown_seconds"
         const val EXTRA_COUNTDOWN_LABEL = "countdown_label"
         const val EXTRA_TOUR_ACTION = "tour_action"
         const val EXTRA_TOUR_PIN = "tour_pin"
+        const val EXTRA_TOUR_SEQUENCE_ID = "tour_sequence_id"
+        const val EXTRA_TOUR_BUTTON_TEXT = "tour_button_text"
+
 
         // Common phrases to precache for instant playback
         private val PRECACHE_PHRASES = listOf(
@@ -581,6 +585,22 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         // Also hide countdown
         updateCountdown(0, "")
     }
+
+    /**
+     * Notifies the UI that a tour is in standby, ready to be started by a visitor.
+     * This allows the lock screen to show a "Start Tour" button.
+     */
+    override fun notifyTourStandby(sequenceId: String, buttonText: String) {
+        Log.i(TAG, "Notifying UI of tour standby: sequenceId=$sequenceId, buttonText=$buttonText")
+        mainHandler.post {
+            val intent = Intent(ACTION_TOUR_STANDBY).apply {
+                putExtra(EXTRA_TOUR_SEQUENCE_ID, sequenceId)
+                putExtra(EXTRA_TOUR_BUTTON_TEXT, buttonText)
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        }
+    }
+
 
     /**
      * Called when tour mode is unlocked via PIN entry on tablet

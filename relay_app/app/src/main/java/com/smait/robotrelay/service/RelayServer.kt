@@ -45,6 +45,7 @@ class RelayServer(
         // Tour mode lock screen
         fun startTourMode(pin: String?)
         fun stopTourMode()
+        fun notifyTourStandby(sequenceId: String, buttonText: String)
     }
     companion object {
         private const val TAG = "RelayServer"

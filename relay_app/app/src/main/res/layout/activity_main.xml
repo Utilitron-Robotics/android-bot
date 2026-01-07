@@ -21,20 +21,16 @@
             android:paddingHorizontal="16dp"
             android:background="#0A0E14">
 
-            <androidx.cardview.widget.CardView
+            <com.google.android.material.imageview.ShapeableImageView
+                android:id="@+id/ivFtLogo"
                 android:layout_width="32dp"
                 android:layout_height="32dp"
-                app:cardCornerRadius="16dp"
-                app:cardElevation="0dp"
-                app:cardBackgroundColor="@android:color/transparent">
-
-                <ImageView
-                    android:id="@+id/ivFtLogo"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:src="@drawable/frontiertowerlogo"
-                    android:scaleType="centerCrop" />
-            </androidx.cardview.widget.CardView>
+                android:src="@drawable/frontiertowerlogo"
+                android:scaleType="centerCrop"
+                app:shapeAppearanceOverlay="@style/ShapeAppearance.App.Circle"
+                app:strokeWidth="1dp"
+                app:strokeColor="#FFFFFF"
+                android:padding="0dp" />
 
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -302,11 +298,13 @@
 
             <!-- Background logo (dimmed) -->
             <ImageView
+                android:id="@+id/joystick_background"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:src="@drawable/frontiertowerlogo"
                 android:scaleType="centerInside"
-                android:alpha="0.15" />
+                android:alpha="0.15"
+                android:background="@drawable/joystick_background_rounded" />
 
             <!-- Joystick control -->
             <com.smait.robotrelay.ui.JoystickView
@@ -501,7 +499,7 @@
         android:layout_marginBottom="48dp"
         android:background="@drawable/countdown_background"
         android:padding="32dp"
-        android:elevation="10dp"
+        android:elevation="25dp"
         android:visibility="gone">
 
         <LinearLayout
@@ -665,7 +663,7 @@
                 android:text="START TOUR"
                 android:textSize="46sp"
                 android:textStyle="bold"
-                android:backgroundTint="#00CC00"
+                android:background="@drawable/button_background_rounded"
                 android:padding="32dp"
                 android:elevation="25dp" />
 
