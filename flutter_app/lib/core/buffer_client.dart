@@ -51,8 +51,7 @@ class BufferCommand {
         data: {'waypoint': waypoint, 'duration_ms': durationMs},
       );
 
-  factory BufferCommand.closeDisplay() =>
-      BufferCommand(type: 'close_display');
+  factory BufferCommand.closeDisplay() => BufferCommand(type: 'close_display');
 
   factory BufferCommand.wait(int durationMs) => BufferCommand(
         type: 'wait',
@@ -71,7 +70,8 @@ class BufferCommand {
     required String sequenceId,
     String? buttonText,
     String? displayUrl,
-  }) => BufferCommand(
+  }) =>
+      BufferCommand(
         type: 'motion_standby',
         data: {
           'greeting': greeting,
@@ -105,14 +105,14 @@ class BufferCommand {
 /// Recovery configuration for navigation failures
 /// Sent to relay to control how it handles blocked paths and 604 failures
 class RecoveryConfig {
-  final int stuckThresholdMs;      // Time stuck before recovery (default 15s)
-  final int maxRecoveryAttempts;   // Max retries before giving up (default 3)
-  final int backupDurationMs;      // How long to reverse (default 2000ms)
-  final double backupSpeed;        // Reverse speed m/s (default 0.15)
-  final double spinSpeed;          // Spin speed rad/s (default 0.5)
-  final int nudgeDurationMs;       // Forward nudge duration (default 1500ms)
-  final double nudgeSpeed;         // Nudge speed m/s (default 0.2)
-  final bool announceRecovery;     // TTS "Looking for alternative path"
+  final int stuckThresholdMs; // Time stuck before recovery (default 15s)
+  final int maxRecoveryAttempts; // Max retries before giving up (default 3)
+  final int backupDurationMs; // How long to reverse (default 2000ms)
+  final double backupSpeed; // Reverse speed m/s (default 0.15)
+  final double spinSpeed; // Spin speed rad/s (default 0.5)
+  final int nudgeDurationMs; // Forward nudge duration (default 1500ms)
+  final double nudgeSpeed; // Nudge speed m/s (default 0.2)
+  final bool announceRecovery; // TTS "Looking for alternative path"
 
   const RecoveryConfig({
     this.stuckThresholdMs = 15000,
@@ -126,26 +126,26 @@ class RecoveryConfig {
   });
 
   Map<String, dynamic> toJson() => {
-    'stuck_threshold_ms': stuckThresholdMs,
-    'max_recovery_attempts': maxRecoveryAttempts,
-    'backup_duration_ms': backupDurationMs,
-    'backup_speed': backupSpeed,
-    'spin_speed': spinSpeed,
-    'nudge_duration_ms': nudgeDurationMs,
-    'nudge_speed': nudgeSpeed,
-    'announce_recovery': announceRecovery,
-  };
+        'stuck_threshold_ms': stuckThresholdMs,
+        'max_recovery_attempts': maxRecoveryAttempts,
+        'backup_duration_ms': backupDurationMs,
+        'backup_speed': backupSpeed,
+        'spin_speed': spinSpeed,
+        'nudge_duration_ms': nudgeDurationMs,
+        'nudge_speed': nudgeSpeed,
+        'announce_recovery': announceRecovery,
+      };
 
   factory RecoveryConfig.fromJson(Map<String, dynamic> json) => RecoveryConfig(
-    stuckThresholdMs: json['stuck_threshold_ms'] as int? ?? 15000,
-    maxRecoveryAttempts: json['max_recovery_attempts'] as int? ?? 3,
-    backupDurationMs: json['backup_duration_ms'] as int? ?? 2000,
-    backupSpeed: (json['backup_speed'] as num?)?.toDouble() ?? 0.15,
-    spinSpeed: (json['spin_speed'] as num?)?.toDouble() ?? 0.5,
-    nudgeDurationMs: json['nudge_duration_ms'] as int? ?? 1500,
-    nudgeSpeed: (json['nudge_speed'] as num?)?.toDouble() ?? 0.2,
-    announceRecovery: json['announce_recovery'] as bool? ?? true,
-  );
+        stuckThresholdMs: json['stuck_threshold_ms'] as int? ?? 15000,
+        maxRecoveryAttempts: json['max_recovery_attempts'] as int? ?? 3,
+        backupDurationMs: json['backup_duration_ms'] as int? ?? 2000,
+        backupSpeed: (json['backup_speed'] as num?)?.toDouble() ?? 0.15,
+        spinSpeed: (json['spin_speed'] as num?)?.toDouble() ?? 0.5,
+        nudgeDurationMs: json['nudge_duration_ms'] as int? ?? 1500,
+        nudgeSpeed: (json['nudge_speed'] as num?)?.toDouble() ?? 0.2,
+        announceRecovery: json['announce_recovery'] as bool? ?? true,
+      );
 
   RecoveryConfig copyWith({
     int? stuckThresholdMs,
@@ -156,16 +156,17 @@ class RecoveryConfig {
     int? nudgeDurationMs,
     double? nudgeSpeed,
     bool? announceRecovery,
-  }) => RecoveryConfig(
-    stuckThresholdMs: stuckThresholdMs ?? this.stuckThresholdMs,
-    maxRecoveryAttempts: maxRecoveryAttempts ?? this.maxRecoveryAttempts,
-    backupDurationMs: backupDurationMs ?? this.backupDurationMs,
-    backupSpeed: backupSpeed ?? this.backupSpeed,
-    spinSpeed: spinSpeed ?? this.spinSpeed,
-    nudgeDurationMs: nudgeDurationMs ?? this.nudgeDurationMs,
-    nudgeSpeed: nudgeSpeed ?? this.nudgeSpeed,
-    announceRecovery: announceRecovery ?? this.announceRecovery,
-  );
+  }) =>
+      RecoveryConfig(
+        stuckThresholdMs: stuckThresholdMs ?? this.stuckThresholdMs,
+        maxRecoveryAttempts: maxRecoveryAttempts ?? this.maxRecoveryAttempts,
+        backupDurationMs: backupDurationMs ?? this.backupDurationMs,
+        backupSpeed: backupSpeed ?? this.backupSpeed,
+        spinSpeed: spinSpeed ?? this.spinSpeed,
+        nudgeDurationMs: nudgeDurationMs ?? this.nudgeDurationMs,
+        nudgeSpeed: nudgeSpeed ?? this.nudgeSpeed,
+        announceRecovery: announceRecovery ?? this.announceRecovery,
+      );
 }
 
 /// Crowd logic config from relay (for display/sync)
@@ -180,7 +181,8 @@ class RelayCrowdConfig {
 
   factory RelayCrowdConfig.fromJson(Map<String, dynamic> json) =>
       RelayCrowdConfig(
-        safeDistanceMeters: (json['safe_distance_meters'] as num?)?.toDouble() ?? 0.9,
+        safeDistanceMeters:
+            (json['safe_distance_meters'] as num?)?.toDouble() ?? 0.9,
         rampRate: (json['ramp_rate'] as num?)?.toDouble() ?? 0.5,
       );
 
@@ -222,11 +224,14 @@ class BufferState {
           : null,
       pendingCount: buffer?['pending_count'] as int? ?? 0,
       completedCount: buffer?['completed_count'] as int? ?? 0,
-      robot:
-          robotJson != null ? RobotBufferStatus.fromJson(robotJson) : RobotBufferStatus(),
-      crowdConfig:
-          crowdJson != null ? RelayCrowdConfig.fromJson(crowdJson) : const RelayCrowdConfig(),
-      timestamp: json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+      robot: robotJson != null
+          ? RobotBufferStatus.fromJson(robotJson)
+          : RobotBufferStatus(),
+      crowdConfig: crowdJson != null
+          ? RelayCrowdConfig.fromJson(crowdJson)
+          : const RelayCrowdConfig(),
+      timestamp:
+          json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
 }
@@ -258,10 +263,10 @@ class RobotBufferStatus {
   final int navStatus;
   final String navGoal;
   final int battery;
-  final String safetyZone;  // CLEAR, WARN, CREEP, STOP
-  final List<double> ultrasonic;  // Distances in meters
+  final String safetyZone; // CLEAR, WARN, CREEP, STOP
+  final List<double> ultrasonic; // Distances in meters
   final bool ultrasonicBlocked;
-  final double minFrontDistance;  // Min LIDAR distance in front arc (meters)
+  final double minFrontDistance; // Min LIDAR distance in front arc (meters)
 
   RobotBufferStatus({
     this.connected = false,
@@ -282,10 +287,12 @@ class RobotBufferStatus {
         battery: json['battery'] as int? ?? 0,
         safetyZone: json['safety_zone'] as String? ?? 'CLEAR',
         ultrasonic: (json['ultrasonic'] as List<dynamic>?)
-            ?.map((e) => (e as num).toDouble())
-            .toList() ?? [],
+                ?.map((e) => (e as num).toDouble())
+                .toList() ??
+            [],
         ultrasonicBlocked: json['ultrasonic_blocked'] as bool? ?? false,
-        minFrontDistance: (json['min_front_distance'] as num?)?.toDouble() ?? 99.0,
+        minFrontDistance:
+            (json['min_front_distance'] as num?)?.toDouble() ?? 99.0,
       );
 
   /// Min ultrasonic distance in cm (for display), null if no valid data
@@ -297,7 +304,8 @@ class RobotBufferStatus {
   }
 
   /// Whether ultrasonic data is available
-  bool get hasUltrasonic => ultrasonic.isNotEmpty && ultrasonic.any((d) => d > 0);
+  bool get hasUltrasonic =>
+      ultrasonic.isNotEmpty && ultrasonic.any((d) => d > 0);
 }
 
 /// Command completion result
@@ -350,10 +358,6 @@ class BufferClient extends ChangeNotifier {
   BufferEventCallback? onCommandCompleted;
   BufferEventCallback? onHeartbeat;
 
-  // Retry tracking (logic is HERE, not in relay)
-  final Map<String, int> _retryCount = {};
-  int maxRetries = 3;
-
   // Last heartbeat tracking
   DateTime? _lastHeartbeat;
   DateTime? get lastHeartbeat => _lastHeartbeat;
@@ -371,7 +375,8 @@ class BufferClient extends ChangeNotifier {
     // This handles the case where RosbridgeClient recreates stream controllers on reconnect
     _stateSubscription = _client.connectionState.listen((state) {
       if (state == WsConnectionState.connected) {
-        debugPrint('BufferClient: Connection restored, re-subscribing to messages');
+        debugPrint(
+            'BufferClient: Connection restored, re-subscribing to messages');
         _setupMessageHandler();
       }
     });
@@ -412,25 +417,19 @@ class BufferClient extends ChangeNotifier {
 
   void _handleCommandStarted(Map<String, dynamic> json) {
     final command = json['command'] as Map<String, dynamic>?;
-    debugPrint('BufferClient: Command started: ${command?['id']} (${command?['type']})');
+    debugPrint(
+        'BufferClient: Command started: ${command?['id']} (${command?['type']})');
     onCommandStarted?.call('started', command);
     notifyListeners();
   }
 
   void _handleCommandCompleted(Map<String, dynamic> json) {
     final result = CommandResult.fromJson(json);
-    debugPrint('BufferClient: Command completed: ${result.commandId} = ${result.result}');
+    debugPrint(
+        'BufferClient: Command completed: ${result.commandId} = ${result.result}');
 
     // Handle retry logic HERE (not in relay)
-    if (result.isFailure) {
-      final retries = _retryCount[result.commandId] ?? 0;
-      if (retries < maxRetries) {
-        _retryCount[result.commandId] = retries + 1;
-        debugPrint('BufferClient: Will retry (${retries + 1}/$maxRetries)');
-      }
-    } else {
-      _retryCount.remove(result.commandId);
-    }
+    // NOTE: Retry logic moved to BufferSequenceExecutor
 
     onCommandCompleted?.call('completed', result);
     notifyListeners();
@@ -452,7 +451,6 @@ class BufferClient extends ChangeNotifier {
   void clear() {
     debugPrint('BufferClient: Clearing buffer');
     _client.send({'op': 'buffer_clear'});
-    _retryCount.clear();
   }
 
   /// Pause execution after current command
@@ -545,20 +543,14 @@ class BufferClient extends ChangeNotifier {
       }
 
       // Wait
-      if (waitTimes.containsKey(waypoint) && !displayUrls.containsKey(waypoint)) {
+      if (waitTimes.containsKey(waypoint) &&
+          !displayUrls.containsKey(waypoint)) {
         commands.add(BufferCommand.wait(waitTimes[waypoint]! * 1000));
       }
     }
 
     loadCommands(commands);
   }
-
-  /// Retry count for a command
-  int getRetryCount(String commandId) => _retryCount[commandId] ?? 0;
-
-  /// Check if a command should be retried
-  bool shouldRetry(String commandId) =>
-      (_retryCount[commandId] ?? 0) < maxRetries;
 
   @override
   void dispose() {

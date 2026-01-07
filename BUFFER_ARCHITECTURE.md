@@ -1,5 +1,7 @@
 # Relay Buffer Architecture
 
+> **Note**: This document outlines the conceptual design for the buffer system. The implementation has now been integrated into `flutter_app` (BufferClient) and `relay_app` (CommandBuffer).
+
 ## Core Principle
 **Relay = BUFFER ONLY. No logic. No retries. No decisions.**
 

@@ -24,7 +24,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
 
   /// Initialize with robot connection
   void init(RobotConnection robot) {
-    debugPrint('SequenceExecutor.init: CALLED with robot=${robot.hashCode}, isConnected=${robot.isConnected}');
+    debugPrint(
+        'SequenceExecutor.init: CALLED with robot=${robot.hashCode}, isConnected=${robot.isConnected}');
     _robot = robot;
     debugPrint('SequenceExecutor.init: _robot is now set');
 
@@ -42,7 +43,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
     SequenceManager.instance.setBufferExecutor(_bufferClient!);
     debugPrint('SequenceExecutor.init: BufferSequenceExecutor enabled');
 
-    debugPrint('SequenceExecutor.init: Verifying - SequenceManager._callback is ${SequenceManager.instance.status}');
+    debugPrint(
+        'SequenceExecutor.init: Verifying - SequenceManager._callback is ${SequenceManager.instance.status}');
   }
 
   /// Get the buffer client for external monitoring
@@ -62,16 +64,20 @@ class SequenceExecutor implements SequenceExecutorCallback {
     if (SequenceManager.instance.status != SequenceStatus.running) return;
 
     // Check if we arrived at a waypoint (status 603)
+    // NOTE: Arrival events are routed through SequenceTaskMode via onNavStatus
+    // We do NOT want to trigger SequenceManager.onArrived here, as it may conflict
+    // with the active TaskMode logic. The TaskMode is responsible for sequence progression.
+    /*
     if (navStatus == 603 && goalName.isNotEmpty) {
       debugPrint('SequenceExecutor: Detected arrival at $goalName');
       _pendingWaypoint = null;
       SequenceManager.instance.onArrived(goalName);
     }
+    */
 
-    // NOTE: Navigation retries are handled by SequenceTaskMode, NOT here
-    // SequenceTaskMode has its own _retryNavigation() with 3 retries
-    // RobotConnection now forwards nav status to TaskManager with deduplication
-    // DO NOT forward here - it causes duplicate events!
+    // NOTE: Navigation retries are handled by SequenceTaskMode (via CommandManager), NOT here.
+    // We defer all arrival handling to SequenceTaskMode to prevent duplicate event handling
+    // and race conditions. The TaskMode is responsible for sequence progression.
   }
 
   // NOTE: _attemptRetry() removed - SequenceTaskMode handles all navigation retries
@@ -82,7 +88,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
     if (robot == null) return;
 
     if (robot.isStale && _pendingWaypoint != null) {
-      debugPrint('SequenceExecutor: Connection stale, will retry when restored');
+      debugPrint(
+          'SequenceExecutor: Connection stale, will retry when restored');
       // The retry will happen when connection comes back and we get nav status
     }
   }
@@ -97,13 +104,15 @@ class SequenceExecutor implements SequenceExecutorCallback {
 
   @override
   void onArrivalAnnouncement(String waypoint, {bool isDelivery = false}) {
-    debugPrint('SequenceExecutor: Arrival announcement at $waypoint (delivery=$isDelivery)');
+    debugPrint(
+        'SequenceExecutor: Arrival announcement at $waypoint (delivery=$isDelivery)');
     AudioAnnouncer().announceArrival(waypoint, isDelivery: isDelivery);
   }
 
   @override
   void onDisplay(String url, int durationSeconds) {
-    debugPrint('SequenceExecutor: Displaying URL for ${durationSeconds}s: $url');
+    debugPrint(
+        'SequenceExecutor: Displaying URL for ${durationSeconds}s: $url');
     _robot?.client.tabletDisplay(url);
   }
 
@@ -114,7 +123,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
     final displayName = waypoint
         .replaceAll('_', ' ')
         .split(' ')
-        .map((word) => word.isEmpty ? '' : '${word[0].toUpperCase()}${word.substring(1)}')
+        .map((word) =>
+            word.isEmpty ? '' : '${word[0].toUpperCase()}${word.substring(1)}')
         .join(' ');
 
     // Show company branding with waypoint name
@@ -139,7 +149,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
   @override
   void onNavigate(String waypoint) {
     debugPrint('SequenceExecutor: onNavigate called with waypoint=$waypoint');
-    debugPrint('SequenceExecutor: _robot=${_robot != null}, isConnected=${_robot?.isConnected}');
+    debugPrint(
+        'SequenceExecutor: _robot=${_robot != null}, isConnected=${_robot?.isConnected}');
     _pendingWaypoint = waypoint;
     if (_robot != null) {
       debugPrint('SequenceExecutor: Calling goToWaypoint($waypoint)');
@@ -152,7 +163,8 @@ class SequenceExecutor implements SequenceExecutorCallback {
 
   @override
   void onSequenceStarted(Sequence sequence) {
-    debugPrint('SequenceExecutor: Sequence started: ${sequence.name} with ${sequence.stops.length} stops');
+    debugPrint(
+        'SequenceExecutor: Sequence started: ${sequence.name} with ${sequence.stops.length} stops');
     AudioAnnouncer().speak('Starting sequence: ${sequence.name}');
   }
 
@@ -178,6 +190,7 @@ class SequenceExecutor implements SequenceExecutorCallback {
 
   @override
   void onStopArrived(SequenceStop stop, int stopIndex) {
-    debugPrint('SequenceExecutor: Arrived at stop ${stopIndex + 1}: ${stop.waypoint}');
+    debugPrint(
+        'SequenceExecutor: Arrived at stop ${stopIndex + 1}: ${stop.waypoint}');
   }
 }
