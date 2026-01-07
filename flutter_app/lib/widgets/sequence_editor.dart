@@ -58,6 +58,11 @@ class _SequenceEditorState extends State<SequenceEditor> {
           'SequenceEditor: Running sequence changed, auto-selecting: ${runningSeq.name}');
       _selectSequence(runningSeq);
     }
+
+    // Rebuild UI when sequences list changes (e.g., cloud sync PULL/PUSH)
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _initializeSelection() async {
@@ -741,11 +746,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 );
                 if (confirm == true) {
                   await SequenceManager.instance.loadFromCloud();
+                  // Save pulled tours to local storage
+                  await SequenceManager.instance.save();
+                  final count = SequenceManager.instance.sequences.length;
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                          content: Text(
-                              'Pulled ${SequenceManager.instance.sequences.length} tours from cloud!')),
+                      SnackBar(content: Text('Pulled $count tour(s) from cloud!')),
                     );
                     setState(() {});
                   }
