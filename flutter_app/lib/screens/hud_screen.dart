@@ -942,6 +942,8 @@ class _HudScreenState extends State<HudScreen>
         return Colors.purple;
       case SequencePhase.waiting:
         return Colors.teal;
+      case SequencePhase.awaitingVisitor:
+        return Colors.amber;
     }
   }
 

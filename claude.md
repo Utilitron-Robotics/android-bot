@@ -117,11 +117,7 @@ When a tour starts, the tablet enters **Tour Mode**:
 - Displays company branding or custom URLs
 - Shows floating countdown timer (bottom-right corner)
 
-**Unlock Sequence:**
-1. Tap screen 6 times within 2 seconds
-2. First tap triggers TTS: "Please do not touch the screen until asked to do so"
-3. After 3+ taps, shows "Tap X more times..."
-4. After 6 taps, PIN entry appears (default PIN: 1234)
+**Unlock:** Staff-only unlock mechanism (not documented for security reasons)
 
 ### Tablet WebSocket Commands
 | Command | Description |
@@ -276,6 +272,56 @@ curl -X POST http://tablet-ip:8765/velocity -H "Content-Type: application/json" 
 curl -X POST http://tablet-ip:8765/navigate -H "Content-Type: application/json" -d '{"poi":"P1"}'
 ```
 
+## Navigation Recovery System
+
+When navigation fails (status 604) or robot gets stuck, the CommandBuffer performs intelligent recovery:
+
+### Recovery Sequence
+1. **Detect Block** - LIDAR zone (STOP/CREEP), ultrasonic sensors, or nav failure (604)
+2. **Cancel Nav** - Stop current navigation attempt
+3. **Announce** - "Looking for an alternative path" (if enabled)
+4. **Backup** - Reverse slowly (5cm/s tortoise speed) for ~3 seconds
+5. **Spin Search** - Rotate to find clear direction (both LIDAR AND ultrasonic must be clear)
+6. **Nudge Forward** - Move slightly into the clear space
+7. **Retry Nav** - Re-issue navigation command
+8. **Give Up** - After max attempts, play sad R2D2 sounds and ask for help
+
+### Sensor Fusion
+The recovery system uses multiple sensor inputs:
+
+| Sensor | Topic | Detection |
+|--------|-------|-----------|
+| LIDAR | `/laser_data` | SafetyZone (STOP/CREEP/WARN/CLEAR) based on nearest obstacle |
+| Ultrasonic | `/mobile_base/sensors/core` → `analog_input` | Cardboard, glass, soft objects LIDAR can't see |
+| Odometry | `/robot_status` → `velocity` | Detect when pushing but not moving (invisible obstacle) |
+| Bumper | `/mobile_base/sensors/core` → `bumper` | Physical contact detection |
+
+### Smart Velocity
+Raw velocity commands check actual vs commanded motion:
+- If commanding motion but `velocity ≈ 0` for 3 consecutive checks (~600ms)
+- Robot is blocked by something (glass window, heavy object)
+- Stop pushing immediately - don't be stubborn
+
+### Recovery Configuration
+Configurable via `set_recovery_config` command from Flutter:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stuckThresholdMs` | 15000 | Time stuck before recovery triggers |
+| `maxRecoveryAttempts` | 3 | Retries before giving up |
+| `backupSpeed` | 0.05 m/s | Reverse speed (tortoise - safe for wheelchairs) |
+| `backupDurationMs` | 3000 | How long to reverse |
+| `spinSpeed` | 0.3 rad/s | Rotation speed while searching |
+| `nudgeSpeed` | 0.05 m/s | Forward nudge after finding clear |
+| `nudgeDurationMs` | 2000 | How long to nudge |
+| `announceRecovery` | true | TTS announcements during recovery |
+
+### Failure Behavior
+When all recovery attempts exhausted:
+1. TTS: "I'm stuck. I need help please."
+2. Play sad R2D2 sounds (descending woeful tones)
+3. Complete command with `robot_failed` status
+
 ## Audio Announcements
 
 The Flutter app uses TTS to announce:
@@ -287,17 +333,52 @@ The Flutter app uses TTS to announce:
 
 Toggle audio in joystick widget.
 
+## Alert Sounds
+
+Generated tones via AudioTrack (works on all devices):
+
+| Sound | Pattern | Use Case |
+|-------|---------|----------|
+| `beep` | Single A5 (880Hz) | Attention |
+| `horn` | A4→F4→D4 descending | Alarm/warning |
+| `arrival` | A5→C6→A5 beep-boop | POI arrival |
+| `delivery` | C5→E5→G5→C6 triumphant | Delivery complete |
+| `sad` | A5→F5→C5→G4→E4→C4→A3 | Stuck/needs help (R2D2 whimper) |
+
+## Cloud Fleet Management
+
+### AWS Infrastructure
+CloudFormation stack in `infrastructure/frontiertower-stack.yaml`:
+
+| Resource | Purpose |
+|----------|---------|
+| API Gateway | HTTP API for tour sync, fleet status |
+| Lambda | Request processing |
+| DynamoDB | Tours, maps, floors, robots, commands, alerts |
+
+### Tour Cloud Sync
+Tours can sync to cloud for fleet-wide sharing:
+1. Deploy CloudFormation stack
+2. Get API endpoint from stack outputs
+3. Enter URL in Cloud Sync dialog (Flutter app)
+4. Push/Pull tours by map ID
+
+### DynamoDB Tables
+| Table | Key | Description |
+|-------|-----|-------------|
+| `frontiertower-tours-{env}` | `tour_id` | Tour sequences with stops, speak text, URLs |
+| `frontiertower-maps-{env}` | `map_id` | SLAM maps, waypoints |
+| `frontiertower-floors-{env}` | `floor_id` | Physical floors in buildings |
+| `frontiertower-robots-{env}` | `robot_id` | Robot status, position, battery |
+| `frontiertower-commands-{env}` | `robot_id + command_id` | Pending commands |
+| `frontiertower-alerts-{env}` | `robot_id + timestamp` | Alerts, warnings |
+| `frontiertower-fleet-config-{env}` | `config_key` | Fleet-wide settings |
+
 ## Future Development
 
 ### Planned Features
 - Camera/microphone integration for video calling
-- AWS IoT cloud fleet management
 - Multi-robot coordination
-- Obstacle avoidance visualization
+- Obstacle avoidance visualization on map
 - Route planning interface
-
-### Infrastructure
-AWS CloudFormation stack defined in `infrastructure/frontiertower-stack.yaml` for:
-- IoT Core for robot fleet
-- Lambda for command processing
-- DynamoDB for telemetry storage
+- IoT Core for real-time telemetry

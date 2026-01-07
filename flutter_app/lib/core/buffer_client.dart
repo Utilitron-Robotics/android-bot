@@ -80,6 +80,111 @@ class BufferCommand {
           if (displayUrl != null) 'display_url': displayUrl,
         },
       );
+
+  /// Configure recovery behavior for navigation failures
+  factory BufferCommand.setRecoveryConfig(RecoveryConfig config) =>
+      BufferCommand(
+        type: 'set_recovery_config',
+        data: config.toJson(),
+      );
+
+  /// Configure crowd logic / speed ramping behavior
+  factory BufferCommand.setCrowdConfig({
+    required double safeDistanceMeters,
+    required double rampRate,
+  }) =>
+      BufferCommand(
+        type: 'set_crowd_config',
+        data: {
+          'safe_distance_meters': safeDistanceMeters,
+          'ramp_rate': rampRate,
+        },
+      );
+}
+
+/// Recovery configuration for navigation failures
+/// Sent to relay to control how it handles blocked paths and 604 failures
+class RecoveryConfig {
+  final int stuckThresholdMs;      // Time stuck before recovery (default 15s)
+  final int maxRecoveryAttempts;   // Max retries before giving up (default 3)
+  final int backupDurationMs;      // How long to reverse (default 2000ms)
+  final double backupSpeed;        // Reverse speed m/s (default 0.15)
+  final double spinSpeed;          // Spin speed rad/s (default 0.5)
+  final int nudgeDurationMs;       // Forward nudge duration (default 1500ms)
+  final double nudgeSpeed;         // Nudge speed m/s (default 0.2)
+  final bool announceRecovery;     // TTS "Looking for alternative path"
+
+  const RecoveryConfig({
+    this.stuckThresholdMs = 15000,
+    this.maxRecoveryAttempts = 3,
+    this.backupDurationMs = 2000,
+    this.backupSpeed = 0.15,
+    this.spinSpeed = 0.5,
+    this.nudgeDurationMs = 1500,
+    this.nudgeSpeed = 0.2,
+    this.announceRecovery = true,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'stuck_threshold_ms': stuckThresholdMs,
+    'max_recovery_attempts': maxRecoveryAttempts,
+    'backup_duration_ms': backupDurationMs,
+    'backup_speed': backupSpeed,
+    'spin_speed': spinSpeed,
+    'nudge_duration_ms': nudgeDurationMs,
+    'nudge_speed': nudgeSpeed,
+    'announce_recovery': announceRecovery,
+  };
+
+  factory RecoveryConfig.fromJson(Map<String, dynamic> json) => RecoveryConfig(
+    stuckThresholdMs: json['stuck_threshold_ms'] as int? ?? 15000,
+    maxRecoveryAttempts: json['max_recovery_attempts'] as int? ?? 3,
+    backupDurationMs: json['backup_duration_ms'] as int? ?? 2000,
+    backupSpeed: (json['backup_speed'] as num?)?.toDouble() ?? 0.15,
+    spinSpeed: (json['spin_speed'] as num?)?.toDouble() ?? 0.5,
+    nudgeDurationMs: json['nudge_duration_ms'] as int? ?? 1500,
+    nudgeSpeed: (json['nudge_speed'] as num?)?.toDouble() ?? 0.2,
+    announceRecovery: json['announce_recovery'] as bool? ?? true,
+  );
+
+  RecoveryConfig copyWith({
+    int? stuckThresholdMs,
+    int? maxRecoveryAttempts,
+    int? backupDurationMs,
+    double? backupSpeed,
+    double? spinSpeed,
+    int? nudgeDurationMs,
+    double? nudgeSpeed,
+    bool? announceRecovery,
+  }) => RecoveryConfig(
+    stuckThresholdMs: stuckThresholdMs ?? this.stuckThresholdMs,
+    maxRecoveryAttempts: maxRecoveryAttempts ?? this.maxRecoveryAttempts,
+    backupDurationMs: backupDurationMs ?? this.backupDurationMs,
+    backupSpeed: backupSpeed ?? this.backupSpeed,
+    spinSpeed: spinSpeed ?? this.spinSpeed,
+    nudgeDurationMs: nudgeDurationMs ?? this.nudgeDurationMs,
+    nudgeSpeed: nudgeSpeed ?? this.nudgeSpeed,
+    announceRecovery: announceRecovery ?? this.announceRecovery,
+  );
+}
+
+/// Crowd logic config from relay (for display/sync)
+class RelayCrowdConfig {
+  final double safeDistanceMeters;
+  final double rampRate;
+
+  const RelayCrowdConfig({
+    this.safeDistanceMeters = 0.9,
+    this.rampRate = 0.5,
+  });
+
+  factory RelayCrowdConfig.fromJson(Map<String, dynamic> json) =>
+      RelayCrowdConfig(
+        safeDistanceMeters: (json['safe_distance_meters'] as num?)?.toDouble() ?? 0.9,
+        rampRate: (json['ramp_rate'] as num?)?.toDouble() ?? 0.5,
+      );
+
+  double get safeDistanceFeet => safeDistanceMeters / 0.3048;
 }
 
 /// Current buffer state from relay
@@ -89,6 +194,7 @@ class BufferState {
   final int pendingCount;
   final int completedCount;
   final RobotBufferStatus robot;
+  final RelayCrowdConfig crowdConfig;
   final int timestamp;
 
   BufferState({
@@ -97,13 +203,16 @@ class BufferState {
     this.pendingCount = 0,
     this.completedCount = 0,
     RobotBufferStatus? robot,
+    RelayCrowdConfig? crowdConfig,
     int? timestamp,
   })  : robot = robot ?? RobotBufferStatus(),
+        crowdConfig = crowdConfig ?? const RelayCrowdConfig(),
         timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch;
 
   factory BufferState.fromJson(Map<String, dynamic> json) {
     final buffer = json['buffer'] as Map<String, dynamic>?;
     final robotJson = json['robot'] as Map<String, dynamic>?;
+    final crowdJson = json['crowd_config'] as Map<String, dynamic>?;
 
     return BufferState(
       paused: buffer?['paused'] as bool? ?? false,
@@ -115,6 +224,8 @@ class BufferState {
       completedCount: buffer?['completed_count'] as int? ?? 0,
       robot:
           robotJson != null ? RobotBufferStatus.fromJson(robotJson) : RobotBufferStatus(),
+      crowdConfig:
+          crowdJson != null ? RelayCrowdConfig.fromJson(crowdJson) : const RelayCrowdConfig(),
       timestamp: json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
     );
   }
@@ -147,12 +258,20 @@ class RobotBufferStatus {
   final int navStatus;
   final String navGoal;
   final int battery;
+  final String safetyZone;  // CLEAR, WARN, CREEP, STOP
+  final List<double> ultrasonic;  // Distances in meters
+  final bool ultrasonicBlocked;
+  final double minFrontDistance;  // Min LIDAR distance in front arc (meters)
 
   RobotBufferStatus({
     this.connected = false,
     this.navStatus = 0,
     this.navGoal = '',
     this.battery = 0,
+    this.safetyZone = 'CLEAR',
+    this.ultrasonic = const [],
+    this.ultrasonicBlocked = false,
+    this.minFrontDistance = 99.0,
   });
 
   factory RobotBufferStatus.fromJson(Map<String, dynamic> json) =>
@@ -161,7 +280,24 @@ class RobotBufferStatus {
         navStatus: json['nav_status'] as int? ?? 0,
         navGoal: json['nav_goal'] as String? ?? '',
         battery: json['battery'] as int? ?? 0,
+        safetyZone: json['safety_zone'] as String? ?? 'CLEAR',
+        ultrasonic: (json['ultrasonic'] as List<dynamic>?)
+            ?.map((e) => (e as num).toDouble())
+            .toList() ?? [],
+        ultrasonicBlocked: json['ultrasonic_blocked'] as bool? ?? false,
+        minFrontDistance: (json['min_front_distance'] as num?)?.toDouble() ?? 99.0,
       );
+
+  /// Min ultrasonic distance in cm (for display), null if no valid data
+  double? get minUltrasonicCm {
+    if (ultrasonic.isEmpty) return null;
+    final valid = ultrasonic.where((d) => d > 0).toList();
+    if (valid.isEmpty) return null;
+    return valid.reduce((a, b) => a < b ? a : b) * 100;
+  }
+
+  /// Whether ultrasonic data is available
+  bool get hasUltrasonic => ultrasonic.isNotEmpty && ultrasonic.any((d) => d > 0);
 }
 
 /// Command completion result

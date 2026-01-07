@@ -11,8 +11,8 @@ class FleetCloudClient extends ChangeNotifier {
   factory FleetCloudClient() => _instance;
   FleetCloudClient._internal();
 
-  // Configuration - branded for Frontier Tower
-  static const String defaultEndpoint = 'https://api.frontiertower.io';
+  // Configuration - deployed CloudFormation stack endpoint
+  static const String defaultEndpoint = 'https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev';
   String _apiEndpoint = defaultEndpoint;
   String? _apiKey;
   bool _isConnected = false;

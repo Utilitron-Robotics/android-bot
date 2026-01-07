@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../core/buffer_client.dart';
+import '../core/sequence_mode.dart';
 import '../services/audio_announcer.dart';
 
 /// Crowd Logic Settings widget for configuring blocked path behavior
@@ -23,6 +25,18 @@ class _CrowdLogicSettingsState extends State<CrowdLogicSettings> {
   void _applyConfig(CrowdLogicConfig config) {
     setState(() => _config = config);
     AudioAnnouncer().crowdConfig = config;
+
+    // Send to relay for velocity ramping (if connected)
+    final bufferClient = SequenceManager.instance.bufferClient;
+    if (bufferClient != null) {
+      bufferClient.loadCommands([
+        BufferCommand.setCrowdConfig(
+          safeDistanceMeters: config.safeDistanceMeters,
+          rampRate: config.rampRate,
+        ),
+      ], clearExisting: false);
+      debugPrint('CrowdLogicSettings: Sent config to relay - ${config.safeDistanceMeters}m, ramp=${config.rampRate}');
+    }
   }
 
   void _applyVenuePreset(CrowdLogicVenue venue) {
@@ -217,6 +231,153 @@ class _CrowdLogicSettingsState extends State<CrowdLogicSettings> {
                   ],
                 ),
               ],
+            ],
+          ),
+        ),
+
+        // Speed Ramping Controls
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.blue.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.blue.shade700),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.speed, color: Colors.blue.shade300, size: 24),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Speed Ramping',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Distance where robot starts slowing down',
+                style: TextStyle(color: Colors.grey[400], fontSize: 11),
+              ),
+              const SizedBox(height: 12),
+
+              // Safe Distance - 3 box feet input
+              Row(
+                children: [
+                  const Text('Safe Distance:', style: TextStyle(fontSize: 13)),
+                  const SizedBox(width: 12),
+                  // Feet whole number
+                  SizedBox(
+                    width: 45,
+                    child: TextField(
+                      controller: TextEditingController(
+                        text: _config.safeDistanceFeet.floor().toString(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) {
+                        final feet = int.tryParse(value) ?? 0;
+                        final inches = ((_config.safeDistanceFeet - _config.safeDistanceFeet.floor()) * 12).round();
+                        final totalFeet = feet + (inches / 12.0);
+                        _applyConfig(_config.copyWith(
+                          venue: CrowdLogicVenue.custom,
+                          safeDistanceFeet: totalFeet.clamp(1.0, 10.0),
+                        ));
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text('ft', style: TextStyle(fontSize: 12)),
+                  const SizedBox(width: 8),
+                  // Inches
+                  SizedBox(
+                    width: 45,
+                    child: TextField(
+                      controller: TextEditingController(
+                        text: ((_config.safeDistanceFeet - _config.safeDistanceFeet.floor()) * 12).round().toString(),
+                      ),
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) {
+                        final inches = int.tryParse(value) ?? 0;
+                        final feet = _config.safeDistanceFeet.floor();
+                        final totalFeet = feet + (inches.clamp(0, 11) / 12.0);
+                        _applyConfig(_config.copyWith(
+                          venue: CrowdLogicVenue.custom,
+                          safeDistanceFeet: totalFeet.clamp(1.0, 10.0),
+                        ));
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Text('in', style: TextStyle(fontSize: 12)),
+                  const SizedBox(width: 16),
+                  // Show meters equivalent
+                  Text(
+                    '(${_config.safeDistanceMeters.toStringAsFixed(2)}m)',
+                    style: TextStyle(color: Colors.grey[500], fontSize: 11),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // Ramp Rate slider
+              Row(
+                children: [
+                  const Text('Slowdown Rate:', style: TextStyle(fontSize: 13)),
+                  const Spacer(),
+                  Text(
+                    _getRampRateLabel(_config.rampRate),
+                    style: TextStyle(
+                      color: _getRampRateColor(_config.rampRate),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  const Text('Gentle', style: TextStyle(fontSize: 10)),
+                  Expanded(
+                    child: Slider(
+                      value: _config.rampRate,
+                      min: 0.1,
+                      max: 1.0,
+                      divisions: 9,
+                      activeColor: _getRampRateColor(_config.rampRate),
+                      onChanged: (value) {
+                        _applyConfig(_config.copyWith(
+                          venue: CrowdLogicVenue.custom,
+                          rampRate: value,
+                        ));
+                      },
+                    ),
+                  ),
+                  const Text('Aggressive', style: TextStyle(fontSize: 10)),
+                ],
+              ),
+              Text(
+                'Higher = stops faster/earlier, Lower = gradual slowdown',
+                style: TextStyle(color: Colors.grey[500], fontSize: 10),
+              ),
             ],
           ),
         ),
@@ -458,5 +619,21 @@ class _CrowdLogicSettingsState extends State<CrowdLogicSettings> {
       case CrowdLogicVenue.custom:
         return Icons.tune;
     }
+  }
+
+  String _getRampRateLabel(double rate) {
+    if (rate <= 0.2) return 'Very Gentle';
+    if (rate <= 0.4) return 'Gentle';
+    if (rate <= 0.6) return 'Moderate';
+    if (rate <= 0.8) return 'Quick';
+    return 'Aggressive';
+  }
+
+  Color _getRampRateColor(double rate) {
+    if (rate <= 0.2) return Colors.green;
+    if (rate <= 0.4) return Colors.lightGreen;
+    if (rate <= 0.6) return Colors.yellow;
+    if (rate <= 0.8) return Colors.orange;
+    return Colors.red;
   }
 }

@@ -57,7 +57,7 @@ class _FleetDashboardState extends State<FleetDashboard> {
                 controller: _endpointController,
                 decoration: const InputDecoration(
                   labelText: 'API Endpoint',
-                  hintText: 'https://api.frontiertower.io',
+                  hintText: 'From CloudFormation output',
                   border: OutlineInputBorder(),
                 ),
               ),

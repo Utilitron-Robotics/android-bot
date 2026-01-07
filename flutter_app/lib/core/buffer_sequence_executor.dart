@@ -137,7 +137,14 @@ class BufferSequenceExecutor extends ChangeNotifier {
             }
           }
           break;
+        case 'motion_standby':
+          // Waiting for visitor to approach - show special phase
+          _currentPhase = SequencePhase.awaitingVisitor;
+          _countdownSeconds = 0;
+          debugPrint('BufferSequenceExecutor: Motion standby active - awaiting visitor');
+          break;
         default:
+          debugPrint('BufferSequenceExecutor: Unknown command type: ${state.current!.type}');
           break;
       }
     } else {
@@ -441,9 +448,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // MOTION TRIGGER - wait for visitor to approach before starting tour
     // When enabled, robot waits at start position for motion detection,
-    // then greets visitor and shows "Start Tour" button
+    // announces "Human detected" then greets visitor and shows "Start Tour" button
     if (sequence.motionTriggerStart) {
-      final greeting = sequence.motionGreeting ?? 'Hello! Would you like a tour?';
+      // Prefix "Human detected" to the greeting for audible feedback on motion
+      final customGreeting = sequence.motionGreeting;
+      final greeting = customGreeting != null && customGreeting.isNotEmpty
+          ? 'Human detected. $customGreeting'
+          : 'Human detected. Hello! Would you like a tour?';
       final buttonText = sequence.motionButtonText ?? 'Start Tour';
       debugPrint('BufferSequenceExecutor: Adding motion standby with greeting: $greeting, button: $buttonText');
       commands.add(BufferCommand.motionStandby(

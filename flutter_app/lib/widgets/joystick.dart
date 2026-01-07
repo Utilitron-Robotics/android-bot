@@ -32,7 +32,16 @@ enum RobotSpeedMode {
 
 /// Virtual joystick for manual robot control
 class JoystickControl extends StatefulWidget {
-  const JoystickControl({super.key});
+  /// Ultrasonic distance in cm (from relay heartbeat), null if not available
+  final double? ultrasonicCm;
+  /// Whether ultrasonic detects blocking obstacle
+  final bool ultrasonicBlocked;
+
+  const JoystickControl({
+    super.key,
+    this.ultrasonicCm,
+    this.ultrasonicBlocked = false,
+  });
 
   @override
   State<JoystickControl> createState() => _JoystickControlState();
@@ -362,13 +371,19 @@ class _JoystickControlState extends State<JoystickControl> {
                   max: _maxLinear,
                   unit: 'm/s',
                 ),
-                // Distance gauge
+                // LIDAR distance gauge
                 _DistanceGauge(
                   distance: _minFrontRange,
                   stopDist: stopDistance,
                   creepDist: creepDistance,
                   warnDist: warnDistance,
                 ),
+                // Ultrasonic gauge (sees cardboard, glass, etc that LIDAR misses)
+                if (widget.ultrasonicCm != null)
+                  _UltrasonicGauge(
+                    distanceCm: widget.ultrasonicCm!,
+                    isBlocked: widget.ultrasonicBlocked,
+                  ),
                 _VelocityIndicator(
                   label: 'Ang',
                   value: _actualAngular,  // Show actual velocity being sent
@@ -778,6 +793,120 @@ class _DistanceGauge extends StatelessWidget {
         // Distance value
         Text(
           distance.isInfinite ? '>2m' : '${distance.toStringAsFixed(2)}m',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontFamily: 'monospace',
+            color: zoneColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          zoneLabel,
+          style: TextStyle(
+            fontSize: 9,
+            color: zoneColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Visual gauge for ultrasonic sensor (sees cardboard, glass, etc)
+class _UltrasonicGauge extends StatelessWidget {
+  final double distanceCm;
+  final bool isBlocked;
+
+  // Ultrasonic thresholds (in cm)
+  static const double blockDist = 20.0;   // <20cm = blocked
+  static const double warnDist = 50.0;    // <50cm = warning
+  static const double maxDist = 100.0;    // Display max
+
+  const _UltrasonicGauge({
+    required this.distanceCm,
+    required this.isBlocked,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Determine zone and color
+    Color zoneColor;
+    String zoneLabel;
+    if (isBlocked || distanceCm < blockDist) {
+      zoneColor = Colors.purple;
+      zoneLabel = 'BLOCK';
+    } else if (distanceCm < warnDist) {
+      zoneColor = Colors.deepPurple;
+      zoneLabel = 'NEAR';
+    } else {
+      zoneColor = Colors.indigo;
+      zoneLabel = 'OK';
+    }
+
+    // Clamp display distance for gauge
+    final displayDist = distanceCm.clamp(0.0, maxDist);
+    final gaugePercent = (displayDist / maxDist).clamp(0.0, 1.0);
+
+    return Column(
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.sensors, size: 12, color: zoneColor),
+            const SizedBox(width: 2),
+            Text('US', style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: zoneColor,
+            )),
+          ],
+        ),
+        const SizedBox(height: 4),
+        // Vertical gauge bar (purple theme for ultrasonic)
+        Container(
+          width: 24,
+          height: 60,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.purple.shade600),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              // Background zones
+              Column(
+                children: [
+                  Expanded(
+                    flex: 50,  // 50-100cm = OK
+                    child: Container(color: Colors.indigo.withValues(alpha: 0.2)),
+                  ),
+                  Expanded(
+                    flex: 30,  // 20-50cm = warn
+                    child: Container(color: Colors.deepPurple.withValues(alpha: 0.2)),
+                  ),
+                  Expanded(
+                    flex: 20,  // 0-20cm = block
+                    child: Container(color: Colors.purple.withValues(alpha: 0.3)),
+                  ),
+                ],
+              ),
+              // Distance indicator fill
+              FractionallySizedBox(
+                heightFactor: gaugePercent,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: zoneColor.withValues(alpha: 0.7),
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(3),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        // Distance value
+        Text(
+          distanceCm > 99 ? '>99' : '${distanceCm.toStringAsFixed(0)}cm',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             fontFamily: 'monospace',
             color: zoneColor,

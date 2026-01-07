@@ -50,6 +50,17 @@ class CommandBuffer(
     private var pendingNavWaypoint: String? = null
     private var navArrivalPending = false  // 603 received, waiting for robot to actually stop
 
+    // Recovery state (accessible from onNavStatus callback)
+    private var recoveryAttempts = 0
+    private var triggerRecovery = false  // Set by 604 handler to trigger recovery in while loop
+    private var inRecovery = false       // True during recovery maneuvers, prevents 602 from cancelling
+
+    // Recovery configuration (sent from Flutter, stored in DynamoDB)
+    private var recoveryConfig = RecoveryConfig()
+
+    // Crowd logic configuration for speed ramping
+    private var crowdConfig = CrowdLogicConfig()
+
     /**
      * Start the buffer (heartbeat + execution loop)
      */
@@ -160,14 +171,32 @@ class CommandBuffer(
                     navArrivalPending = true
                 }
             }
-            604 -> { // Failed
-                Log.i(TAG, "Nav failed to $pendingNavWaypoint")
-                waitingForNavArrival = false
-                navArrivalPending = false
-                pendingNavWaypoint = null
-                completeCommand(cmd.id, "robot_failed")
+            604 -> { // Failed - path blocked, find another way
+                if (recoveryAttempts < recoveryConfig.maxRecoveryAttempts) {
+                    Log.i(TAG, "Path blocked to $pendingNavWaypoint - searching for escape route...")
+                    triggerRecovery = true
+                } else {
+                    // All attempts exhausted - cry for help like a sad R2D2
+                    Log.w(TAG, "Trapped! No escape route found after $recoveryAttempts attempts")
+                    scope.launch(Dispatchers.Main) {
+                        taskExecutor?.speakText("I'm stuck. I need help please.")
+                        delay(2000)
+                        taskExecutor?.playAlertSound("sad")  // Sad beeps
+                    }
+                    waitingForNavArrival = false
+                    navArrivalPending = false
+                    pendingNavWaypoint = null
+                    completeCommand(cmd.id, "robot_failed")
+                }
             }
             602 -> { // Cancelled
+                // CRITICAL: If recovery is pending OR in progress, don't cancel!
+                // The robot base sends 602 after 604 to say "I cancelled the failed nav"
+                // and we send cancel ourselves during recovery - ignore both cases
+                if (triggerRecovery || inRecovery) {
+                    Log.i(TAG, "Nav cancelled but recovery ${if (inRecovery) "in progress" else "pending"} - ignoring 602")
+                    return
+                }
                 Log.i(TAG, "Nav cancelled to $pendingNavWaypoint")
                 waitingForNavArrival = false
                 navArrivalPending = false
@@ -212,7 +241,15 @@ class CommandBuffer(
                 "connected" to (robotClient.connectionState.value == ConnectionState.CONNECTED),
                 "nav_status" to (status?.navStatus ?: 0),
                 "nav_goal" to (status?.currentGoalName ?: ""),
-                "battery" to (status?.battery ?: 0)
+                "battery" to (status?.battery ?: 0),
+                "safety_zone" to (status?.safetyZone?.name ?: "CLEAR"),
+                "ultrasonic" to (status?.sensors?.ultrasonicDistances ?: emptyList<Double>()),
+                "ultrasonic_blocked" to (status?.sensors?.ultrasonicBlocked ?: false),
+                "min_front_distance" to (status?.minFrontDistance ?: 99.0)
+            ),
+            "crowd_config" to mapOf(
+                "safe_distance_meters" to crowdConfig.safeDistanceMeters,
+                "ramp_rate" to crowdConfig.rampRate
             )
         )
         onStatusUpdate(gson.toJson(heartbeat))
@@ -268,18 +305,20 @@ class CommandBuffer(
                 pendingNavWaypoint = waypoint
                 waitingForNavArrival = true
 
+                // Reset recovery state for this navigation
+                recoveryAttempts = 0
+                triggerRecovery = false
+
                 robotClient.navigateToPoi(waypoint)
                 navArrivalPending = false
 
                 // Wait for nav completion or timeout
-                val timeout = cmd.timeoutMs ?: 60000L
+                val timeout = cmd.timeoutMs ?: 120000L  // Increased to 2min to allow recovery attempts
                 val deadline = System.currentTimeMillis() + timeout
                 var lastProgressTime = System.currentTimeMillis()
                 var lastPosition: Pair<Double, Double>? = null
-                var recoveryAttempts = 0
-                val maxRecoveryAttempts = 3
-                val stuckThresholdMs = 45000L  // 45 seconds stuck = try recovery
                 var stoppedSince: Long? = null  // Track when robot stopped after 603
+                // Note: stuckThreshold now comes from recoveryConfig.stuckThresholdMs
 
                 while (waitingForNavArrival && System.currentTimeMillis() < deadline) {
                     delay(100)
@@ -322,65 +361,107 @@ class CommandBuffer(
                     }
                     lastPosition = currentPos
 
-                    // Check if stuck and in obstacle zone
+                    // Check if stuck and in obstacle zone, OR if 604 triggered recovery
                     val stuckTime = System.currentTimeMillis() - lastProgressTime
                     val safetyZone = status?.safetyZone
-                    val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP
+                    val ultrasonicBlocked = status?.sensors?.ultrasonicBlocked ?: false
+                    // LIDAR blocked OR ultrasonic blocked (cardboard box, glass, etc)
+                    val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP || ultrasonicBlocked
 
-                    if (stuckTime > stuckThresholdMs && isBlocked && recoveryAttempts < maxRecoveryAttempts) {
+                    if (ultrasonicBlocked) {
+                        Log.d(TAG, "Ultrasonic sees obstacle LIDAR can't - backing off")
+                    }
+
+                    // Smart recovery: push but if not moving, stop pushing and try something else
+                    val shouldRecover = triggerRecovery || (stuckTime > recoveryConfig.stuckThresholdMs && isBlocked)
+
+                    if (shouldRecover && recoveryAttempts < recoveryConfig.maxRecoveryAttempts) {
+                        val wasTriggeredBy604 = triggerRecovery
+                        triggerRecovery = false
+                        inRecovery = true  // Prevent 602 from cancelling during recovery
                         recoveryAttempts++
-                        Log.i(TAG, "Robot stuck for ${stuckTime/1000}s in $safetyZone zone, attempting recovery spin #$recoveryAttempts")
 
-                        // Cancel current navigation before recovery maneuver
+                        Log.i(TAG, "Recovery #$recoveryAttempts/${recoveryConfig.maxRecoveryAttempts} - ${if (wasTriggeredBy604) "nav failed" else "stuck ${stuckTime/1000}s"}")
+
                         robotClient.cancelNavigation()
                         delay(300)
 
-                        // Announce recovery attempt
-                        withContext(Dispatchers.Main) {
-                            taskExecutor?.speakText("Looking for an alternative path.")
+                        if (recoveryConfig.announceRecovery) {
+                            withContext(Dispatchers.Main) {
+                                taskExecutor?.speakText("Looking for an alternative path.")
+                            }
+                            delay(1500)
                         }
-                        delay(1500)
 
-                        // Spin until we find a clear direction (or max 360°)
-                        // The SLAM sees the hole but hesitates - we need to face it and nudge
-                        val spinDuration = 12500L  // Max 360° at 0.5 rad/s
-                        val spinStart = System.currentTimeMillis()
+                        // SMART VELOCITY: Send command, check if actually moving, stop if blocked
+                        suspend fun smartVelocity(linear: Double, angular: Double, maxMs: Long): Boolean {
+                            val start = System.currentTimeMillis()
+                            var blockedCount = 0
+                            while (System.currentTimeMillis() - start < maxMs) {
+                                robotClient.sendVelocity(linear, angular)
+                                delay(200)
+
+                                // Check actual velocity - if we commanded motion but aren't moving, we're blocked
+                                val actualVel = robotClient.robotStatus.value?.velocity ?: listOf(0.0, 0.0)
+                                val actualLinear = if (actualVel.isNotEmpty()) kotlin.math.abs(actualVel[0]) else 0.0
+                                val actualAngular = if (actualVel.size > 1) kotlin.math.abs(actualVel[1]) else 0.0
+                                val commandedMotion = kotlin.math.abs(linear) > 0.01 || kotlin.math.abs(angular) > 0.01
+                                val actuallyMoving = actualLinear > 0.02 || actualAngular > 0.05
+
+                                if (commandedMotion && !actuallyMoving) {
+                                    blockedCount++
+                                    if (blockedCount >= 3) {
+                                        // Pushed 3 times, not moving - stop, don't be stubborn
+                                        Log.i(TAG, "Commanded velocity but not moving - blocked, stopping")
+                                        robotClient.sendVelocity(0.0, 0.0)
+                                        return false
+                                    }
+                                } else {
+                                    blockedCount = 0  // Reset if we moved
+                                }
+                            }
+                            robotClient.sendVelocity(0.0, 0.0)
+                            return true
+                        }
+
+                        // STEP 1: Back up
+                        Log.i(TAG, "Backing up...")
+                        smartVelocity(-recoveryConfig.backupSpeed, 0.0, recoveryConfig.backupDurationMs.toLong())
+                        delay(200)
+
+                        // STEP 2: Spin to find clear direction
+                        val spinDuration = (2 * Math.PI / recoveryConfig.spinSpeed * 1000).toLong()
                         var foundClear = false
-                        Log.i(TAG, "Starting recovery spin, looking for clear path...")
+                        Log.i(TAG, "Spinning to find clear path...")
 
+                        val spinStart = System.currentTimeMillis()
                         while (System.currentTimeMillis() - spinStart < spinDuration && !foundClear) {
-                            robotClient.sendVelocity(0.0, 0.5)  // Spin slowly
-                            delay(400)
+                            val moved = smartVelocity(0.0, recoveryConfig.spinSpeed, 400)
+                            if (!moved) break  // Can't spin, give up on this attempt
 
-                            // Check if we're now facing a clear direction
-                            val currentZone = robotClient.robotStatus.value?.safetyZone
-                            if (currentZone == SafetyZone.CLEAR || currentZone == SafetyZone.WARN) {
+                            val currentStatus = robotClient.robotStatus.value
+                            val currentZone = currentStatus?.safetyZone
+                            val ultrasonicClear = !(currentStatus?.sensors?.ultrasonicBlocked ?: false)
+                            // BOTH lidar AND ultrasonic must be clear
+                            if ((currentZone == SafetyZone.CLEAR || currentZone == SafetyZone.WARN) && ultrasonicClear) {
                                 foundClear = true
-                                Log.i(TAG, "Found clear direction! Zone: $currentZone")
+                                Log.i(TAG, "Found clear direction (LIDAR + ultrasonic clear)!")
                             }
                         }
-                        robotClient.sendVelocity(0.0, 0.0)  // Stop spinning
-                        delay(300)
+                        robotClient.sendVelocity(0.0, 0.0)
+                        delay(200)
 
-                        // Nudge forward into the gap - this kicks the SLAM planner into action
+                        // STEP 3: Nudge forward if clear
                         if (foundClear) {
-                            Log.i(TAG, "Nudging forward into the gap...")
-                            val nudgeDuration = 1500L  // ~30cm at 0.2 m/s
-                            val nudgeStart = System.currentTimeMillis()
-                            while (System.currentTimeMillis() - nudgeStart < nudgeDuration) {
-                                robotClient.sendVelocity(0.2, 0.0)  // Slow forward
-                                delay(400)
-                            }
-                            robotClient.sendVelocity(0.0, 0.0)  // Stop
-                            delay(300)
+                            Log.i(TAG, "Nudging forward...")
+                            smartVelocity(recoveryConfig.nudgeSpeed, 0.0, recoveryConfig.nudgeDurationMs.toLong())
                         }
 
-                        Log.i(TAG, "Recovery maneuver complete, re-attempting navigation to $waypoint")
-
-                        // Re-attempt navigation
-                        delay(500)
+                        Log.i(TAG, "Recovery complete, retrying navigation to $waypoint")
+                        delay(300)
+                        inRecovery = false  // Done with recovery, 602 can cancel again
                         robotClient.navigateToPoi(waypoint)
-                        lastProgressTime = System.currentTimeMillis()  // Reset stuck timer
+                        lastProgressTime = System.currentTimeMillis()
                     }
                 }
 
@@ -488,6 +569,18 @@ class CommandBuffer(
 
                 Log.i(TAG, "Entering motion standby mode for sequence: $sequenceId, button: $buttonText")
 
+                // CRITICAL: Pause and CLEAR stale obstacle data before motion detection
+                // Robot may have just arrived from a navigation with obstacle events (door hits, recovery)
+                // Those stale values would cause false motion triggers
+                Log.i(TAG, "Pausing 3s to let robot fully settle before motion detection...")
+                delay(3000)
+
+                // DISABLE then RE-ENABLE obstacle intelligence to clear stale state
+                taskExecutor?.enableObstacleIntelligence(false)
+                delay(500)
+                taskExecutor?.enableObstacleIntelligence(true)
+                Log.i(TAG, "Cleared and re-enabled obstacle intelligence for motion detection")
+
                 // Show "waiting for visitor" on tablet
                 withContext(Dispatchers.Main) {
                     taskExecutor?.displayUrl("motion://standby?sequence=$sequenceId")
@@ -499,33 +592,102 @@ class CommandBuffer(
                 val startTime = System.currentTimeMillis()
                 val maxWaitMs = 300000L  // 5 minute max wait
 
+                // IMPORTANT: Wait for robot to be stationary before detecting motion
+                // This prevents false triggers when robot arrives at waypoint
+                // After hitting obstacles (door, wall), robot needs time to settle + LIDAR history to stabilize
+                val settleTimeMs = 8000L  // 8 second settle time - extra time after impacts
+                var robotStationarySince: Long? = null
+                var motionFrameCount = 0  // Require sustained motion, not just 1 frame
+                val requiredMotionFrames = 8  // Must see motion for 8 consecutive checks (~4s)
+
+                // DISTANCE-BASED motion detection (immune to LIDAR jitter)
+                // After settling, capture baseline distance. Only trigger if something APPROACHES (gets closer).
+                var baselineDistance: Double? = null
+                val approachThreshold = 0.25  // 25cm - something must get 25cm closer than baseline
+                val maxDetectionRange = 3.0   // Only consider objects within 3m
+
                 while (!motionDetected && currentCommand != null &&
                        System.currentTimeMillis() - startTime < maxWaitMs) {
-                    // Check for motion via obstacle classification
-                    // The classification is updated by RobotWebSocketClient
                     val status = robotClient.robotStatus.value
-                    if (status?.obstacleInPath == true && status.obstacleMoving == true) {
-                        if (!greetingSpoken) {
-                            Log.i(TAG, "Motion detected! Speaking greeting...")
-                            greetingSpoken = true
-                            withContext(Dispatchers.Main) {
-                                // Play arrival sound first
-                                taskExecutor?.playAlertSound("arrival")
-                                delay(500)
-                                // Speak greeting
-                                taskExecutor?.speakText(greeting)
-                                // Show start tour button with custom text
-                                val encodedButton = java.net.URLEncoder.encode(buttonText, "UTF-8")
-                                taskExecutor?.displayUrl("motion://start_tour?sequence=$sequenceId&button=$encodedButton")
-                            }
+                    val robotVelocity = status?.velocity?.getOrElse(0) { 0.0 } ?: 0.0
+                    val isRobotStationary = kotlin.math.abs(robotVelocity) < 0.05
+
+                    // Track when robot became stationary
+                    if (isRobotStationary) {
+                        if (robotStationarySince == null) {
+                            robotStationarySince = System.currentTimeMillis()
+                            baselineDistance = null  // Reset baseline when robot stops
+                            Log.i(TAG, "Robot stopped, waiting ${settleTimeMs}ms before motion detection...")
                         }
-                        // Wait for tour start button press (handled via tablet event)
-                        // The button press will complete this command
-                        delay(100)
                     } else {
-                        delay(500)  // Check every 500ms when no motion
+                        robotStationarySince = null
+                        baselineDistance = null
+                        motionFrameCount = 0  // Reset if robot moves
                     }
+
+                    // Only check for motion after robot has been stationary for settle time
+                    val settledMs = robotStationarySince?.let { System.currentTimeMillis() - it } ?: 0
+                    val readyForMotion = settledMs >= settleTimeMs
+
+                    // Get current front obstacle distance (minimum from LIDAR front arc)
+                    val currentDistance = status?.minFrontDistance ?: Double.MAX_VALUE
+
+                    // Log periodically to help debug motion detection
+                    if ((System.currentTimeMillis() - startTime) % 5000 < 500) {
+                        Log.d(TAG, "Motion check: ready=$readyForMotion, baseline=${baselineDistance?.let { "%.2f".format(it) } ?: "none"}, current=${"%.2f".format(currentDistance)}, frames=$motionFrameCount")
+                    }
+
+                    if (readyForMotion) {
+                        // First frame after settling - capture baseline
+                        if (baselineDistance == null) {
+                            baselineDistance = currentDistance
+                            Log.i(TAG, "Captured baseline distance: ${"%.2f".format(baselineDistance)}m")
+                        }
+
+                        // Only consider objects within detection range
+                        val inRange = currentDistance < maxDetectionRange
+
+                        // Calculate how much closer something is compared to baseline
+                        val approachAmount = (baselineDistance ?: 999.0) - currentDistance
+                        val isApproaching = approachAmount > approachThreshold && inRange
+
+                        if (isApproaching) {
+                            motionFrameCount++
+                            Log.d(TAG, "Approach detected: ${("%.2f".format(approachAmount))}m closer, frame $motionFrameCount/$requiredMotionFrames")
+
+                            if (motionFrameCount >= requiredMotionFrames && !greetingSpoken) {
+                                Log.i(TAG, "Motion detected! Something approached ${("%.2f".format(approachAmount))}m - AUTO-STARTING TOUR!")
+                                greetingSpoken = true
+                                motionDetected = true
+                                withContext(Dispatchers.Main) {
+                                    // Play arrival sound
+                                    taskExecutor?.playAlertSound("arrival")
+                                    delay(300)
+                                    // Speak "Human detected, starting tour!"
+                                    taskExecutor?.speakText("Human detected. Starting tour!")
+                                    delay(500)
+                                    // Hide motion overlay and start tour lock screen
+                                    taskExecutor?.displayUrl("motion://hide")
+                                }
+                                // AUTO-START: Complete the motion_standby command immediately
+                                Log.i(TAG, "Auto-completing motion_standby, tour will proceed")
+                                completeCommand(cmd.id, "motion_detected")
+                            }
+                        } else {
+                            // No approach - reset frame count (must be consecutive)
+                            if (motionFrameCount > 0) {
+                                Log.d(TAG, "Approach stopped, resetting frame count from $motionFrameCount")
+                            }
+                            motionFrameCount = 0
+                        }
+                    }
+
+                    delay(500)  // Check every 500ms
                 }
+
+                // Disable obstacle intelligence now that motion detection is done
+                taskExecutor?.enableObstacleIntelligence(false)
+                Log.i(TAG, "Disabled obstacle intelligence after motion standby")
 
                 // If we exited due to timeout or skip, mark as such
                 if (currentCommand != null && !motionDetected) {
@@ -533,6 +695,49 @@ class CommandBuffer(
                     completeCommand(cmd.id, "timeout")
                 }
                 // If tour was started via button, command is completed by notifyTourStarted()
+            }
+
+            "set_recovery_config" -> {
+                // Update recovery configuration from Flutter
+                val stuckMs = (cmd.data["stuck_threshold_ms"] as? Number)?.toLong() ?: recoveryConfig.stuckThresholdMs
+                val maxAttempts = (cmd.data["max_recovery_attempts"] as? Number)?.toInt() ?: recoveryConfig.maxRecoveryAttempts
+                val backupMs = (cmd.data["backup_duration_ms"] as? Number)?.toLong() ?: recoveryConfig.backupDurationMs
+                val backupSpd = (cmd.data["backup_speed"] as? Number)?.toDouble() ?: recoveryConfig.backupSpeed
+                val spinSpd = (cmd.data["spin_speed"] as? Number)?.toDouble() ?: recoveryConfig.spinSpeed
+                val nudgeMs = (cmd.data["nudge_duration_ms"] as? Number)?.toLong() ?: recoveryConfig.nudgeDurationMs
+                val nudgeSpd = (cmd.data["nudge_speed"] as? Number)?.toDouble() ?: recoveryConfig.nudgeSpeed
+                val announce = cmd.data["announce_recovery"] as? Boolean ?: recoveryConfig.announceRecovery
+
+                recoveryConfig = RecoveryConfig(
+                    stuckThresholdMs = stuckMs,
+                    maxRecoveryAttempts = maxAttempts,
+                    backupDurationMs = backupMs,
+                    backupSpeed = backupSpd,
+                    spinSpeed = spinSpd,
+                    nudgeDurationMs = nudgeMs,
+                    nudgeSpeed = nudgeSpd,
+                    announceRecovery = announce
+                )
+
+                Log.i(TAG, "Recovery config updated: stuckMs=$stuckMs, maxAttempts=$maxAttempts, backupMs=$backupMs")
+                completeCommand(cmd.id, "success")
+            }
+
+            "set_crowd_config" -> {
+                // Update crowd logic / speed ramping configuration from Flutter
+                val safeDist = (cmd.data["safe_distance_meters"] as? Number)?.toDouble() ?: crowdConfig.safeDistanceMeters
+                val rate = (cmd.data["ramp_rate"] as? Number)?.toDouble() ?: crowdConfig.rampRate
+
+                crowdConfig = CrowdLogicConfig(
+                    safeDistanceMeters = safeDist.coerceIn(0.3, 3.0),  // 1-10 feet range
+                    rampRate = rate.coerceIn(0.1, 1.0)
+                )
+
+                // Forward to robot client for velocity ramping in WARN zone
+                robotClient.setCrowdConfig(crowdConfig.safeDistanceMeters, crowdConfig.rampRate)
+
+                Log.i(TAG, "Crowd config updated: safeDistance=${crowdConfig.safeDistanceMeters}m, rampRate=${crowdConfig.rampRate}")
+                completeCommand(cmd.id, "success")
             }
 
             else -> {
@@ -638,4 +843,28 @@ data class CompletedCommand(
     val type: String,
     val result: String,
     val durationMs: Long
+)
+
+/**
+ * Recovery configuration for navigation failures
+ * Sent from Flutter, stored in DynamoDB for fleet-wide sync
+ */
+data class RecoveryConfig(
+    val stuckThresholdMs: Long = 15000L,      // Time stuck before recovery (default 15s)
+    val maxRecoveryAttempts: Int = 3,         // Max retries before giving up
+    val backupDurationMs: Long = 3000L,       // How long to reverse (longer at slow speed)
+    val backupSpeed: Double = 0.05,           // TORTOISE: 5cm/s - gentle bump
+    val spinSpeed: Double = 0.3,              // Slower spin
+    val nudgeDurationMs: Long = 2000L,        // Nudge duration (longer at slow speed)
+    val nudgeSpeed: Double = 0.05,            // TORTOISE: 5cm/s - gentle nudge
+    val announceRecovery: Boolean = true      // TTS "Looking for alternative path"
+)
+
+/**
+ * Crowd Logic configuration for speed ramping
+ * Controls how aggressively robot slows down when approaching obstacles
+ */
+data class CrowdLogicConfig(
+    val safeDistanceMeters: Double = 0.9,     // Distance where ramping begins (~3 feet)
+    val rampRate: Double = 0.5                // 0.1 = gentle, 1.0 = aggressive
 )
