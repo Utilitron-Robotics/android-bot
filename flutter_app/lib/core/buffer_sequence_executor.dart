@@ -59,16 +59,16 @@ class BufferSequenceExecutor extends ChangeNotifier {
   BufferClient get bufferClient => _bufferClient;
   BufferState get bufferState => _bufferClient.state;
 
-  SequenceStop? get currentStop =>
-      _currentSequence != null &&
-              _currentStopIndex >= 0 &&
-              _currentStopIndex < _currentSequence!.stops.length
-          ? _currentSequence!.stops[_currentStopIndex]
-          : null;
+  SequenceStop? get currentStop => _currentSequence != null &&
+          _currentStopIndex >= 0 &&
+          _currentStopIndex < _currentSequence!.stops.length
+      ? _currentSequence!.stops[_currentStopIndex]
+      : null;
 
-  double get progress => _currentSequence == null || _currentSequence!.stops.isEmpty
-      ? 0.0
-      : (_currentStopIndex + 1) / _currentSequence!.stops.length;
+  double get progress =>
+      _currentSequence == null || _currentSequence!.stops.isEmpty
+          ? 0.0
+          : (_currentStopIndex + 1) / _currentSequence!.stops.length;
 
   void _setupBufferListeners() {
     // Handle heartbeat updates
@@ -102,8 +102,11 @@ class BufferSequenceExecutor extends ChangeNotifier {
   /// Update state from buffer heartbeat
   void _updateFromHeartbeat(BufferState state) {
     // RECONNECT DETECTION: If buffer is running but we have no sequence, restore state
-    if (_needsStateRestore && state.current != null && _currentSequence == null) {
-      debugPrint('BufferSequenceExecutor: Detected running buffer on reconnect, restoring state...');
+    if (_needsStateRestore &&
+        state.current != null &&
+        _currentSequence == null) {
+      debugPrint(
+          'BufferSequenceExecutor: Detected running buffer on reconnect, restoring state...');
       _restoreFromHeartbeat(state);
       return;
     }
@@ -127,13 +130,15 @@ class BufferSequenceExecutor extends ChangeNotifier {
           _currentPhase = SequencePhase.waiting;
           // Calculate countdown from elapsed time
           if (_currentWaitDurationMs > 0) {
-            final remainingMs = _currentWaitDurationMs - state.current!.elapsedMs;
+            final remainingMs =
+                _currentWaitDurationMs - state.current!.elapsedMs;
             final newCountdown = (remainingMs / 1000).ceil().clamp(0, 9999);
             // Only send update if countdown changed (avoid flooding)
             if (newCountdown != _countdownSeconds) {
               _countdownSeconds = newCountdown;
               // Send countdown to tablet for floating timer overlay
-              _bufferClient.updateCountdown(_countdownSeconds, label: 'Next stop in');
+              _bufferClient.updateCountdown(_countdownSeconds,
+                  label: 'Next stop in');
             }
           }
           break;
@@ -141,10 +146,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
           // Waiting for visitor to approach - show special phase
           _currentPhase = SequencePhase.awaitingVisitor;
           _countdownSeconds = 0;
-          debugPrint('BufferSequenceExecutor: Motion standby active - awaiting visitor');
+          debugPrint(
+              'BufferSequenceExecutor: Motion standby active - awaiting visitor');
           break;
         default:
-          debugPrint('BufferSequenceExecutor: Unknown command type: ${state.current!.type}');
+          debugPrint(
+              'BufferSequenceExecutor: Unknown command type: ${state.current!.type}');
           break;
       }
     } else {
@@ -175,7 +182,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Sync command counts from heartbeat to avoid skip-to-next issues
     // The relay's completed_count tells us how many commands finished
     _completedCommandCount = state.completedCount;
-    debugPrint('BufferSequenceExecutor: Synced completed count from relay: $_completedCommandCount');
+    debugPrint(
+        'BufferSequenceExecutor: Synced completed count from relay: $_completedCommandCount');
 
     // Try to load the running sequence ID from preferences
     try {
@@ -186,7 +194,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
         // Get sequence from SequenceManager
         final sequence = SequenceManager.instance.getSequence(sequenceId);
         if (sequence != null) {
-          debugPrint('BufferSequenceExecutor: Restored sequence "${sequence.name}" from preferences');
+          debugPrint(
+              'BufferSequenceExecutor: Restored sequence "${sequence.name}" from preferences');
           _currentSequence = sequence;
           _status = state.paused
               ? SequenceExecutorStatus.paused
@@ -196,12 +205,14 @@ class BufferSequenceExecutor extends ChangeNotifier {
           // Rebuild total command count so completion detection works
           final commands = _buildSequenceCommands(sequence);
           _totalCommandCount = commands.length;
-          debugPrint('BufferSequenceExecutor: Rebuilt total count: $_totalCommandCount, completed: $_completedCommandCount');
+          debugPrint(
+              'BufferSequenceExecutor: Rebuilt total count: $_totalCommandCount, completed: $_completedCommandCount');
 
           // Try to determine current stop from navigate command
           if (state.current?.type == 'navigate') {
             // Request current command details - we'll get waypoint from next heartbeat
-            debugPrint('BufferSequenceExecutor: Currently navigating, will sync stop index from next command event');
+            debugPrint(
+                'BufferSequenceExecutor: Currently navigating, will sync stop index from next command event');
           }
 
           notifyListeners();
@@ -215,7 +226,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // If we couldn't restore, mark as running but with unknown sequence
     // This allows the UI to show "Tour Running" even without full details
     if (state.current != null || state.pendingCount > 0) {
-      debugPrint('BufferSequenceExecutor: Buffer is running but sequence unknown, showing running state');
+      debugPrint(
+          'BufferSequenceExecutor: Buffer is running but sequence unknown, showing running state');
       _status = state.paused
           ? SequenceExecutorStatus.paused
           : SequenceExecutorStatus.running;
@@ -243,7 +255,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
         // Find the stop index for this waypoint
         for (int i = 0; i < _currentSequence!.stops.length; i++) {
           if (_currentSequence!.stops[i].waypoint == waypoint) {
-            debugPrint('BufferSequenceExecutor: Found stop index $i for $waypoint');
+            debugPrint(
+                'BufferSequenceExecutor: Found stop index $i for $waypoint');
             _currentStopIndex = i;
             _currentPhase = SequencePhase.navigating;
             break;
@@ -266,7 +279,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
       _currentWaitDurationMs = durationMs ?? 0;
       _countdownSeconds = (_currentWaitDurationMs / 1000).ceil();
-      debugPrint('BufferSequenceExecutor: Wait started, duration=${_currentWaitDurationMs}ms, countdown=$_countdownSeconds');
+      debugPrint(
+          'BufferSequenceExecutor: Wait started, duration=${_currentWaitDurationMs}ms, countdown=$_countdownSeconds');
     } else {
       _currentWaitDurationMs = 0;
     }
@@ -276,28 +290,31 @@ class BufferSequenceExecutor extends ChangeNotifier {
   void _onCommandCompleted(CommandResult result) {
     // Filter out stale events from before reconnect
     // Give 2 second grace period after reconnect to avoid processing buffered events
-    final timeSinceReconnect = DateTime.now().millisecondsSinceEpoch - _reconnectTimestamp;
+    final timeSinceReconnect =
+        DateTime.now().millisecondsSinceEpoch - _reconnectTimestamp;
     if (_reconnectTimestamp > 0 && timeSinceReconnect < 2000) {
-      debugPrint('BufferSequenceExecutor: Ignoring completion event within ${timeSinceReconnect}ms of reconnect');
+      debugPrint(
+          'BufferSequenceExecutor: Ignoring completion event within ${timeSinceReconnect}ms of reconnect');
       return;
     }
 
     _completedCommandCount++;
-    debugPrint('BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
+    debugPrint(
+        'BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
 
     // Handle navigation failures with retry logic (ALL in Flutter)
     if (result.isFailure) {
       // Check if this was a navigation failure
-      final state = _bufferClient.state;
-      if (state.current?.type == 'navigate') {
+      // Use _currentPhase as it's updated by both start events and heartbeats
+      if (_currentPhase == SequencePhase.navigating) {
         _handleNavigationFailure(result);
         return;
       }
     }
 
     // Check for sequence completion
-    if (result.isSuccess) {
-      _navRetryCount = 0; // Reset retry count on success
+    if (result.isSuccess || result.result == 'cancelled') {
+      _navRetryCount = 0; // Reset retry count on success/cancel
       // Give heartbeat a moment to update, then check completion
       Future.delayed(const Duration(milliseconds: 500), () {
         _checkSequenceCompletion();
@@ -315,20 +332,23 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _navRetryCount++;
 
     if (_navRetryCount > _maxNavRetries) {
-      debugPrint('BufferSequenceExecutor: Max retries exceeded, failing sequence');
+      debugPrint(
+          'BufferSequenceExecutor: Max retries exceeded, failing sequence');
       _failSequence('Navigation failed after $_maxNavRetries retries');
       return;
     }
 
-    debugPrint('BufferSequenceExecutor: Retrying navigation ($_navRetryCount/$_maxNavRetries)');
+    debugPrint(
+        'BufferSequenceExecutor: Retrying navigation ($_navRetryCount/$_maxNavRetries)');
 
     // Speak retry message
     _callback.onSpeak('Path blocked. Retrying navigation.');
 
-    // Load retry command into buffer
-    _bufferClient.loadCommands([
-      BufferCommand.navigate(currentStop.waypoint),
-    ], clearExisting: false);
+    // Clear existing commands (which would include the "Arrived" speech for the failed nav)
+    // and reload starting from current stop
+    final commands = _buildSequenceCommands(_currentSequence!,
+        startIndex: _currentStopIndex);
+    _bufferClient.loadCommands(commands, clearExisting: true);
   }
 
   // Track completed commands to detect sequence end without relying on stale heartbeat
@@ -345,21 +365,25 @@ class BufferSequenceExecutor extends ChangeNotifier {
   void _checkSequenceCompletion() {
     final state = _bufferClient.state;
 
-    debugPrint('BufferSequenceExecutor: Checking completion - pending=${state.pendingCount}, current=${state.current?.type}, paused=${state.paused}, status=$_status, completed=$_completedCommandCount/$_totalCommandCount');
+    debugPrint(
+        'BufferSequenceExecutor: Checking completion - pending=${state.pendingCount}, current=${state.current?.type}, paused=${state.paused}, status=$_status, completed=$_completedCommandCount/$_totalCommandCount');
 
     // Method 1: Check heartbeat state (may be stale)
     if (state.pendingCount == 0 && state.current == null && !state.paused) {
       if (_status == SequenceExecutorStatus.running) {
-        debugPrint('BufferSequenceExecutor: Completing via heartbeat state (pending=0, current=null)');
+        debugPrint(
+            'BufferSequenceExecutor: Completing via heartbeat state (pending=0, current=null)');
         _completeSequence();
         return;
       }
     }
 
     // Method 2: Check local command tracking (more reliable)
-    if (_totalCommandCount > 0 && _completedCommandCount >= _totalCommandCount) {
+    if (_totalCommandCount > 0 &&
+        _completedCommandCount >= _totalCommandCount) {
       if (_status == SequenceExecutorStatus.running) {
-        debugPrint('BufferSequenceExecutor: Completing via command count ($_completedCommandCount/$_totalCommandCount)');
+        debugPrint(
+            'BufferSequenceExecutor: Completing via command count ($_completedCommandCount/$_totalCommandCount)');
         _completeSequence();
         return;
       }
@@ -391,7 +415,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Build command list for the entire sequence
     final commands = _buildSequenceCommands(sequence);
     _totalCommandCount = commands.length;
-    debugPrint('BufferSequenceExecutor: Loading $_totalCommandCount commands into buffer');
+    debugPrint(
+        'BufferSequenceExecutor: Loading $_totalCommandCount commands into buffer');
 
     // Load all commands into the relay buffer
     _bufferClient.loadCommands(commands, clearExisting: true);
@@ -408,7 +433,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       if (sequenceId != null) {
         await prefs.setString(_runningSequenceKey, sequenceId);
-        debugPrint('BufferSequenceExecutor: Saved running sequence ID: $sequenceId');
+        debugPrint(
+            'BufferSequenceExecutor: Saved running sequence ID: $sequenceId');
       } else {
         await prefs.remove(_runningSequenceKey);
         debugPrint('BufferSequenceExecutor: Cleared running sequence ID');
@@ -429,34 +455,41 @@ class BufferSequenceExecutor extends ChangeNotifier {
   ///
   /// The display stays up from arrival until next navigation starts.
   /// Wait timer does NOT cut off speech - it waits AFTER speech completes.
-  List<BufferCommand> _buildSequenceCommands(Sequence sequence) {
+  List<BufferCommand> _buildSequenceCommands(Sequence sequence,
+      {int startIndex = 0}) {
     final commands = <BufferCommand>[];
 
     // DEBUG: Log all stops and their config
-    debugPrint('BufferSequenceExecutor: Building commands for ${sequence.stops.length} stops:');
-    for (int i = 0; i < sequence.stops.length; i++) {
+    debugPrint(
+        'BufferSequenceExecutor: Building commands for ${sequence.stops.length} stops (starting from index $startIndex):');
+    for (int i = startIndex; i < sequence.stops.length; i++) {
       final s = sequence.stops[i];
-      debugPrint('  Stop $i: ${s.waypoint} - display=${s.displayUrl?.isNotEmpty == true}, speak=${s.speakText?.isNotEmpty == true}, wait=${s.waitSeconds}s');
+      debugPrint(
+          '  Stop $i: ${s.waypoint} - display=${s.displayUrl?.isNotEmpty == true}, speak=${s.speakText?.isNotEmpty == true}, wait=${s.waitSeconds}s');
     }
 
     // START waypoint - navigate here before starting tour
     // (Robot will navigate to start even if human moved it)
-    if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
-      debugPrint('BufferSequenceExecutor: Adding start waypoint: ${sequence.startWaypoint}');
+    if (startIndex == 0 &&
+        sequence.startWaypoint != null &&
+        sequence.startWaypoint!.isNotEmpty) {
+      debugPrint(
+          'BufferSequenceExecutor: Adding start waypoint: ${sequence.startWaypoint}');
       commands.add(BufferCommand.navigate(sequence.startWaypoint!));
     }
 
     // MOTION TRIGGER - wait for visitor to approach before starting tour
     // When enabled, robot waits at start position for motion detection,
     // announces "Human detected" then greets visitor and shows "Start Tour" button
-    if (sequence.motionTriggerStart) {
+    if (startIndex == 0 && sequence.motionTriggerStart) {
       // Prefix "Human detected" to the greeting for audible feedback on motion
       final customGreeting = sequence.motionGreeting;
       final greeting = customGreeting != null && customGreeting.isNotEmpty
           ? 'Human detected. $customGreeting'
           : 'Human detected. Hello! Would you like a tour?';
       final buttonText = sequence.motionButtonText ?? 'Start Tour';
-      debugPrint('BufferSequenceExecutor: Adding motion standby with greeting: $greeting, button: $buttonText');
+      debugPrint(
+          'BufferSequenceExecutor: Adding motion standby with greeting: $greeting, button: $buttonText');
       commands.add(BufferCommand.motionStandby(
         greeting: greeting,
         sequenceId: sequence.id,
@@ -466,12 +499,15 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     // Intro text (spoken at start position)
-    if (sequence.introText != null && sequence.introText!.isNotEmpty) {
+    if (startIndex == 0 &&
+        sequence.introText != null &&
+        sequence.introText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.introText!));
     }
 
     // Each stop
-    for (final stop in sequence.stops) {
+    for (int i = startIndex; i < sequence.stops.length; i++) {
+      final stop = sequence.stops[i];
       // 1. Navigate to waypoint
       commands.add(BufferCommand.navigate(stop.waypoint));
 
@@ -482,7 +518,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
         commands.add(BufferCommand.display(stop.displayUrl!, durationMs: 0));
       } else {
         // Default display - show POI name/company branding
-        commands.add(BufferCommand.displayDefault(stop.waypoint, durationMs: 0));
+        commands
+            .add(BufferCommand.displayDefault(stop.waypoint, durationMs: 0));
       }
 
       // 3. Arrival sound + announcement (if enabled)
@@ -516,7 +553,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // Rest at end - wait before going to end waypoint (for loops, or just resting)
     if (sequence.restAtEndSeconds > 0) {
-      debugPrint('BufferSequenceExecutor: Adding rest at end: ${sequence.restAtEndSeconds}s');
+      debugPrint(
+          'BufferSequenceExecutor: Adding rest at end: ${sequence.restAtEndSeconds}s');
       commands.add(BufferCommand.wait(sequence.restAtEndSeconds * 1000));
     }
 
@@ -616,6 +654,27 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _status = SequenceExecutorStatus.failed;
     _stopCountdown();
     _callback.onSequenceFailed(reason);
+
+    // Attempt recovery to end/start waypoint if available
+    // User requested: "when all fails got to Pile or last waypoint"
+    if (_currentSequence != null) {
+      String? recoveryWaypoint = _currentSequence!.endWaypoint;
+      if (recoveryWaypoint == null || recoveryWaypoint.isEmpty) {
+        recoveryWaypoint = _currentSequence!.startWaypoint;
+      }
+
+      if (recoveryWaypoint != null && recoveryWaypoint.isNotEmpty) {
+        debugPrint(
+            'BufferSequenceExecutor: Attempting recovery navigation to $recoveryWaypoint');
+        // Load recovery commands - just go there and close display
+        _bufferClient.loadCommands([
+          BufferCommand.speak(
+              'Sequence failed. Returning to $recoveryWaypoint.'),
+          BufferCommand.navigate(recoveryWaypoint),
+          BufferCommand.closeDisplay(),
+        ], clearExisting: true);
+      }
+    }
 
     // Stop tour mode on tablet - unlocks screen
     _bufferClient.stopTourMode();

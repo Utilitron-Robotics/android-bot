@@ -1,3 +1,9 @@
+# Android Migration Plan: TourBot (ARCHIVED)
+
+> **Note**: This migration plan is largely complete or superseded by the current `flutter_app` and `relay_app` architecture. It is kept here for historical context. The `relay_app` now serves as the Android native component, while the `flutter_app` acts as the primary controller.
+
+# Original Plan Follows:
+
 # Android Migration Plan: TourBot
 
 This document outlines the technical architecture and implementation plan for migrating the Python/FastAPI/Web TourBot to a native Android application using Kotlin and Jetpack Compose.

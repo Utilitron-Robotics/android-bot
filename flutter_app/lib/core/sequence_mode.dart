@@ -11,10 +11,10 @@ import 'buffer_client.dart';
 /// A single stop in a tour with waypoint and associated actions
 class SequenceStop {
   final String waypoint;
-  final String? speakText;       // TTS text at this stop
-  final String? displayUrl;      // URL to display (website/image)
-  final int displayDuration;     // How long to show display (0 = until next nav)
-  final int waitSeconds;         // Extra wait time at stop
+  final String? speakText; // TTS text at this stop
+  final String? displayUrl; // URL to display (website/image)
+  final int displayDuration; // How long to show display (0 = until next nav)
+  final int waitSeconds; // Extra wait time at stop
 
   const SequenceStop({
     required this.waypoint,
@@ -31,20 +31,20 @@ class SequenceStop {
       waitSeconds > 0;
 
   Map<String, dynamic> toJson() => {
-    'waypoint': waypoint,
-    if (speakText != null) 'speak_text': speakText,
-    if (displayUrl != null) 'display_url': displayUrl,
-    'display_duration': displayDuration,
-    'wait_seconds': waitSeconds,
-  };
+        'waypoint': waypoint,
+        if (speakText != null) 'speak_text': speakText,
+        if (displayUrl != null) 'display_url': displayUrl,
+        'display_duration': displayDuration,
+        'wait_seconds': waitSeconds,
+      };
 
   factory SequenceStop.fromJson(Map<String, dynamic> json) => SequenceStop(
-    waypoint: json['waypoint'] as String? ?? '',
-    speakText: json['speak_text'] as String?,
-    displayUrl: json['display_url'] as String?,
-    displayDuration: json['display_duration'] as int? ?? 0,
-    waitSeconds: json['wait_seconds'] as int? ?? 0,
-  );
+        waypoint: json['waypoint'] as String? ?? '',
+        speakText: json['speak_text'] as String?,
+        displayUrl: json['display_url'] as String?,
+        displayDuration: json['display_duration'] as int? ?? 0,
+        waitSeconds: json['wait_seconds'] as int? ?? 0,
+      );
 
   SequenceStop copyWith({
     String? waypoint,
@@ -52,13 +52,14 @@ class SequenceStop {
     String? displayUrl,
     int? displayDuration,
     int? waitSeconds,
-  }) => SequenceStop(
-    waypoint: waypoint ?? this.waypoint,
-    speakText: speakText ?? this.speakText,
-    displayUrl: displayUrl ?? this.displayUrl,
-    displayDuration: displayDuration ?? this.displayDuration,
-    waitSeconds: waitSeconds ?? this.waitSeconds,
-  );
+  }) =>
+      SequenceStop(
+        waypoint: waypoint ?? this.waypoint,
+        speakText: speakText ?? this.speakText,
+        displayUrl: displayUrl ?? this.displayUrl,
+        displayDuration: displayDuration ?? this.displayDuration,
+        waitSeconds: waitSeconds ?? this.waitSeconds,
+      );
 }
 
 /// A complete tour with ordered stops
@@ -67,20 +68,25 @@ class Sequence {
   final String name;
   final String description;
   final List<SequenceStop> stops;
-  final bool loop;              // Loop back to start after completion
-  final bool announceArrival;   // Say "Arrived at [waypoint]" before custom text
-  final String? introText;      // Speak before starting tour
-  final String? outroText;      // Speak after completing tour
-  final String? startWaypoint;  // Navigate here before starting tour
-  final String? endWaypoint;    // Navigate here after completing tour
-  final int restAtEndSeconds;   // Wait at end waypoint before returning to start (for loops)
-  final int modifiedAt;         // Timestamp for conflict resolution (ms since epoch)
+  final bool loop; // Loop back to start after completion
+  final bool announceArrival; // Say "Arrived at [waypoint]" before custom text
+  final String? introText; // Speak before starting tour
+  final String? outroText; // Speak after completing tour
+  final String? startWaypoint; // Navigate here before starting tour
+  final String? endWaypoint; // Navigate here after completing tour
+  final int
+      restAtEndSeconds; // Wait at end waypoint before returning to start (for loops)
+  final int modifiedAt; // Timestamp for conflict resolution (ms since epoch)
 
   // Motion trigger settings - start tour when someone approaches
-  final bool motionTriggerStart;    // Enable motion-triggered tour start at start waypoint
-  final String? motionGreeting;     // TTS greeting when motion detected (e.g., "Hello! Would you like a tour?")
-  final String? motionButtonText;   // Button text shown on tablet (e.g., "Start Tour", "Begin Experience")
-  final String? motionDisplayUrl;   // URL to show on tablet when awaiting tour start (start button)
+  final bool
+      motionTriggerStart; // Enable motion-triggered tour start at start waypoint
+  final String?
+      motionGreeting; // TTS greeting when motion detected (e.g., "Hello! Would you like a tour?")
+  final String?
+      motionButtonText; // Button text shown on tablet (e.g., "Start Tour", "Begin Experience")
+  final String?
+      motionDisplayUrl; // URL to show on tablet when awaiting tour start (start button)
 
   Sequence({
     required this.id,
@@ -112,11 +118,13 @@ class Sequence {
     return Sequence(
       id: id,
       name: name,
-      stops: waypoints.map((wp) => SequenceStop(
-        waypoint: wp,
-        speakText: scripts[wp],
-        displayUrl: displayUrls[wp],
-      )).toList(),
+      stops: waypoints
+          .map((wp) => SequenceStop(
+                waypoint: wp,
+                speakText: scripts[wp],
+                displayUrl: displayUrls[wp],
+              ))
+          .toList(),
     );
   }
 
@@ -141,13 +149,15 @@ class Sequence {
       outroText: 'This concludes our tour. Thank you for joining me!',
       announceArrival: true,
       endWaypoint: returnWaypoint,
-      stops: waypoints.map((wp) => SequenceStop(
-        waypoint: wp,
-        speakText: narrations[wp] ?? 'This is $wp.',
-        displayUrl: mediaUrls[wp],
-        displayDuration: 15,
-        waitSeconds: 5,
-      )).toList(),
+      stops: waypoints
+          .map((wp) => SequenceStop(
+                waypoint: wp,
+                speakText: narrations[wp] ?? 'This is $wp.',
+                displayUrl: mediaUrls[wp],
+                displayDuration: 15,
+                waitSeconds: 5,
+              ))
+          .toList(),
     );
   }
 
@@ -161,7 +171,9 @@ class Sequence {
     final stops = <SequenceStop>[];
     for (int i = 0; i < waypoints.length; i++) {
       final wp = waypoints[i];
-      final joke = i < jokes.length ? jokes[i] : 'Why did the robot cross the road? To get to the other circuit!';
+      final joke = i < jokes.length
+          ? jokes[i]
+          : 'Why did the robot cross the road? To get to the other circuit!';
       stops.add(SequenceStop(
         waypoint: wp,
         speakText: joke,
@@ -186,7 +198,8 @@ class Sequence {
   static Sequence deliveryExample({
     required List<String> destinations,
     required String returnWaypoint,
-    String deliveryMessage = 'Your delivery has arrived. Please take your items.',
+    String deliveryMessage =
+        'Your delivery has arrived. Please take your items.',
     int waitSeconds = 30,
   }) {
     return Sequence(
@@ -197,11 +210,13 @@ class Sequence {
       outroText: 'All deliveries complete. Returning to station.',
       announceArrival: true,
       endWaypoint: returnWaypoint,
-      stops: destinations.map((wp) => SequenceStop(
-        waypoint: wp,
-        speakText: deliveryMessage,
-        waitSeconds: waitSeconds,
-      )).toList(),
+      stops: destinations
+          .map((wp) => SequenceStop(
+                waypoint: wp,
+                speakText: deliveryMessage,
+                waitSeconds: waitSeconds,
+              ))
+          .toList(),
     );
   }
 
@@ -213,11 +228,13 @@ class Sequence {
     String askText = 'Please place any finished items on my tray.',
     int waitSeconds = 20,
   }) {
-    final stops = tables.map((table) => SequenceStop(
-      waypoint: table,
-      speakText: askText,
-      waitSeconds: waitSeconds,
-    )).toList();
+    final stops = tables
+        .map((table) => SequenceStop(
+              waypoint: table,
+              speakText: askText,
+              waitSeconds: waitSeconds,
+            ))
+        .toList();
 
     // Add bus station as final stop
     stops.add(SequenceStop(
@@ -242,16 +259,19 @@ class Sequence {
   static Sequence emergencyExample({
     required List<String> alertWaypoints,
     required String exitWaypoint,
-    String alertMessage = 'EMERGENCY! Please evacuate immediately. Follow me to the exit.',
+    String alertMessage =
+        'EMERGENCY! Please evacuate immediately. Follow me to the exit.',
     String? evacuationMapUrl,
   }) {
-    final stops = alertWaypoints.map((wp) => SequenceStop(
-      waypoint: wp,
-      speakText: alertMessage,
-      displayUrl: evacuationMapUrl,
-      displayDuration: 0, // Keep displayed until departure
-      waitSeconds: 5, // Brief wait to ensure message heard
-    )).toList();
+    final stops = alertWaypoints
+        .map((wp) => SequenceStop(
+              waypoint: wp,
+              speakText: alertMessage,
+              displayUrl: evacuationMapUrl,
+              displayDuration: 0, // Keep displayed until departure
+              waitSeconds: 5, // Brief wait to ensure message heard
+            ))
+        .toList();
 
     // Add exit as final stop
     stops.add(SequenceStop(
@@ -284,10 +304,12 @@ class Sequence {
       description: 'Continuously patrol waypoints',
       loop: true,
       announceArrival: false,
-      stops: patrolPoints.map((wp) => SequenceStop(
-        waypoint: wp,
-        waitSeconds: dwellSeconds,
-      )).toList(),
+      stops: patrolPoints
+          .map((wp) => SequenceStop(
+                waypoint: wp,
+                waitSeconds: dwellSeconds,
+              ))
+          .toList(),
     );
   }
 
@@ -324,44 +346,46 @@ class Sequence {
   }
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'description': description,
-    'stops': stops.map((s) => s.toJson()).toList(),
-    'loop': loop,
-    'announce_arrival': announceArrival,
-    'rest_at_end_seconds': restAtEndSeconds,
-    'modified_at': modifiedAt,
-    'motion_trigger_start': motionTriggerStart,
-    if (introText != null) 'intro_text': introText,
-    if (outroText != null) 'outro_text': outroText,
-    if (startWaypoint != null) 'start_waypoint': startWaypoint,
-    if (endWaypoint != null) 'end_waypoint': endWaypoint,
-    if (motionGreeting != null) 'motion_greeting': motionGreeting,
-    if (motionButtonText != null) 'motion_button_text': motionButtonText,
-    if (motionDisplayUrl != null) 'motion_display_url': motionDisplayUrl,
-  };
+        'id': id,
+        'name': name,
+        'description': description,
+        'stops': stops.map((s) => s.toJson()).toList(),
+        'loop': loop,
+        'announce_arrival': announceArrival,
+        'rest_at_end_seconds': restAtEndSeconds,
+        'modified_at': modifiedAt,
+        'motion_trigger_start': motionTriggerStart,
+        if (introText != null) 'intro_text': introText,
+        if (outroText != null) 'outro_text': outroText,
+        if (startWaypoint != null) 'start_waypoint': startWaypoint,
+        if (endWaypoint != null) 'end_waypoint': endWaypoint,
+        if (motionGreeting != null) 'motion_greeting': motionGreeting,
+        if (motionButtonText != null) 'motion_button_text': motionButtonText,
+        if (motionDisplayUrl != null) 'motion_display_url': motionDisplayUrl,
+      };
 
   factory Sequence.fromJson(Map<String, dynamic> json) => Sequence(
-    id: json['id'] as String? ?? DateTime.now().millisecondsSinceEpoch.toString(),
-    name: json['name'] as String? ?? 'Untitled Sequence',
-    description: json['description'] as String? ?? '',
-    stops: (json['stops'] as List<dynamic>?)
-        ?.map((s) => SequenceStop.fromJson(s as Map<String, dynamic>))
-        .toList() ?? [],
-    loop: json['loop'] as bool? ?? false,
-    announceArrival: json['announce_arrival'] as bool? ?? false,
-    restAtEndSeconds: json['rest_at_end_seconds'] as int? ?? 0,
-    introText: json['intro_text'] as String?,
-    outroText: json['outro_text'] as String?,
-    startWaypoint: json['start_waypoint'] as String?,
-    endWaypoint: json['end_waypoint'] as String?,
-    modifiedAt: json['modified_at'] as int?,
-    motionTriggerStart: json['motion_trigger_start'] as bool? ?? false,
-    motionGreeting: json['motion_greeting'] as String?,
-    motionButtonText: json['motion_button_text'] as String?,
-    motionDisplayUrl: json['motion_display_url'] as String?,
-  );
+        id: json['id'] as String? ??
+            DateTime.now().millisecondsSinceEpoch.toString(),
+        name: json['name'] as String? ?? 'Untitled Sequence',
+        description: json['description'] as String? ?? '',
+        stops: (json['stops'] as List<dynamic>?)
+                ?.map((s) => SequenceStop.fromJson(s as Map<String, dynamic>))
+                .toList() ??
+            [],
+        loop: json['loop'] as bool? ?? false,
+        announceArrival: json['announce_arrival'] as bool? ?? false,
+        restAtEndSeconds: json['rest_at_end_seconds'] as int? ?? 0,
+        introText: json['intro_text'] as String?,
+        outroText: json['outro_text'] as String?,
+        startWaypoint: json['start_waypoint'] as String?,
+        endWaypoint: json['end_waypoint'] as String?,
+        modifiedAt: json['modified_at'] as int?,
+        motionTriggerStart: json['motion_trigger_start'] as bool? ?? false,
+        motionGreeting: json['motion_greeting'] as String?,
+        motionButtonText: json['motion_button_text'] as String?,
+        motionDisplayUrl: json['motion_display_url'] as String?,
+      );
 
   Sequence copyWith({
     String? id,
@@ -380,34 +404,35 @@ class Sequence {
     String? motionGreeting,
     String? motionButtonText,
     String? motionDisplayUrl,
-  }) => Sequence(
-    id: id ?? this.id,
-    name: name ?? this.name,
-    description: description ?? this.description,
-    stops: stops ?? this.stops,
-    loop: loop ?? this.loop,
-    announceArrival: announceArrival ?? this.announceArrival,
-    restAtEndSeconds: restAtEndSeconds ?? this.restAtEndSeconds,
-    introText: introText ?? this.introText,
-    outroText: outroText ?? this.outroText,
-    startWaypoint: startWaypoint ?? this.startWaypoint,
-    endWaypoint: endWaypoint ?? this.endWaypoint,
-    modifiedAt: modifiedAt ?? this.modifiedAt,
-    motionTriggerStart: motionTriggerStart ?? this.motionTriggerStart,
-    motionGreeting: motionGreeting ?? this.motionGreeting,
-    motionButtonText: motionButtonText ?? this.motionButtonText,
-    motionDisplayUrl: motionDisplayUrl ?? this.motionDisplayUrl,
-  );
+  }) =>
+      Sequence(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        description: description ?? this.description,
+        stops: stops ?? this.stops,
+        loop: loop ?? this.loop,
+        announceArrival: announceArrival ?? this.announceArrival,
+        restAtEndSeconds: restAtEndSeconds ?? this.restAtEndSeconds,
+        introText: introText ?? this.introText,
+        outroText: outroText ?? this.outroText,
+        startWaypoint: startWaypoint ?? this.startWaypoint,
+        endWaypoint: endWaypoint ?? this.endWaypoint,
+        modifiedAt: modifiedAt ?? this.modifiedAt,
+        motionTriggerStart: motionTriggerStart ?? this.motionTriggerStart,
+        motionGreeting: motionGreeting ?? this.motionGreeting,
+        motionButtonText: motionButtonText ?? this.motionButtonText,
+        motionDisplayUrl: motionDisplayUrl ?? this.motionDisplayUrl,
+      );
 
   /// Add a stop
   Sequence addStop(SequenceStop stop) => copyWith(
-    stops: [...stops, stop],
-  );
+        stops: [...stops, stop],
+      );
 
   /// Remove a stop by index
   Sequence removeStop(int index) => copyWith(
-    stops: [...stops]..removeAt(index),
-  );
+        stops: [...stops]..removeAt(index),
+      );
 
   /// Reorder stops
   Sequence reorderStop(int oldIndex, int newIndex) {
@@ -451,9 +476,10 @@ enum SequencePhase {
 /// Callback interface for tour execution
 abstract class SequenceExecutorCallback {
   void onSpeak(String text);
-  void onArrivalAnnouncement(String waypoint, {bool isDelivery = false}); // Beep + speak arrival
+  void onArrivalAnnouncement(String waypoint,
+      {bool isDelivery = false}); // Beep + speak arrival
   void onDisplay(String url, int durationSeconds);
-  void onDisplayDefault(String waypoint);  // Show company branding when no media
+  void onDisplayDefault(String waypoint); // Show company branding when no media
   void onCloseDisplay();
   void onNavigate(String waypoint);
   void onSequenceStarted(Sequence sequence);
@@ -469,11 +495,11 @@ class SequenceManager extends ChangeNotifier {
   static const String _sequencesKey = 'saved_sequences';
   static const String _cloudUrlKey = 'tour_cloud_api_url';
   static const String _currentMapKey = 'tour_current_map_id';
-  static const String _deletedToursKey = 'deleted_tour_ids';  // Tombstones
+  static const String _deletedToursKey = 'deleted_tour_ids'; // Tombstones
   static SequenceManager? _instance;
 
   final Map<String, Sequence> _sequences = {};
-  final Set<String> _deletedTourIds = {};  // Tombstones for deleted tours
+  final Set<String> _deletedTourIds = {}; // Tombstones for deleted tours
   bool _loaded = false;
   bool _cloudSyncEnabled = false;
   String? _cloudApiUrl;
@@ -515,10 +541,11 @@ class SequenceManager extends ChangeNotifier {
   SequenceStatus get status => _status;
   Sequence? get currentSequence => _currentSequence;
   int get currentStopIndex => _currentStopIndex;
-  SequenceStop? get currentStop =>
-      _currentSequence != null && _currentStopIndex >= 0 && _currentStopIndex < _currentSequence!.stops.length
-          ? _currentSequence!.stops[_currentStopIndex]
-          : null;
+  SequenceStop? get currentStop => _currentSequence != null &&
+          _currentStopIndex >= 0 &&
+          _currentStopIndex < _currentSequence!.stops.length
+      ? _currentSequence!.stops[_currentStopIndex]
+      : null;
   List<Sequence> get sequences => _sequences.values.toList();
 
   // Phase tracking getters
@@ -566,7 +593,8 @@ class SequenceManager extends ChangeNotifier {
   /// When set, sequences are loaded into the relay buffer for execution
   void setBufferExecutor(BufferClient bufferClient) {
     if (_callback == null) {
-      debugPrint('SequenceManager: Cannot set buffer executor - no callback set');
+      debugPrint(
+          'SequenceManager: Cannot set buffer executor - no callback set');
       return;
     }
     _bufferExecutor = BufferSequenceExecutor.withClient(
@@ -643,7 +671,8 @@ class SequenceManager extends ChangeNotifier {
       await prefs.setString(_currentMapKey, mapId);
     }
 
-    debugPrint('SequenceManager: Cloud sync configured - API: $apiUrl, Map: $mapId');
+    debugPrint(
+        'SequenceManager: Cloud sync configured - API: $apiUrl, Map: $mapId');
     notifyListeners();
   }
 
@@ -677,18 +706,21 @@ class SequenceManager extends ChangeNotifier {
       if (deletedJson != null) {
         _deletedTourIds.addAll(deletedJson);
       }
-      debugPrint('SequenceManager: Loaded ${_deletedTourIds.length} tombstones');
+      debugPrint(
+          'SequenceManager: Loaded ${_deletedTourIds.length} tombstones');
 
       // Load local tours
       final toursJson = prefs.getString(_sequencesKey);
       final jsonLen = toursJson?.length ?? 0;
-      debugPrint('SequenceManager.load(): Raw JSON from prefs: ${jsonLen > 0 ? toursJson!.substring(0, jsonLen.clamp(0, 200)) : "(null)"}...');
+      debugPrint(
+          'SequenceManager.load(): Raw JSON from prefs: ${jsonLen > 0 ? toursJson!.substring(0, jsonLen.clamp(0, 200)) : "(null)"}...');
       debugPrint('SequenceManager.load(): JSON length: $jsonLen chars');
 
       if (toursJson != null && toursJson.isNotEmpty) {
         try {
           final tours = jsonDecode(toursJson) as Map<String, dynamic>;
-          debugPrint('SequenceManager.load(): Decoded ${tours.length} tour entries');
+          debugPrint(
+              'SequenceManager.load(): Decoded ${tours.length} tour entries');
           tours.forEach((id, data) {
             debugPrint('SequenceManager.load(): Loading tour id=$id');
             _sequences[id] = Sequence.fromJson(data as Map<String, dynamic>);
@@ -697,7 +729,8 @@ class SequenceManager extends ChangeNotifier {
           debugPrint('SequenceManager.load(): JSON decode error: $e');
         }
       } else {
-        debugPrint('SequenceManager.load(): No tours JSON found in prefs (null or empty)');
+        debugPrint(
+            'SequenceManager.load(): No tours JSON found in prefs (null or empty)');
       }
       _loaded = true;
       debugPrint('SequenceManager: Loaded ${_sequences.length} local tours');
@@ -717,10 +750,12 @@ class SequenceManager extends ChangeNotifier {
   /// Only overwrites local tours if cloud version is newer (based on modified_at timestamp)
   Future<bool> loadFromCloud({String? mapId}) async {
     debugPrint('SequenceManager.loadFromCloud(): CALLED');
-    debugPrint('SequenceManager.loadFromCloud(): Current local tours BEFORE cloud load: ${_sequences.keys.toList()}');
+    debugPrint(
+        'SequenceManager.loadFromCloud(): Current local tours BEFORE cloud load: ${_sequences.keys.toList()}');
 
     if (_cloudApiUrl == null || _cloudApiUrl!.isEmpty) {
-      debugPrint('SequenceManager.loadFromCloud(): SKIP - Cloud API URL not configured');
+      debugPrint(
+          'SequenceManager.loadFromCloud(): SKIP - Cloud API URL not configured');
       return false;
     }
 
@@ -741,19 +776,22 @@ class SequenceManager extends ChangeNotifier {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final cloudTours = data['tours'] as List<dynamic>? ?? [];
 
-        debugPrint('SequenceManager: Received ${cloudTours.length} tours from cloud');
+        debugPrint(
+            'SequenceManager: Received ${cloudTours.length} tours from cloud');
 
         int merged = 0;
         int skipped = 0;
         int added = 0;
 
         for (final tourData in cloudTours) {
-          final cloudSeq = _parseSequenceFromCloud(tourData as Map<String, dynamic>);
+          final cloudSeq =
+              _parseSequenceFromCloud(tourData as Map<String, dynamic>);
 
           // Skip tours that were deleted locally (tombstoned)
           if (_deletedTourIds.contains(cloudSeq.id)) {
             skipped++;
-            debugPrint('SequenceManager: Skipping tombstoned tour: ${cloudSeq.name}');
+            debugPrint(
+                'SequenceManager: Skipping tombstoned tour: ${cloudSeq.name}');
             continue;
           }
 
@@ -763,30 +801,37 @@ class SequenceManager extends ChangeNotifier {
             // New tour from cloud - add it
             _sequences[cloudSeq.id] = cloudSeq;
             added++;
-            debugPrint('SequenceManager: Added new tour from cloud: ${cloudSeq.name}');
+            debugPrint(
+                'SequenceManager: Added new tour from cloud: ${cloudSeq.name}');
           } else if (cloudSeq.modifiedAt > localSeq.modifiedAt) {
             // Cloud is newer - use cloud version
             _sequences[cloudSeq.id] = cloudSeq;
             merged++;
-            debugPrint('SequenceManager: Cloud tour "${cloudSeq.name}" is newer (cloud=${cloudSeq.modifiedAt}, local=${localSeq.modifiedAt}) - updated');
+            debugPrint(
+                'SequenceManager: Cloud tour "${cloudSeq.name}" is newer (cloud=${cloudSeq.modifiedAt}, local=${localSeq.modifiedAt}) - updated');
           } else {
             // Local is newer or same - keep local
             skipped++;
-            debugPrint('SequenceManager: Local tour "${localSeq.name}" is newer/same (cloud=${cloudSeq.modifiedAt}, local=${localSeq.modifiedAt}) - kept local');
+            debugPrint(
+                'SequenceManager: Local tour "${localSeq.name}" is newer/same (cloud=${cloudSeq.modifiedAt}, local=${localSeq.modifiedAt}) - kept local');
           }
         }
 
-        debugPrint('SequenceManager.loadFromCloud(): Cloud sync - added=$added, updated=$merged, kept_local=$skipped');
-        debugPrint('SequenceManager.loadFromCloud(): Local tours AFTER cloud merge: ${_sequences.keys.toList()}');
+        debugPrint(
+            'SequenceManager.loadFromCloud(): Cloud sync - added=$added, updated=$merged, kept_local=$skipped');
+        debugPrint(
+            'SequenceManager.loadFromCloud(): Local tours AFTER cloud merge: ${_sequences.keys.toList()}');
 
         // Save to local storage for offline access
-        debugPrint('SequenceManager.loadFromCloud(): About to call save() with ${_sequences.length} tours');
+        debugPrint(
+            'SequenceManager.loadFromCloud(): About to call save() with ${_sequences.length} tours');
         await save();
         debugPrint('SequenceManager.loadFromCloud(): save() completed');
         notifyListeners();
         return true;
       } else {
-        debugPrint('SequenceManager.loadFromCloud(): FAILED - status ${response.statusCode}, body=${response.body}');
+        debugPrint(
+            'SequenceManager.loadFromCloud(): FAILED - status ${response.statusCode}, body=${response.body}');
         return false;
       }
     } catch (e, stack) {
@@ -800,15 +845,17 @@ class SequenceManager extends ChangeNotifier {
   Sequence _parseSequenceFromCloud(Map<String, dynamic> cloudData) {
     // Convert cloud format (tour_id, map_id) to local format (id)
     final tourId = cloudData['tour_id'] as String? ??
-                   cloudData['id'] as String? ??
-                   DateTime.now().millisecondsSinceEpoch.toString();
+        cloudData['id'] as String? ??
+        DateTime.now().millisecondsSinceEpoch.toString();
 
     // Parse waypoints array into SequenceStops
     final waypoints = cloudData['waypoints'] as List<dynamic>? ?? [];
     final dwellTimes = cloudData['dwell_times'] as Map<String, dynamic>? ?? {};
 
     final stops = waypoints.map((wp) {
-      final waypointName = wp is String ? wp : (wp as Map<String, dynamic>)['name'] as String? ?? '';
+      final waypointName = wp is String
+          ? wp
+          : (wp as Map<String, dynamic>)['name'] as String? ?? '';
       final dwellTime = dwellTimes[waypointName] as int? ?? 0;
 
       // Check if waypoint has additional data
@@ -818,7 +865,8 @@ class SequenceManager extends ChangeNotifier {
           speakText: wp['speak_text'] as String?,
           displayUrl: wp['display_url'] as String?,
           displayDuration: wp['display_duration'] as int? ?? 0,
-          waitSeconds: dwellTime > 0 ? dwellTime : (wp['wait_seconds'] as int? ?? 0),
+          waitSeconds:
+              dwellTime > 0 ? dwellTime : (wp['wait_seconds'] as int? ?? 0),
         );
       }
       return SequenceStop(
@@ -849,16 +897,19 @@ class SequenceManager extends ChangeNotifier {
 
   /// Save a tour to cloud (DynamoDB via API Gateway)
   Future<bool> saveToCloud(Sequence sequence, {String? mapId}) async {
-    debugPrint('SequenceManager.saveToCloud(): CALLED for "${sequence.name}" id=${sequence.id}');
+    debugPrint(
+        'SequenceManager.saveToCloud(): CALLED for "${sequence.name}" id=${sequence.id}');
 
     if (_cloudApiUrl == null || _cloudApiUrl!.isEmpty) {
-      debugPrint('SequenceManager.saveToCloud(): SKIP - Cloud API URL not configured');
+      debugPrint(
+          'SequenceManager.saveToCloud(): SKIP - Cloud API URL not configured');
       return false;
     }
 
     try {
       final targetMapId = mapId ?? _currentMapId ?? '';
-      debugPrint('SequenceManager.saveToCloud(): Saving to map: $targetMapId, API: $_cloudApiUrl');
+      debugPrint(
+          'SequenceManager.saveToCloud(): Saving to map: $targetMapId, API: $_cloudApiUrl');
 
       // Convert to cloud format
       final cloudData = {
@@ -866,14 +917,18 @@ class SequenceManager extends ChangeNotifier {
         'map_id': targetMapId,
         'name': sequence.name,
         'description': sequence.description,
-        'waypoints': sequence.stops.map((s) => {
-          'name': s.waypoint,
-          'speak_text': s.speakText,
-          'display_url': s.displayUrl,
-          'display_duration': s.displayDuration,
-          'wait_seconds': s.waitSeconds,
-        }).toList(),
-        'dwell_times': {for (var s in sequence.stops) s.waypoint: s.waitSeconds},
+        'waypoints': sequence.stops
+            .map((s) => {
+                  'name': s.waypoint,
+                  'speak_text': s.speakText,
+                  'display_url': s.displayUrl,
+                  'display_duration': s.displayDuration,
+                  'wait_seconds': s.waitSeconds,
+                })
+            .toList(),
+        'dwell_times': {
+          for (var s in sequence.stops) s.waypoint: s.waitSeconds
+        },
         'loop': sequence.loop,
         'announce_arrival': sequence.announceArrival,
         'rest_at_end_seconds': sequence.restAtEndSeconds,
@@ -885,22 +940,29 @@ class SequenceManager extends ChangeNotifier {
       };
 
       debugPrint('SequenceManager.saveToCloud(): POST to $_cloudApiUrl/tours');
-      debugPrint('SequenceManager.saveToCloud(): Body: ${jsonEncode(cloudData)}');
+      debugPrint(
+          'SequenceManager.saveToCloud(): Body: ${jsonEncode(cloudData)}');
 
-      final response = await http.post(
-        Uri.parse('$_cloudApiUrl/tours'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(cloudData),
-      ).timeout(const Duration(seconds: 10));
+      final response = await http
+          .post(
+            Uri.parse('$_cloudApiUrl/tours'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(cloudData),
+          )
+          .timeout(const Duration(seconds: 10));
 
-      debugPrint('SequenceManager.saveToCloud(): Response status=${response.statusCode}');
-      debugPrint('SequenceManager.saveToCloud(): Response body=${response.body}');
+      debugPrint(
+          'SequenceManager.saveToCloud(): Response status=${response.statusCode}');
+      debugPrint(
+          'SequenceManager.saveToCloud(): Response body=${response.body}');
 
       if (response.statusCode == 200) {
-        debugPrint('SequenceManager.saveToCloud(): SUCCESS - Tour saved to cloud');
+        debugPrint(
+            'SequenceManager.saveToCloud(): SUCCESS - Tour saved to cloud');
         return true;
       } else {
-        debugPrint('SequenceManager.saveToCloud(): FAILED - status ${response.statusCode}');
+        debugPrint(
+            'SequenceManager.saveToCloud(): FAILED - status ${response.statusCode}');
         return false;
       }
     } catch (e, stack) {
@@ -920,14 +982,16 @@ class SequenceManager extends ChangeNotifier {
     final targetMapId = mapId ?? _currentMapId ?? '';
     int pushed = 0;
 
-    debugPrint('SequenceManager.pushAllToCloud(): Pushing ${_sequences.length} tours to cloud');
+    debugPrint(
+        'SequenceManager.pushAllToCloud(): Pushing ${_sequences.length} tours to cloud');
 
     for (final seq in _sequences.values) {
       final success = await saveToCloud(seq, mapId: targetMapId);
       if (success) pushed++;
     }
 
-    debugPrint('SequenceManager.pushAllToCloud(): Pushed $pushed/${_sequences.length} tours');
+    debugPrint(
+        'SequenceManager.pushAllToCloud(): Pushed $pushed/${_sequences.length} tours');
     return pushed;
   }
 
@@ -975,8 +1039,10 @@ class SequenceManager extends ChangeNotifier {
       final toursJson = jsonEncode(toursMap);
 
       debugPrint('SequenceManager.save(): Saving ${_sequences.length} tours');
-      debugPrint('SequenceManager.save(): Tours map keys: ${_sequences.keys.toList()}');
-      debugPrint('SequenceManager.save(): JSON length: ${toursJson.length} chars');
+      debugPrint(
+          'SequenceManager.save(): Tours map keys: ${_sequences.keys.toList()}');
+      debugPrint(
+          'SequenceManager.save(): JSON length: ${toursJson.length} chars');
 
       final setResult = await prefs.setString(_sequencesKey, toursJson);
       debugPrint('SequenceManager.save(): setString result: $setResult');
@@ -986,9 +1052,11 @@ class SequenceManager extends ChangeNotifier {
 
       // VERIFY it was saved by reading it back
       final verifyJson = prefs.getString(_sequencesKey);
-      debugPrint('SequenceManager.save(): Verify - read back ${verifyJson?.length ?? 0} chars');
+      debugPrint(
+          'SequenceManager.save(): Verify - read back ${verifyJson?.length ?? 0} chars');
 
-      debugPrint('SequenceManager: Saved ${_sequences.length} tours, ${_deletedTourIds.length} tombstones');
+      debugPrint(
+          'SequenceManager: Saved ${_sequences.length} tours, ${_deletedTourIds.length} tombstones');
     } catch (e, stack) {
       debugPrint('SequenceManager: Failed to save: $e');
       debugPrint('SequenceManager: Stack: $stack');
@@ -1001,8 +1069,10 @@ class SequenceManager extends ChangeNotifier {
   /// Save a sequence (local + cloud if enabled)
   /// Updates modified_at timestamp to prevent cloud from overwriting this edit
   Future<void> saveSequence(Sequence sequence) async {
-    debugPrint('SequenceManager.saveSequence(): CALLED with "${sequence.name}" id=${sequence.id}');
-    debugPrint('SequenceManager.saveSequence(): Before save - _sequences has ${_sequences.length} tours');
+    debugPrint(
+        'SequenceManager.saveSequence(): CALLED with "${sequence.name}" id=${sequence.id}');
+    debugPrint(
+        'SequenceManager.saveSequence(): Before save - _sequences has ${_sequences.length} tours');
 
     // Update modified_at timestamp to mark this as the newest version
     final updatedSequence = sequence.copyWith(
@@ -1013,21 +1083,27 @@ class SequenceManager extends ChangeNotifier {
     _deletedTourIds.remove(updatedSequence.id);
 
     _sequences[updatedSequence.id] = updatedSequence;
-    debugPrint('SequenceManager.saveSequence(): After adding - _sequences has ${_sequences.length} tours');
-    debugPrint('SequenceManager.saveSequence(): Tour IDs: ${_sequences.keys.toList()}');
+    debugPrint(
+        'SequenceManager.saveSequence(): After adding - _sequences has ${_sequences.length} tours');
+    debugPrint(
+        'SequenceManager.saveSequence(): Tour IDs: ${_sequences.keys.toList()}');
 
     await save();
-    debugPrint('SequenceManager.saveSequence(): save() completed for "${updatedSequence.name}" with modifiedAt=${updatedSequence.modifiedAt}');
+    debugPrint(
+        'SequenceManager.saveSequence(): save() completed for "${updatedSequence.name}" with modifiedAt=${updatedSequence.modifiedAt}');
 
     // VERIFY PERSISTENCE: Read back immediately to confirm save worked
     final prefs = await SharedPreferences.getInstance();
     final verifyJson = prefs.getString(_sequencesKey);
-    debugPrint('SequenceManager.saveSequence(): VERIFY - stored JSON length: ${verifyJson?.length ?? 0}');
+    debugPrint(
+        'SequenceManager.saveSequence(): VERIFY - stored JSON length: ${verifyJson?.length ?? 0}');
     if (verifyJson != null && verifyJson.isNotEmpty) {
       final verifyMap = jsonDecode(verifyJson) as Map<String, dynamic>;
-      debugPrint('SequenceManager.saveSequence(): VERIFY - stored ${verifyMap.length} tours: ${verifyMap.keys.toList()}');
+      debugPrint(
+          'SequenceManager.saveSequence(): VERIFY - stored ${verifyMap.length} tours: ${verifyMap.keys.toList()}');
     } else {
-      debugPrint('SequenceManager.saveSequence(): VERIFY FAILED - no data stored!');
+      debugPrint(
+          'SequenceManager.saveSequence(): VERIFY FAILED - no data stored!');
     }
 
     // Also save to cloud if enabled
@@ -1058,11 +1134,14 @@ class SequenceManager extends ChangeNotifier {
 
   /// Start a sequence using buffer executor (preferred) or SequenceTaskMode fallback
   Future<void> startSequence(Sequence sequence) async {
-    debugPrint('SequenceManager.startSequence: CALLED with sequence="${sequence.name}" (${sequence.stops.length} stops)');
-    debugPrint('SequenceManager.startSequence: Current status=$_status, useBuffer=$_useBufferExecutor');
+    debugPrint(
+        'SequenceManager.startSequence: CALLED with sequence="${sequence.name}" (${sequence.stops.length} stops)');
+    debugPrint(
+        'SequenceManager.startSequence: Current status=$_status, useBuffer=$_useBufferExecutor');
 
     if (_status == SequenceStatus.running) {
-      debugPrint('SequenceManager.startSequence: ABORT - sequence already running');
+      debugPrint(
+          'SequenceManager.startSequence: ABORT - sequence already running');
       return;
     }
 
@@ -1088,16 +1167,19 @@ class SequenceManager extends ChangeNotifier {
     if (_useBufferExecutor && _bufferExecutor != null) {
       final bufferClient = _bufferExecutor!.bufferClient;
       if (!bufferClient.isStale) {
-        debugPrint('SequenceManager.startSequence: Using BufferSequenceExecutor (relay buffer alive, last heartbeat ${DateTime.now().difference(bufferClient.lastHeartbeat!).inMilliseconds}ms ago)');
+        debugPrint(
+            'SequenceManager.startSequence: Using BufferSequenceExecutor (relay buffer alive, last heartbeat ${DateTime.now().difference(bufferClient.lastHeartbeat!).inMilliseconds}ms ago)');
         await _bufferExecutor!.startSequence(sequence);
         return;
       } else {
-        debugPrint('SequenceManager.startSequence: Buffer is stale (no heartbeats) - falling back to SequenceTaskMode');
+        debugPrint(
+            'SequenceManager.startSequence: Buffer is stale (no heartbeats) - falling back to SequenceTaskMode');
       }
     }
 
     // FALLBACK to old SequenceTaskMode system
-    debugPrint('SequenceManager.startSequence: Falling back to SequenceTaskMode');
+    debugPrint(
+        'SequenceManager.startSequence: Falling back to SequenceTaskMode');
     _activeSequenceTask = SequenceTaskMode(
       sequence: sequence,
       callback: SequenceCallbackAdapter(_callback!),
@@ -1108,7 +1190,8 @@ class SequenceManager extends ChangeNotifier {
     final success = await TaskManager.instance.startTask(_activeSequenceTask!);
 
     if (!success) {
-      debugPrint('SequenceManager.startSequence: TaskManager.startTask failed!');
+      debugPrint(
+          'SequenceManager.startSequence: TaskManager.startTask failed!');
       _status = SequenceStatus.failed;
       _activeSequenceTask?.removeListener(_onSequenceTaskChanged);
       _activeSequenceTask = null;
@@ -1133,7 +1216,8 @@ class SequenceManager extends ChangeNotifier {
     if (task.status == TaskStatus.completed) {
       _status = SequenceStatus.completed;
       _cleanupSequenceTask();
-    } else if (task.status == TaskStatus.failed || task.status == TaskStatus.cancelled) {
+    } else if (task.status == TaskStatus.failed ||
+        task.status == TaskStatus.cancelled) {
       _status = SequenceStatus.failed;
       _cleanupSequenceTask();
     } else if (task.status == TaskStatus.paused) {
@@ -1183,18 +1267,22 @@ class SequenceManager extends ChangeNotifier {
   /// Called when robot arrives at a waypoint
   /// NOTE: When SequenceTaskMode or BufferSequenceExecutor is active, they handle arrivals
   void onArrived(String waypoint) {
-    debugPrint('SequenceManager: onArrived($waypoint) - status=$_status, tour=${_currentSequence?.name}, stopIndex=$_currentStopIndex');
+    debugPrint(
+        'SequenceManager: onArrived($waypoint) - status=$_status, tour=${_currentSequence?.name}, stopIndex=$_currentStopIndex');
 
-    // If SequenceTaskMode is handling execution, let IT handle arrivals
-    // This prevents duplicate execution of stop actions
+    // If SequenceTaskMode is handling execution, let IT handle arrivals.
+    // SequenceTaskMode uses CommandManager for reliable navigation with retries.
+    // Handling arrival here would cause duplicate events and race conditions.
     if (_activeSequenceTask != null) {
-      debugPrint('SequenceManager: Ignoring arrival - SequenceTaskMode is handling it');
+      debugPrint(
+          'SequenceManager: Ignoring arrival - SequenceTaskMode is handling it');
       return;
     }
 
     // If BufferSequenceExecutor is handling execution, let IT handle arrivals
     if (_useBufferExecutor && _bufferExecutor != null) {
-      debugPrint('SequenceManager: Ignoring arrival - BufferSequenceExecutor is handling it');
+      debugPrint(
+          'SequenceManager: Ignoring arrival - BufferSequenceExecutor is handling it');
       return;
     }
 
@@ -1209,11 +1297,13 @@ class SequenceManager extends ChangeNotifier {
 
     final stop = currentStop;
     if (stop == null) {
-      debugPrint('SequenceManager: Ignoring arrival - no current stop (index=$_currentStopIndex, stops=${_currentSequence!.stops.length})');
+      debugPrint(
+          'SequenceManager: Ignoring arrival - no current stop (index=$_currentStopIndex, stops=${_currentSequence!.stops.length})');
       return;
     }
 
-    debugPrint('SequenceManager: Checking arrival - expected="${stop.waypoint}", got="$waypoint"');
+    debugPrint(
+        'SequenceManager: Checking arrival - expected="${stop.waypoint}", got="$waypoint"');
     // Case-insensitive, trimmed comparison for robustness
     if (stop.waypoint.toLowerCase().trim() == waypoint.toLowerCase().trim()) {
       debugPrint('SequenceManager: Arrived at ${stop.waypoint}');
@@ -1222,7 +1312,8 @@ class SequenceManager extends ChangeNotifier {
         debugPrint('SequenceManager: Stack: $stack');
       });
     } else {
-      debugPrint('SequenceManager: Waypoint mismatch - expected="${stop.waypoint}" got="$waypoint" - ignoring');
+      debugPrint(
+          'SequenceManager: Waypoint mismatch - expected="${stop.waypoint}" got="$waypoint" - ignoring');
     }
   }
 
@@ -1230,7 +1321,8 @@ class SequenceManager extends ChangeNotifier {
   /// Uses conservative estimate: ~2 words/sec (120 words/min) to account for pauses
   Duration _estimateTtsDuration(String text) {
     final words = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
-    final seconds = (words / 2.0).ceil(); // ~120 words/min = 2 words/sec (conservative)
+    final seconds =
+        (words / 2.0).ceil(); // ~120 words/min = 2 words/sec (conservative)
     return Duration(seconds: seconds.clamp(2, 60)); // Min 2 sec, max 60 sec
   }
 
@@ -1243,7 +1335,8 @@ class SequenceManager extends ChangeNotifier {
     }
 
     debugPrint('SequenceManager: Executing actions at ${stop.waypoint}');
-    debugPrint('  - speakText: ${stop.speakText?.substring(0, (stop.speakText?.length ?? 0).clamp(0, 50))}...');
+    debugPrint(
+        '  - speakText: ${stop.speakText?.substring(0, (stop.speakText?.length ?? 0).clamp(0, 50))}...');
     debugPrint('  - displayUrl: ${stop.displayUrl}');
     debugPrint('  - announceArrival: ${_currentSequence?.announceArrival}');
 
@@ -1254,11 +1347,13 @@ class SequenceManager extends ChangeNotifier {
     // Step 1: Display content FIRST (so user sees it while TTS plays)
     if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
       debugPrint('SequenceManager: Showing display URL: ${stop.displayUrl}');
-      _setPhase(SequencePhase.displaying, stop.displayDuration > 0 ? stop.displayDuration : 10);
+      _setPhase(SequencePhase.displaying,
+          stop.displayDuration > 0 ? stop.displayDuration : 10);
       _callback?.onDisplay(stop.displayUrl!, stop.displayDuration);
     } else {
       // Default: Show company name when no media configured
-      debugPrint('SequenceManager: Showing default branding for ${stop.waypoint}');
+      debugPrint(
+          'SequenceManager: Showing default branding for ${stop.waypoint}');
       _callback?.onDisplayDefault(stop.waypoint);
     }
 
@@ -1267,39 +1362,47 @@ class SequenceManager extends ChangeNotifier {
 
     // Step 2: Announce arrival if enabled (beep + speak, wait for TTS to finish)
     if (_currentSequence?.announceArrival == true) {
-      debugPrint('SequenceManager: Announcing arrival at ${stop.waypoint} with beep');
+      debugPrint(
+          'SequenceManager: Announcing arrival at ${stop.waypoint} with beep');
       final arrivalText = 'Arrived at ${stop.waypoint}';
       final arrivalDuration = _estimateTtsDuration(arrivalText);
       // Add 500ms for beep sound before TTS
       _setPhase(SequencePhase.speaking, arrivalDuration.inSeconds + 1);
       _callback?.onArrivalAnnouncement(stop.waypoint);
-      debugPrint('SequenceManager: Waiting ${arrivalDuration.inSeconds + 1}s for beep + arrival TTS');
-      await Future.delayed(arrivalDuration + const Duration(milliseconds: 1000));
+      debugPrint(
+          'SequenceManager: Waiting ${arrivalDuration.inSeconds + 1}s for beep + arrival TTS');
+      await Future.delayed(
+          arrivalDuration + const Duration(milliseconds: 1000));
     }
 
     // Step 3: Speak custom text (wait for it to finish)
     if (stop.speakText != null && stop.speakText!.isNotEmpty) {
-      debugPrint('SequenceManager: Speaking tour text (${stop.speakText!.split(' ').length} words)');
+      debugPrint(
+          'SequenceManager: Speaking tour text (${stop.speakText!.split(' ').length} words)');
       final ttsDuration = _estimateTtsDuration(stop.speakText!);
       _setPhase(SequencePhase.speaking, ttsDuration.inSeconds);
       _callback?.onSpeak(stop.speakText!);
-      debugPrint('SequenceManager: Waiting ${ttsDuration.inSeconds}s for tour TTS');
+      debugPrint(
+          'SequenceManager: Waiting ${ttsDuration.inSeconds}s for tour TTS');
       await Future.delayed(ttsDuration);
     }
 
     // Step 4: Wait at stop then continue
     // Wait time is ADDITIONAL time after TTS - media stays until robot leaves
     // Minimum wait: 10 seconds for media to play, or displayDuration if specified
-    final minMediaTime = (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) ? 10 : 0;
+    final minMediaTime =
+        (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) ? 10 : 0;
     final waitTime = stop.waitSeconds > 0
         ? stop.waitSeconds
         : (stop.displayDuration > 0 ? stop.displayDuration : minMediaTime);
 
-    debugPrint('SequenceManager: Extra wait time: ${waitTime}s before next stop (media plays until departure)');
+    debugPrint(
+        'SequenceManager: Extra wait time: ${waitTime}s before next stop (media plays until departure)');
     _setPhase(SequencePhase.waiting, waitTime);
     _waitTimer = Timer(Duration(seconds: waitTime), () {
       try {
-        debugPrint('SequenceManager: Wait complete, navigating to next stop (display stays until departure)');
+        debugPrint(
+            'SequenceManager: Wait complete, navigating to next stop (display stays until departure)');
         // NOTE: Do NOT close display here - it stays until robot leaves (AudioAnnouncer handles that)
         _navigateToNextStop();
       } catch (e, stack) {
@@ -1312,23 +1415,28 @@ class SequenceManager extends ChangeNotifier {
   /// Navigate to next stop
   void _navigateToNextStop() {
     debugPrint('SequenceManager._navigateToNextStop: ENTERED');
-    debugPrint('SequenceManager._navigateToNextStop: _currentSequence=${_currentSequence?.name}, _currentStopIndex=$_currentStopIndex');
+    debugPrint(
+        'SequenceManager._navigateToNextStop: _currentSequence=${_currentSequence?.name}, _currentStopIndex=$_currentStopIndex');
 
     if (_currentSequence == null) {
-      debugPrint('SequenceManager._navigateToNextStop: ABORT - _currentSequence is null');
+      debugPrint(
+          'SequenceManager._navigateToNextStop: ABORT - _currentSequence is null');
       return;
     }
 
     _currentStopIndex++;
-    debugPrint('SequenceManager._navigateToNextStop: Incremented index to $_currentStopIndex (tour has ${_currentSequence!.stops.length} stops)');
+    debugPrint(
+        'SequenceManager._navigateToNextStop: Incremented index to $_currentStopIndex (tour has ${_currentSequence!.stops.length} stops)');
 
     if (_currentStopIndex >= _currentSequence!.stops.length) {
       // Tour complete
       if (_currentSequence!.loop) {
-        debugPrint('SequenceManager._navigateToNextStop: End of tour, looping back to start');
+        debugPrint(
+            'SequenceManager._navigateToNextStop: End of tour, looping back to start');
         _currentStopIndex = 0;
       } else {
-        debugPrint('SequenceManager._navigateToNextStop: End of tour, completing');
+        debugPrint(
+            'SequenceManager._navigateToNextStop: End of tour, completing');
         _completeSequence();
         return;
       }
@@ -1336,21 +1444,27 @@ class SequenceManager extends ChangeNotifier {
 
     final stop = currentStop;
     if (stop != null) {
-      debugPrint('SequenceManager._navigateToNextStop: Got stop waypoint="${stop.waypoint}"');
+      debugPrint(
+          'SequenceManager._navigateToNextStop: Got stop waypoint="${stop.waypoint}"');
       _setPhase(SequencePhase.navigating, 0); // No countdown while navigating
-      debugPrint('SequenceManager._navigateToNextStop: Phase set to navigating');
-      debugPrint('SequenceManager._navigateToNextStop: _callback is ${_callback == null ? "NULL!" : "set (${_callback.runtimeType})"}');
+      debugPrint(
+          'SequenceManager._navigateToNextStop: Phase set to navigating');
+      debugPrint(
+          'SequenceManager._navigateToNextStop: _callback is ${_callback == null ? "NULL!" : "set (${_callback.runtimeType})"}');
 
       if (_callback != null) {
-        debugPrint('SequenceManager._navigateToNextStop: CALLING onNavigate("${stop.waypoint}")');
+        debugPrint(
+            'SequenceManager._navigateToNextStop: CALLING onNavigate("${stop.waypoint}")');
         _callback!.onNavigate(stop.waypoint);
         debugPrint('SequenceManager._navigateToNextStop: onNavigate returned');
       } else {
-        debugPrint('SequenceManager._navigateToNextStop: ERROR - callback is null, cannot navigate!');
+        debugPrint(
+            'SequenceManager._navigateToNextStop: ERROR - callback is null, cannot navigate!');
       }
       notifyListeners();
     } else {
-      debugPrint('SequenceManager._navigateToNextStop: ERROR - currentStop is null! index=$_currentStopIndex, stops=${_currentSequence?.stops.length}');
+      debugPrint(
+          'SequenceManager._navigateToNextStop: ERROR - currentStop is null! index=$_currentStopIndex, stops=${_currentSequence?.stops.length}');
     }
   }
 
@@ -1359,13 +1473,16 @@ class SequenceManager extends ChangeNotifier {
     _stopCountdown();
 
     // Play outro if configured
-    if (_currentSequence?.outroText != null && _currentSequence!.outroText!.isNotEmpty) {
+    if (_currentSequence?.outroText != null &&
+        _currentSequence!.outroText!.isNotEmpty) {
       _callback?.onSpeak(_currentSequence!.outroText!);
     }
 
     // Navigate to end waypoint if configured (e.g., return to charging station)
-    if (_currentSequence?.endWaypoint != null && _currentSequence!.endWaypoint!.isNotEmpty) {
-      debugPrint('SequenceManager: Navigating to end waypoint: ${_currentSequence!.endWaypoint}');
+    if (_currentSequence?.endWaypoint != null &&
+        _currentSequence!.endWaypoint!.isNotEmpty) {
+      debugPrint(
+          'SequenceManager: Navigating to end waypoint: ${_currentSequence!.endWaypoint}');
       _callback?.onNavigate(_currentSequence!.endWaypoint!);
     }
 
@@ -1384,11 +1501,13 @@ class SequenceManager extends ChangeNotifier {
 
   /// Stop the current tour
   void stopSequence() {
-    if (_status != SequenceStatus.running && _status != SequenceStatus.paused) return;
+    if (_status != SequenceStatus.running && _status != SequenceStatus.paused)
+      return;
 
     // Use buffer executor if active
     if (_useBufferExecutor && _bufferExecutor != null) {
-      debugPrint('SequenceManager.stopSequence: Stopping via BufferSequenceExecutor');
+      debugPrint(
+          'SequenceManager.stopSequence: Stopping via BufferSequenceExecutor');
       _bufferExecutor!.stopSequence();
       return;
     }
@@ -1419,7 +1538,8 @@ class SequenceManager extends ChangeNotifier {
 
     // Use buffer executor if active
     if (_useBufferExecutor && _bufferExecutor != null) {
-      debugPrint('SequenceManager.pauseSequence: Pausing via BufferSequenceExecutor');
+      debugPrint(
+          'SequenceManager.pauseSequence: Pausing via BufferSequenceExecutor');
       _bufferExecutor!.pauseSequence();
       return;
     }
@@ -1440,7 +1560,8 @@ class SequenceManager extends ChangeNotifier {
 
     // Use buffer executor if active
     if (_useBufferExecutor && _bufferExecutor != null) {
-      debugPrint('SequenceManager.resumeSequence: Resuming via BufferSequenceExecutor');
+      debugPrint(
+          'SequenceManager.resumeSequence: Resuming via BufferSequenceExecutor');
       _bufferExecutor!.resumeSequence();
       return;
     }
@@ -1461,18 +1582,21 @@ class SequenceManager extends ChangeNotifier {
 
   /// Skip to next stop
   void skipToNextStop() {
-    if (_status != SequenceStatus.running && _status != SequenceStatus.paused) return;
+    if (_status != SequenceStatus.running && _status != SequenceStatus.paused)
+      return;
 
     // Use buffer executor if active
     if (_useBufferExecutor && _bufferExecutor != null) {
-      debugPrint('SequenceManager.skipToNextStop: Skipping via BufferSequenceExecutor');
+      debugPrint(
+          'SequenceManager.skipToNextStop: Skipping via BufferSequenceExecutor');
       _bufferExecutor!.skipCurrentCommand();
       return;
     }
 
     // Delegate to SequenceTaskMode if active
     if (_activeSequenceTask != null) {
-      debugPrint('SequenceManager.skipToNextStop: Delegating to SequenceTaskMode');
+      debugPrint(
+          'SequenceManager.skipToNextStop: Delegating to SequenceTaskMode');
       _activeSequenceTask!.skipToNextStop();
       return;
     }
@@ -1503,8 +1627,8 @@ class SequenceManager extends ChangeNotifier {
 
   /// Export tours as JSON
   String exportTours() => jsonEncode(
-    _sequences.map((k, v) => MapEntry(k, v.toJson())),
-  );
+        _sequences.map((k, v) => MapEntry(k, v.toJson())),
+      );
 
   /// Import tours from JSON
   void importTours(String json) {

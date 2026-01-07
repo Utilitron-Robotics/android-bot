@@ -25,6 +25,18 @@ A cross-platform robot control system for Pudu/smAiT service robots. Deployed at
                               └─────────────────────┘
 ```
 
+### Navigation Architecture
+The system uses a strict state machine and centralized command management to ensure reliable navigation:
+
+1.  **CommandManager Centralization**: All robot commands are routed through a central `CommandManager`. This handles:
+    *   **Retry Logic**: Automatically retries failed commands (up to 3 times) before declaring failure.
+    *   **State Tracking**: Maintains the source of truth for command execution status (pending, running, completed, failed).
+    *   **Ack Verification**: Ensures commands are received by the robot/relay.
+
+2.  **Strict State Machine**: Navigation logic enforces strict phase transitions (e.g., `idle` -> `navigating` -> `arrived`). Events are ignored if they don't match the current phase, preventing race conditions from stray messages.
+
+3.  **Relay Buffer**: The Relay App acts as a command buffer. The Flutter app loads a sequence of commands (navigate, speak, wait) into the Relay's buffer. The Relay executes them sequentially and reports status. This decouples the real-time execution from the network connection, allowing the robot to continue a sequence even if the Flutter controller temporarily disconnects.
+
 ## Applications
 
 ### Flutter App - `flutter_app/`

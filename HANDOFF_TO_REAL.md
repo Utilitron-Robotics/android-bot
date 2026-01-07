@@ -1,5 +1,7 @@
 # 🤖 Handoff to Real Robot Mode
 
+> **Note**: This document describes an older process for the initial Android migration. While the principles of switching between simulation and real robot environments are still relevant, the specific code paths (especially DI modules) may have evolved in the `flutter_app` and `relay_app`. Refer to `README.md` for current configuration instructions.
+
 ## Executive Summary
 
 The Android application is currently configured in **Simulation Mode**. This allows developers to run the app on an emulator or device without connecting to physical robot hardware, using a `FakeTourRepository` to simulate robot responses and navigation updates.
