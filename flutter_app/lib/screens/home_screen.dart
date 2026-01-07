@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/robot_connection.dart';
 import '../services/robot_introspection.dart';
 import '../widgets/widget_factory.dart';
@@ -39,14 +40,17 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     // Load saved URL and connection mode
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final robot = context.read<RobotConnection>();
       final savedUrl = robot.robotUrl;
 
       // Always display the last used URL, regardless of mode
       _urlController.text = savedUrl;
 
-      // Detect and set mode from saved URL
+      // Load saved connection mode
+      await _loadConnectionMode();
+
+      // Detect mode from saved URL if no saved mode
       _detectModeFromUrl(savedUrl);
     });
   }
@@ -82,6 +86,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mode == null) return;
     setState(() => _connectionMode = mode);
 
+    // Save the connection mode immediately
+    _saveConnectionMode(mode);
+
     // Preserve the current URL - only update protocol/port if necessary
     final currentUrl = _urlController.text.trim();
     if (currentUrl.isEmpty) {
@@ -106,6 +113,27 @@ class _HomeScreenState extends State<HomeScreen> {
       _urlController.text = 'ws://$host:8766';
     } else {
       _urlController.text = 'http://$host:8765';
+    }
+  }
+
+  /// Save connection mode to SharedPreferences
+  Future<void> _saveConnectionMode(ConnectionMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('connection_mode', mode.name);
+    debugPrint('HomeScreen: Saved connection mode: ${mode.name}');
+  }
+
+  /// Load connection mode from SharedPreferences
+  Future<void> _loadConnectionMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedMode = prefs.getString('connection_mode');
+    if (savedMode != null) {
+      final mode = ConnectionMode.values.firstWhere(
+        (m) => m.name == savedMode,
+        orElse: () => ConnectionMode.direct,
+      );
+      setState(() => _connectionMode = mode);
+      debugPrint('HomeScreen: Loaded connection mode: ${mode.name}');
     }
   }
 
