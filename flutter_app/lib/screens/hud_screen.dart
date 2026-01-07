@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/robot_connection.dart';
 import '../core/sequence_mode.dart' show SequenceManager, SequenceStatus, SequencePhase, Sequence;
 import '../core/smait_protocol.dart' as protocol;
@@ -102,9 +103,28 @@ class _HudScreenState extends State<HudScreen>
     // Initialize TaskEngine
     _loadTaskEngine();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final robot = context.read<RobotConnection>();
-      _urlController.text = robot.robotUrl;
+      final savedUrl = robot.robotUrl;
+
+      debugPrint('=== HUD SCREEN INIT ===');
+      debugPrint('Loaded URL from robot: $savedUrl');
+
+      _urlController.text = savedUrl;
+
+      // Load saved connection mode
+      final hadSavedMode = await _loadConnectionMode();
+      debugPrint('Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
+
+      // ONLY detect mode from URL if there was NO saved mode
+      if (!hadSavedMode) {
+        debugPrint('HUD: No saved mode found, detecting from URL: $savedUrl');
+        _detectModeFromUrl(savedUrl);
+      } else {
+        debugPrint('HUD: Using saved mode: ${_connectionMode.name}');
+      }
+      debugPrint('Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
+      debugPrint('=== END HUD INIT ===');
     });
   }
 
@@ -476,10 +496,31 @@ class _HudScreenState extends State<HudScreen>
                   }).toList(),
                   onChanged: (mode) {
                     if (mode != null) {
-                      setState(() {
-                        _connectionMode = mode;
+                      setState(() => _connectionMode = mode);
+
+                      // Save the connection mode immediately
+                      _saveConnectionMode(mode);
+
+                      // Preserve the current IP, just update protocol/port
+                      final currentUrl = _urlController.text.trim();
+                      if (currentUrl.isEmpty) {
                         _urlController.text = mode.defaultUrl;
-                      });
+                      } else {
+                        final uri = Uri.tryParse(currentUrl);
+                        final host = uri?.host ?? '';
+                        if (host.isNotEmpty) {
+                          // Preserve IP, update protocol/port to match mode
+                          if (mode == ConnectionMode.direct) {
+                            _urlController.text = 'ws://$host:9090';
+                          } else if (mode == ConnectionMode.relayWs) {
+                            _urlController.text = 'ws://$host:8766';
+                          } else {
+                            _urlController.text = 'http://$host:8765';
+                          }
+                        } else {
+                          _urlController.text = mode.defaultUrl;
+                        }
+                      }
                     }
                   },
                 ),
@@ -1883,6 +1924,41 @@ class _HudScreenState extends State<HudScreen>
       }
     }
     robot.connect(url);
+  }
+
+  void _detectModeFromUrl(String url) {
+    if (url.contains(':8766')) {
+      setState(() => _connectionMode = ConnectionMode.relayWs);
+    } else if (url.contains(':8765') || url.startsWith('http')) {
+      setState(() => _connectionMode = ConnectionMode.relayHttp);
+    } else {
+      setState(() => _connectionMode = ConnectionMode.direct);
+    }
+  }
+
+  /// Save connection mode to SharedPreferences
+  Future<void> _saveConnectionMode(ConnectionMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('connection_mode', mode.name);
+    debugPrint('HUD: Saved connection mode: ${mode.name}');
+  }
+
+  /// Load connection mode from SharedPreferences
+  /// Returns true if a saved mode was found, false otherwise
+  Future<bool> _loadConnectionMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedMode = prefs.getString('connection_mode');
+    if (savedMode != null) {
+      final mode = ConnectionMode.values.firstWhere(
+        (m) => m.name == savedMode,
+        orElse: () => ConnectionMode.direct,
+      );
+      setState(() => _connectionMode = mode);
+      debugPrint('HUD: Loaded connection mode: ${mode.name}');
+      return true;
+    }
+    debugPrint('HUD: No saved connection mode found');
+    return false;
   }
 
   void _navigateTo(String waypoint) {
