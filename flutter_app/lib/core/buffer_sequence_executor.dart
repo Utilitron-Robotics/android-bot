@@ -304,6 +304,32 @@ class BufferSequenceExecutor extends ChangeNotifier {
     debugPrint(
         'BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
 
+    // Special handling for loop command
+    if (result.commandId.contains('loop') && result.isSuccess) {
+      debugPrint('BufferSequenceExecutor: Loop command completed - restarting sequence');
+
+      // Reset state for the new loop iteration
+      _currentStopIndex = -1;
+      _completedCommandCount = 0;
+      _navRetryCount = 0;
+
+      // Rebuild commands WITHOUT motion trigger (already triggered on first run)
+      if (_currentSequence != null) {
+        final loopSequence = _currentSequence!.copyWith(
+          motionTriggerStart: false,  // Clear motion trigger
+          motionGreeting: null,
+          motionButtonText: null,
+        );
+
+        final commands = _buildSequenceCommands(loopSequence);
+        _totalCommandCount = commands.length;
+
+        debugPrint('BufferSequenceExecutor: Reloading ${commands.length} commands for loop');
+        _bufferClient.loadCommands(commands, clearExisting: true);
+      }
+      return;
+    }
+
     // Handle navigation failures with retry logic (ALL in Flutter)
     if (result.isFailure) {
       // Check if this was a navigation failure
