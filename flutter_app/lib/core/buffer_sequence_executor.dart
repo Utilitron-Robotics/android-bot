@@ -311,29 +311,45 @@ class BufferSequenceExecutor extends ChangeNotifier {
         'BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
 
     // Special handling for loop command
-    if (result.commandId.contains('loop') && result.isSuccess) {
-      debugPrint('BufferSequenceExecutor: Loop command completed - restarting sequence');
+    if (result.commandId.contains('loop')) {
+      if (result.isSuccess) {
+        debugPrint('BufferSequenceExecutor: Loop command completed - restarting sequence');
 
-      // Reset state for the new loop iteration
-      _currentStopIndex = -1;
-      _completedCommandCount = 0;
-      _navRetryCount = 0;
+        // Reset state for the new loop iteration
+        _currentStopIndex = -1;
+        _completedCommandCount = 0;
+        _navRetryCount = 0;
 
-      // Rebuild commands WITHOUT motion trigger (already triggered on first run)
-      if (_currentSequence != null) {
-        final loopSequence = _currentSequence!.copyWith(
-          motionTriggerStart: false,  // Clear motion trigger
-          motionGreeting: null,
-          motionButtonText: null,
-        );
+        // Keep status as running (don't change to completed)
+        _status = SequenceExecutorStatus.running;
 
-        final commands = _buildSequenceCommands(loopSequence);
-        _totalCommandCount = commands.length;
+        // Rebuild commands WITHOUT motion trigger (already triggered on first run)
+        if (_currentSequence != null) {
+          final loopSequence = _currentSequence!.copyWith(
+            motionTriggerStart: false,  // Clear motion trigger
+            motionGreeting: null,
+            motionButtonText: null,
+          );
 
-        debugPrint('BufferSequenceExecutor: Reloading ${commands.length} commands for loop');
-        _bufferClient.loadCommands(commands, clearExisting: true);
+          final commands = _buildSequenceCommands(loopSequence);
+          _totalCommandCount = commands.length;
+
+          debugPrint('BufferSequenceExecutor: Reloading ${commands.length} commands for loop');
+
+          // Start tour mode again for the new iteration
+          _bufferClient.startTourMode();
+
+          // Reload commands
+          _bufferClient.loadCommands(commands, clearExisting: true);
+
+          // Notify listeners that we're still running
+          notifyListeners();
+        }
+        return;
+      } else {
+        debugPrint('BufferSequenceExecutor: Loop command failed (${result.result}), ending tour');
+        // Fall through to normal completion handling
       }
-      return;
     }
 
     // Handle navigation failures with retry logic (ALL in Flutter)
@@ -617,6 +633,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
       // Navigate back to start to begin loop
       if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
         commands.add(BufferCommand.navigate(sequence.startWaypoint!));
+        // Wait a moment at start position before restarting
+        commands.add(BufferCommand.wait(3000));
       }
 
       // Add loop command to restart the sequence
