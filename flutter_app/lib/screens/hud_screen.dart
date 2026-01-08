@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/robot_connection.dart';
 import '../core/sequence_mode.dart'
     show SequenceManager, SequenceStatus, SequencePhase, Sequence;
@@ -40,7 +41,7 @@ class HudScreen extends StatefulWidget {
 }
 
 class _HudScreenState extends State<HudScreen>
-    with TickerProviderStateMixin
+    with TickerProviderStateMixin, WidgetsBindingObserver
     implements TaskExecutorCallback {
   final _urlController = TextEditingController();
   final _customSoundController = TextEditingController();
@@ -75,6 +76,9 @@ class _HudScreenState extends State<HudScreen>
   late AnimationController _rightPanelController;
   late AnimationController _bottomPanelController;
 
+  // Wake lock state - keeps screen on during tours
+  bool _wakelockEnabled = false;
+
   // Cyberpunk accent color
   static const _accentColor = Color(0xFF00D4FF); // Cyan glow
   static const _accentSecondary = Color(0xFF00FF88); // Green glow
@@ -83,6 +87,10 @@ class _HudScreenState extends State<HudScreen>
   @override
   void initState() {
     super.initState();
+
+    // Register for app lifecycle events (to handle screen lock/unlock)
+    WidgetsBinding.instance.addObserver(this);
+
     // Force landscape on tablets
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
@@ -243,6 +251,15 @@ class _HudScreenState extends State<HudScreen>
 
   @override
   void dispose() {
+    // Unregister lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+
+    // Release wake lock if active
+    if (_wakelockEnabled) {
+      WakelockPlus.disable();
+      _wakelockEnabled = false;
+    }
+
     _urlController.dispose();
     _customSoundController.dispose();
     _leftPanelController.dispose();
@@ -251,6 +268,68 @@ class _HudScreenState extends State<HudScreen>
     // Restore orientation
     SystemChrome.setPreferredOrientations([]);
     super.dispose();
+  }
+
+  /// Handle app lifecycle changes - reconnect when returning from background/lock screen
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    debugPrint('HUD: App lifecycle state changed to: $state');
+
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('HUD: App resumed from background - checking connections');
+      _onAppResumed();
+    } else if (state == AppLifecycleState.paused) {
+      debugPrint('HUD: App paused (going to background/lock)');
+    }
+  }
+
+  /// Called when app returns from background/lock screen
+  void _onAppResumed() {
+    // Check if robot connection is still alive
+    final robot = context.read<RobotConnection>();
+
+    if (robot.state == RobotConnectionState.connected) {
+      // Connection might be stale - force a ping/reconnect check
+      debugPrint('HUD: Connection appears alive, forcing state refresh');
+
+      // Re-subscribe to topics in case they were dropped
+      // The MapView and other widgets will handle their own resubscription
+      // via their WebSocket state listeners, but we trigger a check here
+      robot.notifyListeners();
+    } else if (robot.state == RobotConnectionState.disconnected ||
+               robot.state == RobotConnectionState.error) {
+      // Connection was lost during background - auto-reconnect
+      debugPrint('HUD: Connection lost during background, attempting reconnect');
+      final savedUrl = robot.robotUrl;
+      if (savedUrl.isNotEmpty) {
+        robot.connect(savedUrl);
+      }
+    }
+
+    // Re-enable wake lock if tour is still running
+    final tourManager = context.read<SequenceManager>();
+    if (tourManager.status == SequenceStatus.running && !_wakelockEnabled) {
+      debugPrint('HUD: Tour still running, re-enabling wake lock');
+      _enableWakelock();
+    }
+  }
+
+  /// Enable wake lock to keep screen on during tours
+  void _enableWakelock() {
+    if (!_wakelockEnabled) {
+      WakelockPlus.enable();
+      _wakelockEnabled = true;
+      debugPrint('HUD: Wake lock ENABLED - screen will stay on');
+    }
+  }
+
+  /// Disable wake lock when tour stops
+  void _disableWakelock() {
+    if (_wakelockEnabled) {
+      WakelockPlus.disable();
+      _wakelockEnabled = false;
+      debugPrint('HUD: Wake lock DISABLED - screen can turn off');
+    }
   }
 
   void _toggleLeftPanel() {
@@ -292,6 +371,16 @@ class _HudScreenState extends State<HudScreen>
           // Check if tour is running to adjust layout
           final tourManager = context.watch<SequenceManager>();
           final tourRunning = tourManager.status == SequenceStatus.running;
+
+          // WAKE LOCK: Keep screen on during tours to prevent connection drops
+          // (Update via post-frame callback to avoid setState during build)
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (tourRunning && !_wakelockEnabled) {
+              _enableWakelock();
+            } else if (!tourRunning && _wakelockEnabled) {
+              _disableWakelock();
+            }
+          });
 
           // Debug: Log when sequence status changes
           if (_enableVerboseLogging &&
