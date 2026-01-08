@@ -65,6 +65,12 @@ class RobotWebSocketClient(
     private val _robotStatus = MutableStateFlow<RobotStatusData?>(null)
     val robotStatus: StateFlow<RobotStatusData?> = _robotStatus
 
+    // Track when we last received ANY data from the robot
+    // This is critical for detecting stale data even when heartbeats are flowing
+    @Volatile
+    private var _lastRobotDataTime: Long = 0
+    val lastRobotDataTime: Long get() = _lastRobotDataTime
+
     // People detection from /people_detected topic
     private val _peopleDetected = MutableStateFlow(false)
     val peopleDetected: StateFlow<Boolean> = _peopleDetected
@@ -265,6 +271,9 @@ class RobotWebSocketClient(
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
             val current = _robotStatus.value ?: RobotStatusData()
+
+            // Track when we last got data from robot - critical for stale detection!
+            _lastRobotDataTime = System.currentTimeMillis()
 
             when (topic) {
                 SmaitProtocol.TOPIC_ROBOT_STATUS -> {

@@ -1262,16 +1262,26 @@ class _HudScreenState extends State<HudScreen>
             ),
           ],
 
-          // Stale data warning
-          if (robot.isStale) ...[
-            const SizedBox(width: 12),
-            const _HudChip(
-              icon: Icons.warning_amber,
-              label: 'DATA STALE',
-              color: Colors.amber,
-              pulse: true,
-            ),
-          ],
+          // Stale data warning - check BOTH RobotConnection AND BufferClient
+          // robot.isStale: WebSocket status updates not received
+          // bufferClient.isStale: Relay heartbeats not received OR robot data old
+          Builder(builder: (context) {
+            final bufferStale = tourManager.bufferClient?.isStale ?? false;
+            final isStale = robot.isStale || bufferStale;
+            if (!isStale) return const SizedBox.shrink();
+            return const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(width: 12),
+                _HudChip(
+                  icon: Icons.warning_amber,
+                  label: 'DATA STALE',
+                  color: Colors.amber,
+                  pulse: true,
+                ),
+              ],
+            );
+          }),
 
           // Tour Status in Center
           if (currentSequence != null) ...[
