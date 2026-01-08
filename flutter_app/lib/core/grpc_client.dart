@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
-import '../generated/robot_control.pb.dart';
 import '../generated/robot_control.pbgrpc.dart';
 
 /// gRPC client for WAN-ready robot communication
@@ -82,8 +80,8 @@ class GrpcRobotClient extends ChangeNotifier {
       _channel = ClientChannel(
         _currentHost,
         port: _currentPort,
-        options: ChannelOptions(
-          credentials: const ChannelCredentials.insecure(),
+        options: const ChannelOptions(
+          credentials: ChannelCredentials.insecure(),
           connectionTimeout: _connectionTimeout,
           idleTimeout: _idleTimeout,
           // These are the KEY settings for WAN stability!
@@ -121,8 +119,8 @@ class GrpcRobotClient extends ChangeNotifier {
       _connectionStateController.add(true);
       notifyListeners();
 
-      debugPrint('$_tag: ✅ Connected to $_currentHost:$_currentPort - WAN READY!');
-
+      debugPrint(
+          '$_tag: ✅ Connected to $_currentHost:$_currentPort - WAN READY!');
     } catch (e) {
       _lastError = e.toString();
       debugPrint('$_tag: Connection failed: $e');
@@ -192,8 +190,7 @@ class GrpcRobotClient extends ChangeNotifier {
 
   /// Send heartbeat request
   void _sendHeartbeatRequest() {
-    final message = ClientMessage()
-      ..heartbeatRequest = HeartbeatRequest();
+    final message = ClientMessage()..heartbeatRequest = HeartbeatRequest();
     _sendMessage(message);
   }
 
@@ -205,7 +202,8 @@ class GrpcRobotClient extends ChangeNotifier {
 
     // Calculate delay with exponential backoff
     final delayMs = (_minReconnectDelay.inMilliseconds *
-        (_backoffMultiplier * _reconnectAttempts)).round();
+            (_backoffMultiplier * _reconnectAttempts))
+        .round();
     final delay = Duration(
       milliseconds: delayMs.clamp(
         _minReconnectDelay.inMilliseconds,
@@ -213,7 +211,8 @@ class GrpcRobotClient extends ChangeNotifier {
       ),
     );
 
-    debugPrint('$_tag: Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
+    debugPrint(
+        '$_tag: Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
 
     _reconnectTimer = Timer(delay, () async {
       if (!_isConnected && _currentHost.isNotEmpty) {
@@ -261,7 +260,8 @@ class GrpcRobotClient extends ChangeNotifier {
   }
 
   /// Load commands into buffer
-  void loadBufferCommands(List<BufferCommand> commands, {bool clearExisting = true}) {
+  void loadBufferCommands(List<BufferCommand> commands,
+      {bool clearExisting = true}) {
     final load = LoadCommands()
       ..commands.addAll(commands)
       ..clearExisting = clearExisting;
