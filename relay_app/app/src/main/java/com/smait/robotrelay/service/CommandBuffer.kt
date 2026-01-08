@@ -620,7 +620,16 @@ class CommandBuffer(
 
                 Log.i(TAG, "Entering motion standby for sequence: $sequenceId, button: $buttonText")
 
-                // Activate tour mode to lock the screen
+                // Speak the greeting - await TTS completion (no guessing!)
+                val ttsComplete = CompletableDeferred<Unit>()
+                withContext(Dispatchers.Main) {
+                    taskExecutor?.speakText(greeting) {
+                        ttsComplete.complete(Unit)
+                    }
+                }
+                ttsComplete.await()
+
+                // Activate tour mode to lock the screen AFTER greeting finishes
                 withContext(Dispatchers.Main) {
                     taskExecutor?.startTourMode(pin)
                     // Notify UI to show the "Start Tour" button on the lock screen
