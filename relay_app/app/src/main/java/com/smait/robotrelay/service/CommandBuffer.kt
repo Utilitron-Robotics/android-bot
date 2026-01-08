@@ -617,14 +617,14 @@ class CommandBuffer(
                 val greeting = cmd.data["greeting"] as? String ?: "Hello! Would you like a tour?"
                 val sequenceId = cmd.data["sequence_id"] as? String ?: ""
                 val pin = cmd.data["pin"] as? String
-                val displayUrl = cmd.data["display_url"] as? String
+                val standbyDisplayUrl = cmd.data["display_url"] as? String
 
                 Log.i(TAG, "Entering motion standby for sequence: $sequenceId - waiting for person...")
 
                 // Show standby display if provided
-                if (displayUrl != null && displayUrl.isNotEmpty()) {
+                if (standbyDisplayUrl != null && standbyDisplayUrl.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
-                        taskExecutor?.showDisplay(displayUrl, 0)
+                        taskExecutor?.displayUrl(standbyDisplayUrl)
                     }
                 }
 
