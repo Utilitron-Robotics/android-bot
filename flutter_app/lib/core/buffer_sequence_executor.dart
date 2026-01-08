@@ -327,40 +327,57 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // Special handling for loop command
     if (result.commandId.contains('loop')) {
-      if (result.isSuccess) {
-        debugPrint('BufferSequenceExecutor: Loop command completed - entering standby at start position');
+      if (result.isSuccess && _currentSequence != null && _currentSequence!.loop) {
+        debugPrint('BufferSequenceExecutor: Loop command completed - restarting tour');
 
-        // Loop command means: tour iteration complete, robot at start position
-        // Now enter standby mode - wait for manual trigger or motion detection
-
-        if (_currentSequence != null && _currentSequence!.loop) {
-          // Enter motion standby mode if configured
-          if (_currentSequence!.motionTriggerStart) {
-            debugPrint('BufferSequenceExecutor: Entering motion standby for next tour iteration');
-
-            // Send motion standby command to wait for visitors
-            _bufferClient.loadCommands([
-              BufferCommand.motionStandby(
-                sequenceId: _currentSequence!.id,
-                greeting: _currentSequence!.motionGreeting ?? 'Hello! Would you like a tour?',
-                buttonText: _currentSequence!.motionButtonText ?? 'START TOUR',
-                displayUrl: _currentSequence!.motionDisplayUrl,
-              ),
-            ], clearExisting: true);
-
-            // Keep status as running (in standby)
-            _status = SequenceExecutorStatus.running;
-            notifyListeners();
-            return;
-          }
+        if (_currentSequence!.motionTriggerStart) {
+          // Motion trigger enabled - enter standby mode to wait for visitor
+          debugPrint('BufferSequenceExecutor: Entering motion standby for next tour iteration');
+          _bufferClient.loadCommands([
+            BufferCommand.motionStandby(
+              sequenceId: _currentSequence!.id,
+              greeting: _currentSequence!.motionGreeting ?? 'Hello! Would you like a tour?',
+              buttonText: _currentSequence!.motionButtonText ?? 'START TOUR',
+              displayUrl: _currentSequence!.motionDisplayUrl,
+            ),
+          ], clearExisting: true);
+        } else {
+          // No motion trigger - restart tour immediately
+          debugPrint('BufferSequenceExecutor: Restarting tour immediately (no motion trigger)');
+          final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0);
+          _totalCommandCount = commands.length;
+          _completedCommandCount = 0;
+          _currentStopIndex = -1;
+          _bufferClient.loadCommands(commands, clearExisting: true);
         }
 
-        // If no motion trigger configured, just complete the tour
-        debugPrint('BufferSequenceExecutor: Loop complete, tour ending (no motion trigger configured)');
-        // Fall through to normal completion
+        _status = SequenceExecutorStatus.running;
+        notifyListeners();
+        return;
       } else {
-        debugPrint('BufferSequenceExecutor: Loop command failed (${result.result}), ending tour');
+        debugPrint('BufferSequenceExecutor: Loop command failed or loop disabled, ending tour');
         // Fall through to normal completion handling
+      }
+    }
+
+    // Special handling for motion_standby completion (visitor pressed button OR motion detected)
+    // This means start/restart the tour!
+    if (result.commandId.contains('motion_standby')) {
+      if (result.isSuccess && _currentSequence != null) {
+        debugPrint('BufferSequenceExecutor: Motion standby completed - starting tour!');
+
+        // Rebuild and load tour commands
+        final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0);
+        _totalCommandCount = commands.length;
+        _completedCommandCount = 0;
+        _currentStopIndex = -1;
+
+        debugPrint('BufferSequenceExecutor: Loading $_totalCommandCount commands');
+        _bufferClient.loadCommands(commands, clearExisting: true);
+
+        _status = SequenceExecutorStatus.running;
+        notifyListeners();
+        return;
       }
     }
 
