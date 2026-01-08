@@ -511,25 +511,26 @@ class _HudScreenState extends State<HudScreen>
                       _saveConnectionMode(mode);
 
                       // Preserve the current IP, just update protocol/port
+                      // NEVER use hardcoded default IPs!
                       final currentUrl = _urlController.text.trim();
                       if (currentUrl.isEmpty) {
-                        _urlController.text = mode.defaultUrl;
-                      } else {
-                        final uri = Uri.tryParse(currentUrl);
-                        final host = uri?.host ?? '';
-                        if (host.isNotEmpty) {
-                          // Preserve IP, update protocol/port to match mode
-                          if (mode == ConnectionMode.direct) {
-                            _urlController.text = 'ws://$host:9090';
-                          } else if (mode == ConnectionMode.relayWs) {
-                            _urlController.text = 'ws://$host:8766';
-                          } else {
-                            _urlController.text = 'http://$host:8765';
-                          }
+                        // Leave empty - user must enter their IP
+                        return;
+                      }
+
+                      final uri = Uri.tryParse(currentUrl);
+                      final host = uri?.host ?? '';
+                      if (host.isNotEmpty) {
+                        // Preserve IP, update protocol/port to match mode
+                        if (mode == ConnectionMode.direct) {
+                          _urlController.text = 'ws://$host:9090';
+                        } else if (mode == ConnectionMode.relayWs) {
+                          _urlController.text = 'ws://$host:8766';
                         } else {
-                          _urlController.text = mode.defaultUrl;
+                          _urlController.text = 'http://$host:8765';
                         }
                       }
+                      // If host is empty, leave URL as-is (don't replace with hardcoded)
                     }
                   },
                 ),
