@@ -256,6 +256,10 @@ Resources:
                   path = '/' + path
               body = json.loads(event.get('body', '{}') or '{}')
 
+              # Handle CORS preflight OPTIONS requests
+              if method == 'OPTIONS':
+                  return response(200, {})
+
               # Route requests
               if path == '/fleet/register' and method == 'POST':
                   return register_robot(body)

@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'com.google.protobuf' version '0.9.4'
 }
 
 android {
@@ -34,6 +35,14 @@ android {
     buildFeatures {
         viewBinding true
     }
+
+    sourceSets {
+        main {
+            proto {
+                srcDir '../../proto'
+            }
+        }
+    }
 }
 
 dependencies {
@@ -57,4 +66,49 @@ dependencies {
     // NanoHTTPD for embedded HTTP server
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
     implementation 'org.nanohttpd:nanohttpd-websocket:2.3.1'
+
+    // gRPC and Protobuf
+    implementation 'io.grpc:grpc-okhttp:1.60.0'
+    implementation 'io.grpc:grpc-protobuf-lite:1.60.0'
+    implementation 'io.grpc:grpc-stub:1.60.0'
+    implementation 'io.grpc:grpc-kotlin-stub:1.4.1'
+    implementation 'com.google.protobuf:protobuf-kotlin-lite:3.25.1'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+
+    // Annotations for gRPC
+    compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.25.1'
+    }
+    plugins {
+        grpc {
+            artifact = 'io.grpc:protoc-gen-grpc-java:1.60.0'
+        }
+        grpckt {
+            artifact = 'io.grpc:protoc-gen-grpc-kotlin:1.4.1:jdk8@jar'
+        }
+    }
+    generateProtoTasks {
+        all().each { task ->
+            task.builtins {
+                java {
+                    option 'lite'
+                }
+                kotlin {
+                    option 'lite'
+                }
+            }
+            task.plugins {
+                grpc {
+                    option 'lite'
+                }
+                grpckt {
+                    option 'lite'
+                }
+            }
+        }
+    }
 }
