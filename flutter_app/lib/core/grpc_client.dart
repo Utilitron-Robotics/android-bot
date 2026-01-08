@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:grpc/grpc.dart';
-import '../generated/robot_control.pb.dart';
 import '../generated/robot_control.pbgrpc.dart';
 
 /// gRPC client for WAN-ready robot communication
