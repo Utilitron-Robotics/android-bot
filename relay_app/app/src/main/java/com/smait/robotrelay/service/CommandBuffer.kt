@@ -231,9 +231,19 @@ class CommandBuffer(
 
     private fun sendHeartbeat() {
         val status = robotClient.robotStatus.value
+        val now = System.currentTimeMillis()
+
+        // Calculate how stale the robot data is
+        // If lastRobotDataTime is 0, we've never received data - definitely stale
+        val robotDataAge = if (robotClient.lastRobotDataTime > 0) {
+            now - robotClient.lastRobotDataTime
+        } else {
+            -1L  // Never received data
+        }
+
         val heartbeat = mapOf(
             "op" to "buffer_heartbeat",
-            "timestamp" to System.currentTimeMillis(),
+            "timestamp" to now,
             "buffer" to mapOf(
                 "paused" to _paused.value,
                 "current" to currentCommand?.let { cmd ->
@@ -241,7 +251,7 @@ class CommandBuffer(
                         "id" to cmd.id,
                         "type" to cmd.type,
                         "started_at" to currentCommandStartTime,
-                        "elapsed_ms" to (System.currentTimeMillis() - currentCommandStartTime)
+                        "elapsed_ms" to (now - currentCommandStartTime)
                     )
                 },
                 "pending_count" to pendingQueue.size,
@@ -252,7 +262,13 @@ class CommandBuffer(
                 "nav_status" to (status?.navStatus ?: 0),
                 "nav_goal" to (status?.currentGoalName ?: ""),
                 "battery" to (status?.battery ?: 0),
-                "safety_zone" to (status?.safetyZone?.name ?: "CLEAR")
+                "safety_zone" to (status?.safetyZone?.name ?: "CLEAR"),
+                // CRITICAL: Include position so Flutter always has it even if pose messages get lost
+                "x" to (status?.x ?: 0.0),
+                "y" to (status?.y ?: 0.0),
+                "theta" to (status?.theta ?: 0.0),
+                // CRITICAL: Data freshness so Flutter knows if we're serving stale data
+                "data_age_ms" to robotDataAge
             ),
             "crowd_config" to mapOf(
                 "safe_distance_meters" to crowdConfig.safeDistanceMeters,
