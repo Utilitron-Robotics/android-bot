@@ -327,40 +327,57 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // Special handling for loop command
     if (result.commandId.contains('loop')) {
-      if (result.isSuccess) {
-        debugPrint('BufferSequenceExecutor: Loop command completed - entering standby at start position');
+      if (result.isSuccess && _currentSequence != null && _currentSequence!.loop) {
+        debugPrint('BufferSequenceExecutor: Loop command completed - restarting tour');
 
-        // Loop command means: tour iteration complete, robot at start position
-        // Now enter standby mode - wait for manual trigger or motion detection
-
-        if (_currentSequence != null && _currentSequence!.loop) {
-          // Enter motion standby mode if configured
-          if (_currentSequence!.motionTriggerStart) {
-            debugPrint('BufferSequenceExecutor: Entering motion standby for next tour iteration');
-
-            // Send motion standby command to wait for visitors
-            _bufferClient.loadCommands([
-              BufferCommand.motionStandby(
-                sequenceId: _currentSequence!.id,
-                greeting: _currentSequence!.motionGreeting ?? 'Hello! Would you like a tour?',
-                buttonText: _currentSequence!.motionButtonText ?? 'START TOUR',
-                displayUrl: _currentSequence!.motionDisplayUrl,
-              ),
-            ], clearExisting: true);
-
-            // Keep status as running (in standby)
-            _status = SequenceExecutorStatus.running;
-            notifyListeners();
-            return;
-          }
+        if (_currentSequence!.motionTriggerStart) {
+          // Motion trigger enabled - enter standby mode to wait for visitor
+          debugPrint('BufferSequenceExecutor: Entering motion standby for next tour iteration');
+          _bufferClient.loadCommands([
+            BufferCommand.motionStandby(
+              sequenceId: _currentSequence!.id,
+              greeting: _currentSequence!.motionGreeting ?? 'Hello! Would you like a tour?',
+              buttonText: _currentSequence!.motionButtonText ?? 'START TOUR',
+              displayUrl: _currentSequence!.motionDisplayUrl,
+            ),
+          ], clearExisting: true);
+        } else {
+          // No motion trigger - restart tour immediately
+          debugPrint('BufferSequenceExecutor: Restarting tour immediately (no motion trigger)');
+          final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0);
+          _totalCommandCount = commands.length;
+          _completedCommandCount = 0;
+          _currentStopIndex = -1;
+          _bufferClient.loadCommands(commands, clearExisting: true);
         }
 
-        // If no motion trigger configured, just complete the tour
-        debugPrint('BufferSequenceExecutor: Loop complete, tour ending (no motion trigger configured)');
-        // Fall through to normal completion
+        _status = SequenceExecutorStatus.running;
+        notifyListeners();
+        return;
       } else {
-        debugPrint('BufferSequenceExecutor: Loop command failed (${result.result}), ending tour');
+        debugPrint('BufferSequenceExecutor: Loop command failed or loop disabled, ending tour');
         // Fall through to normal completion handling
+      }
+    }
+
+    // Special handling for standby completion (button pressed - either motion or button standby)
+    // This means start/restart the tour!
+    if (result.commandId.contains('_standby')) {
+      if (result.isSuccess && _currentSequence != null) {
+        debugPrint('BufferSequenceExecutor: Standby completed - button pressed, starting tour!');
+
+        // Rebuild and load tour commands (skip the standby command, start from intro/stops)
+        final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0, skipStandby: true);
+        _totalCommandCount = commands.length;
+        _completedCommandCount = 0;
+        _currentStopIndex = -1;
+
+        debugPrint('BufferSequenceExecutor: Loading $_totalCommandCount commands');
+        _bufferClient.loadCommands(commands, clearExisting: true);
+
+        _status = SequenceExecutorStatus.running;
+        notifyListeners();
+        return;
       }
     }
 
@@ -516,12 +533,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
   /// The display stays up from arrival until next navigation starts.
   /// Wait timer does NOT cut off speech - it waits AFTER speech completes.
   List<BufferCommand> _buildSequenceCommands(Sequence sequence,
-      {int startIndex = 0}) {
+      {int startIndex = 0, bool skipStandby = false}) {
     final commands = <BufferCommand>[];
 
     // DEBUG: Log all stops and their config
     debugPrint(
-        'BufferSequenceExecutor: Building commands for ${sequence.stops.length} stops (starting from index $startIndex):');
+        'BufferSequenceExecutor: Building commands for ${sequence.stops.length} stops (starting from index $startIndex, skipStandby=$skipStandby):');
     for (int i = startIndex; i < sequence.stops.length; i++) {
       final s = sequence.stops[i];
       debugPrint(
@@ -530,7 +547,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // START waypoint - navigate here before starting tour
     // (Robot will navigate to start even if human moved it)
-    if (startIndex == 0 &&
+    // Skip if we're resuming after standby (already at start)
+    if (!skipStandby &&
+        startIndex == 0 &&
         sequence.startWaypoint != null &&
         sequence.startWaypoint!.isNotEmpty) {
       debugPrint(
@@ -538,24 +557,40 @@ class BufferSequenceExecutor extends ChangeNotifier {
       commands.add(BufferCommand.navigate(sequence.startWaypoint!));
     }
 
-    // MOTION TRIGGER - wait for visitor to approach before starting tour
-    // When enabled, robot waits at start position for motion detection,
-    // announces "Human detected" then greets visitor and shows "Start Tour" button
-    if (startIndex == 0 && sequence.motionTriggerStart) {
-      // Prefix "Human detected" to the greeting for audible feedback on motion
-      final customGreeting = sequence.motionGreeting;
-      final greeting = customGreeting != null && customGreeting.isNotEmpty
-          ? 'Human detected. $customGreeting'
-          : 'Human detected. Hello! Would you like a tour?';
+    // BUTTON GATE - always show Start button when startWaypoint exists
+    // Motion trigger controls WHETHER to wait for motion detection, but
+    // the button gate is SEPARATE - we always wait for button press at start
+    // Skip if resuming after standby completion (button already pressed)
+    if (!skipStandby &&
+        startIndex == 0 &&
+        sequence.startWaypoint != null &&
+        sequence.startWaypoint!.isNotEmpty) {
       final buttonText = sequence.motionButtonText ?? 'Start Tour';
-      debugPrint(
-          'BufferSequenceExecutor: Adding motion standby with greeting: $greeting, button: $buttonText');
-      commands.add(BufferCommand.motionStandby(
-        greeting: greeting,
-        sequenceId: sequence.id,
-        buttonText: buttonText,
-        displayUrl: sequence.motionDisplayUrl,
-      ));
+
+      if (sequence.motionTriggerStart) {
+        // Motion detection enabled - wait for motion, then show greeting + button
+        final customGreeting = sequence.motionGreeting;
+        final greeting = customGreeting != null && customGreeting.isNotEmpty
+            ? 'Human detected. $customGreeting'
+            : 'Human detected. Hello! Would you like a tour?';
+        debugPrint(
+            'BufferSequenceExecutor: Adding motion standby with greeting: $greeting, button: $buttonText');
+        commands.add(BufferCommand.motionStandby(
+          greeting: greeting,
+          sequenceId: sequence.id,
+          buttonText: buttonText,
+          displayUrl: sequence.motionDisplayUrl,
+        ));
+      } else {
+        // No motion detection - just show button immediately, no greeting
+        debugPrint(
+            'BufferSequenceExecutor: Adding button standby (no motion) with button: $buttonText');
+        commands.add(BufferCommand.buttonStandby(
+          sequenceId: sequence.id,
+          buttonText: buttonText,
+          displayUrl: sequence.motionDisplayUrl,
+        ));
+      }
     }
 
     // Intro text (spoken at start position)

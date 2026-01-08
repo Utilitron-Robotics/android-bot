@@ -64,7 +64,10 @@ class BufferCommand {
       );
 
   /// Loop command - tells the buffer to restart the sequence from the beginning
-  factory BufferCommand.loop() => BufferCommand(type: 'loop');
+  factory BufferCommand.loop() => BufferCommand(
+        id: 'loop_${DateTime.now().millisecondsSinceEpoch}',
+        type: 'loop',
+      );
 
   /// Enter motion standby mode - wait for motion detection to trigger tour start
   /// When motion is detected, speaks greeting and shows start button
@@ -75,9 +78,27 @@ class BufferCommand {
     String? displayUrl,
   }) =>
       BufferCommand(
+        id: 'motion_standby_${DateTime.now().millisecondsSinceEpoch}',
         type: 'motion_standby',
         data: {
           'greeting': greeting,
+          'sequence_id': sequenceId,
+          if (buttonText != null) 'button_text': buttonText,
+          if (displayUrl != null) 'display_url': displayUrl,
+        },
+      );
+
+  /// Enter button standby mode - show start button immediately (no motion detection)
+  /// Button press triggers tour start
+  factory BufferCommand.buttonStandby({
+    required String sequenceId,
+    String? buttonText,
+    String? displayUrl,
+  }) =>
+      BufferCommand(
+        id: 'button_standby_${DateTime.now().millisecondsSinceEpoch}',
+        type: 'button_standby',
+        data: {
           'sequence_id': sequenceId,
           if (buttonText != null) 'button_text': buttonText,
           if (displayUrl != null) 'display_url': displayUrl,

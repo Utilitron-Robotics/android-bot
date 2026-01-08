@@ -645,6 +645,29 @@ class CommandBuffer(
                 Log.i(TAG, "Exiting motion standby for sequence: $sequenceId")
             }
 
+            "button_standby" -> {
+                // Like motion_standby but no greeting/motion detection - just show button immediately
+                val sequenceId = cmd.data["sequence_id"] as? String ?: ""
+                val buttonText = cmd.data["button_text"] as? String ?: "Start Tour"
+                val pin = cmd.data["pin"] as? String
+
+                Log.i(TAG, "Entering button standby for sequence: $sequenceId, button: $buttonText")
+
+                // Activate tour mode and show button immediately (no greeting)
+                withContext(Dispatchers.Main) {
+                    taskExecutor?.startTourMode(pin)
+                    taskExecutor?.notifyTourStandby(sequenceId, buttonText)
+                }
+
+                // Wait indefinitely until the command is completed by a button press or skipped
+                while (currentCommand != null) {
+                    delay(500)
+                }
+
+                // Command was completed externally (e.g., button press, skip, clear)
+                Log.i(TAG, "Exiting button standby for sequence: $sequenceId")
+            }
+
 
             "set_recovery_config" -> {
                 // Update recovery configuration from Flutter

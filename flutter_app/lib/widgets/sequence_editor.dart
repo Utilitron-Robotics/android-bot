@@ -1334,6 +1334,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   ),
                 ],
               ),
+              // Greeting (only shown when motion trigger is ON)
               if (seq.motionTriggerStart) ...[
                 Text(
                   'Robot greets visitors at Start location and shows Start button',
@@ -1351,17 +1352,18 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                TextField(
-                  controller: _motionButtonTextController,
-                  decoration: const InputDecoration(
-                    labelText: 'Button Text',
-                    hintText: 'Start Tour',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    prefixIcon: Icon(Icons.touch_app, size: 18),
-                  ),
-                ),
               ],
+              // Button text - ALWAYS visible, separate from motion trigger
+              TextField(
+                controller: _motionButtonTextController,
+                decoration: const InputDecoration(
+                  labelText: 'Button Text',
+                  hintText: 'Start Tour',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon: Icon(Icons.touch_app, size: 18),
+                ),
+              ),
             ],
           ),
         ),
