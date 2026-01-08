@@ -377,10 +377,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Check for sequence completion
     if (result.isSuccess || result.result == 'cancelled') {
       _navRetryCount = 0; // Reset retry count on success/cancel
-      // Give heartbeat a moment to update, then check completion
-      Future.delayed(const Duration(milliseconds: 500), () {
-        _checkSequenceCompletion();
-      });
+      // Check completion immediately - we track command count locally, no need to wait for heartbeat
+      _checkSequenceCompletion();
     }
 
     notifyListeners();
@@ -561,17 +559,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     // Intro text (spoken at start position)
+    // Relay awaits TTS completion via callback - no more guessing duration!
     if (startIndex == 0 &&
         sequence.introText != null &&
         sequence.introText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.introText!));
-      // Add dynamic wait based on intro text length to prevent overlap with arrival announcement
-      // Estimate: ~150 words per minute = ~2.5 words per second
-      // Add 1 second buffer for speech processing
-      final wordCount = sequence.introText!.split(' ').length;
-      final waitMs = ((wordCount / 2.5) * 1000).round() + 1000; // +1s buffer
-      commands.add(BufferCommand.wait(waitMs));
-      debugPrint('BufferSequenceExecutor: Intro text has $wordCount words, waiting ${waitMs}ms after speech');
+      debugPrint('BufferSequenceExecutor: Intro text queued (TTS awaits completion, no wait needed)');
     }
 
     // Each stop
@@ -592,14 +585,16 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
 
       // 3. Arrival sound + announcement (if enabled)
-      // Plays while display is showing
+      // Plays while display is showing - TTS awaits completion, no extra wait needed
       if (sequence.announceArrival) {
         commands.add(BufferCommand.sound('arrival'));
-        commands.add(BufferCommand.speak('Arrived at ${stop.waypoint}'));
-        // Add small pause after arrival announcement before custom text
-        if (stop.speakText != null && stop.speakText!.isNotEmpty) {
-          commands.add(BufferCommand.wait(500)); // 0.5s pause for clarity
-        }
+        // Use delivery-specific announcement if this is a delivery sequence
+        final isDelivery = sequence.name.toLowerCase().contains('delivery') ||
+            sequence.id.toLowerCase().contains('delivery');
+        final announcement = isDelivery
+            ? 'Your delivery has arrived at ${stop.waypoint}'
+            : 'Arrived at ${stop.waypoint}';
+        commands.add(BufferCommand.speak(announcement));
       }
 
       // 4. Custom speak text (plays while display is showing)
