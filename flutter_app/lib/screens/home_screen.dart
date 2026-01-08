@@ -280,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: _urlController,
                 decoration: InputDecoration(
                   labelText: 'Robot URL',
-                  hintText: _connectionMode.defaultUrl,
+                  hintText: 'Enter robot IP (e.g., 192.168.x.x)',
                   border: const OutlineInputBorder(),
                   isDense: true,
                   prefixIcon: const Icon(Icons.link),
