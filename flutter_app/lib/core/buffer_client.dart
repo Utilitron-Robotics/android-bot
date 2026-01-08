@@ -88,6 +88,23 @@ class BufferCommand {
         },
       );
 
+  /// Enter button standby mode - show start button immediately (no motion detection)
+  /// Button press triggers tour start
+  factory BufferCommand.buttonStandby({
+    required String sequenceId,
+    String? buttonText,
+    String? displayUrl,
+  }) =>
+      BufferCommand(
+        id: 'button_standby_${DateTime.now().millisecondsSinceEpoch}',
+        type: 'button_standby',
+        data: {
+          'sequence_id': sequenceId,
+          if (buttonText != null) 'button_text': buttonText,
+          if (displayUrl != null) 'display_url': displayUrl,
+        },
+      );
+
   /// Configure recovery behavior for navigation failures
   factory BufferCommand.setRecoveryConfig(RecoveryConfig config) =>
       BufferCommand(
