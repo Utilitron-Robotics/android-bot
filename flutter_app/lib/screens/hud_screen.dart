@@ -10,6 +10,7 @@ import '../core/smait_protocol.dart' as protocol;
 import '../core/task_engine.dart';
 import '../utils/file_utils.dart';
 import '../services/audio_announcer.dart';
+import '../services/sequence_executor.dart';
 import '../widgets/map_view.dart';
 import '../widgets/joystick.dart';
 import '../widgets/sequence_editor.dart';
@@ -289,13 +290,33 @@ class _HudScreenState extends State<HudScreen>
     final robot = context.read<RobotConnection>();
 
     if (robot.state == RobotConnectionState.connected) {
-      // Connection might be stale - force a ping/reconnect check
-      debugPrint('HUD: Connection appears alive, forcing state refresh');
+      // Connection might be stale - check BufferClient heartbeat freshness
+      final bufferClient = SequenceExecutor().bufferClient;
+      final isStale = bufferClient?.isStale ?? false;
+      final lastHb = bufferClient?.lastHeartbeat;
+      final hbAge = lastHb != null
+          ? DateTime.now().difference(lastHb).inSeconds
+          : -1;
 
-      // Re-subscribe to topics in case they were dropped
-      // The MapView and other widgets will handle their own resubscription
-      // via their WebSocket state listeners, but we trigger a check here
-      robot.notifyListeners();
+      debugPrint('HUD: Connection appears alive, checking staleness... '
+          'isStale=$isStale, lastHeartbeat=${hbAge}s ago');
+
+      if (isStale) {
+        // Connection is stale - force full reconnect
+        debugPrint('HUD: Connection is STALE! Forcing reconnect...');
+        final savedUrl = robot.robotUrl;
+        robot.disconnect();
+        if (savedUrl.isNotEmpty) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) {
+              robot.connect(savedUrl);
+            }
+          });
+        }
+      } else {
+        // Connection seems fresh - just notify listeners
+        robot.notifyListeners();
+      }
     } else if (robot.state == RobotConnectionState.disconnected ||
                robot.state == RobotConnectionState.error) {
       // Connection was lost during background - auto-reconnect
