@@ -144,17 +144,15 @@ class BufferSequenceExecutor extends ChangeNotifier {
           break;
         case 'motion_standby':
           // Waiting for visitor to approach - show special phase
+          // NOTE: Don't log here - this runs on EVERY heartbeat! Log in _onCommandStarted instead
           _currentPhase = SequencePhase.awaitingVisitor;
           _countdownSeconds = 0;
-          debugPrint(
-              'BufferSequenceExecutor: Motion standby active - awaiting visitor');
           break;
         case 'button_standby':
           // Waiting for button press (no motion detection) - same phase
+          // NOTE: Don't log here - this runs on EVERY heartbeat! Log in _onCommandStarted instead
           _currentPhase = SequencePhase.awaitingVisitor;
           _countdownSeconds = 0;
-          debugPrint(
-              'BufferSequenceExecutor: Button standby active - awaiting visitor');
           break;
         default:
           debugPrint(
