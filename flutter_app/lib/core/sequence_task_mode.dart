@@ -32,14 +32,30 @@ enum SequenceTaskPhase {
 }
 
 /// Callback interface for sequence execution
+///
+/// IMPORTANT: All action methods return Future<void> to enable event-driven
+/// execution. The Future should complete when the action is DONE, not when
+/// it starts. This eliminates the need for hardcoded delays.
 abstract class SequenceTaskCallback {
-  void onSpeak(String text);
-  void onArrivalAnnouncement(String waypoint,
-      {bool isDelivery = false}); // Beep + speak arrival
-  void onDisplay(String url, int durationSeconds);
-  void onDisplayDefault(String waypoint);
-  void onCloseDisplay();
+  /// Speak text via TTS. Returns when TTS playback completes.
+  Future<void> onSpeak(String text);
+
+  /// Announce arrival with beep. Returns when announcement completes.
+  Future<void> onArrivalAnnouncement(String waypoint, {bool isDelivery = false});
+
+  /// Display URL on tablet. Returns when display is shown (not when duration expires).
+  Future<void> onDisplay(String url, int durationSeconds);
+
+  /// Display default waypoint info. Returns when display is shown.
+  Future<void> onDisplayDefault(String waypoint);
+
+  /// Close the display. Returns when closed.
+  Future<void> onCloseDisplay();
+
+  /// Navigate to waypoint. Returns immediately (arrival handled via onArrived).
   Future<void> onNavigate(String waypoint);
+
+  // Lifecycle callbacks - fire-and-forget
   void onSequenceStarted(Sequence sequence);
   void onSequenceStopped(SequenceStop? currentStop, int stopIndex);
   void onSequenceCompleted();
@@ -164,12 +180,10 @@ class SequenceTaskMode extends TaskMode {
     _setPhase(SequenceTaskPhase.starting, 2);
     callback.onSequenceStarted(sequence);
 
-    // Play intro if configured
+    // Play intro if configured - await actual TTS completion
     if (sequence.introText != null && sequence.introText!.isNotEmpty) {
-      _setPhase(SequenceTaskPhase.intro,
-          _estimateTtsDuration(sequence.introText!).inSeconds);
-      callback.onSpeak(sequence.introText!);
-      await Future.delayed(_estimateTtsDuration(sequence.introText!));
+      _setPhase(SequenceTaskPhase.intro, 0); // Duration unknown until complete
+      await callback.onSpeak(sequence.introText!);
     }
 
     // Navigate to first stop (fromStart=true since we're still in 'starting' status)
@@ -399,6 +413,10 @@ class SequenceTaskMode extends TaskMode {
   }
 
   /// Execute actions at current stop
+  ///
+  /// EVENT-DRIVEN: Awaits actual completion of TTS/display callbacks rather
+  /// than guessing durations with hardcoded delays. This ensures the robot
+  /// moves to the next action only when the previous one is truly complete.
   Future<void> _executeStopActions() async {
     final stop = currentStop;
     if (stop == null) {
@@ -411,43 +429,34 @@ class SequenceTaskMode extends TaskMode {
         'SequenceTaskMode: Executing actions at ${stop.waypoint} (isRunning=$isRunning, status=$status)');
 
     try {
-      _setPhase(SequenceTaskPhase.arriving, 1);
+      _setPhase(SequenceTaskPhase.arriving, 0);
       callback.onStopArrived(stop, _currentStopIndex);
 
-      // Display content first
+      // Display content first - await confirmation it's shown
       if (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) {
         _setPhase(SequenceTaskPhase.displaying,
             stop.displayDuration > 0 ? stop.displayDuration : 10);
-        callback.onDisplay(stop.displayUrl!, stop.displayDuration);
+        await callback.onDisplay(stop.displayUrl!, stop.displayDuration);
       } else {
-        callback.onDisplayDefault(stop.waypoint);
+        await callback.onDisplayDefault(stop.waypoint);
       }
 
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Announce arrival if enabled
+      // Announce arrival if enabled - await TTS completion
       if (sequence.announceArrival) {
-        final arrivalText = 'Arrived at ${stop.waypoint}';
-        final duration = _estimateTtsDuration(arrivalText);
-        _setPhase(SequenceTaskPhase.speaking, duration.inSeconds);
-        callback.onSpeak(arrivalText);
-        await Future.delayed(duration + const Duration(milliseconds: 500));
+        _setPhase(SequenceTaskPhase.speaking, 0);
+        await callback.onArrivalAnnouncement(stop.waypoint);
       }
 
-      // Speak custom text
+      // Speak custom text - await TTS completion
       if (stop.speakText != null && stop.speakText!.isNotEmpty) {
-        final duration = _estimateTtsDuration(stop.speakText!);
-        _setPhase(SequenceTaskPhase.speaking, duration.inSeconds);
-        callback.onSpeak(stop.speakText!);
-        await Future.delayed(duration);
+        _setPhase(SequenceTaskPhase.speaking, 0);
+        await callback.onSpeak(stop.speakText!);
       }
 
-      // Wait time
-      final minMediaTime =
-          (stop.displayUrl != null && stop.displayUrl!.isNotEmpty) ? 10 : 0;
+      // Wait time (only if explicitly configured - not for guessing TTS duration)
       final waitTime = stop.waitSeconds > 0
           ? stop.waitSeconds
-          : (stop.displayDuration > 0 ? stop.displayDuration : minMediaTime);
+          : (stop.displayDuration > 0 ? stop.displayDuration : 0);
 
       if (waitTime > 0) {
         _setPhase(SequenceTaskPhase.waiting, waitTime);
@@ -471,26 +480,26 @@ class SequenceTaskMode extends TaskMode {
   }
 
   /// Complete the sequence (works for any mode: Tour, Delivery, Patrol, etc.)
-  void _completeSequence() {
+  ///
+  /// EVENT-DRIVEN: Awaits outro TTS completion before marking complete.
+  /// End waypoint navigation is fire-and-forget (robot continues on its own).
+  Future<void> _completeSequence() async {
     _stopCountdown();
 
-    // Play outro
+    // Play outro - await TTS completion
     if (sequence.outroText != null && sequence.outroText!.isNotEmpty) {
-      _setPhase(SequenceTaskPhase.outro,
-          _estimateTtsDuration(sequence.outroText!).inSeconds);
-      callback.onSpeak(sequence.outroText!);
+      _setPhase(SequenceTaskPhase.outro, 0);
+      await callback.onSpeak(sequence.outroText!);
     }
 
-    // Navigate to end waypoint
+    // Navigate to end waypoint (fire-and-forget - we don't wait for arrival)
     if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
       _setPhase(SequenceTaskPhase.ending, 0);
-      callback.onNavigate(sequence.endWaypoint!);
+      await callback.onNavigate(sequence.endWaypoint!);
     }
 
-    // Mark complete after a delay
-    Future.delayed(const Duration(seconds: 2), () {
-      complete();
-    });
+    // Mark complete immediately - TTS is done, navigation is dispatched
+    complete();
   }
 
   /// Skip to next stop
@@ -507,12 +516,6 @@ class SequenceTaskMode extends TaskMode {
     _navigateToNextStop();
   }
 
-  /// Estimate TTS duration
-  Duration _estimateTtsDuration(String text) {
-    final words = text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
-    final seconds = (words / 2.0).ceil();
-    return Duration(seconds: seconds.clamp(2, 60));
-  }
 
   @override
   void dispose() {
@@ -523,32 +526,47 @@ class SequenceTaskMode extends TaskMode {
 }
 
 /// Adapter to convert old SequenceExecutorCallback to new SequenceTaskCallback
+///
+/// NOTE: This adapter wraps fire-and-forget callbacks with immediate Futures.
+/// For true event-driven execution, implementers should provide a real
+/// SequenceTaskCallback that returns Futures completing when actions finish.
 class SequenceCallbackAdapter implements SequenceTaskCallback {
   final SequenceExecutorCallback _oldCallback;
 
   SequenceCallbackAdapter(this._oldCallback);
 
   @override
-  void onSpeak(String text) => _oldCallback.onSpeak(text);
+  Future<void> onSpeak(String text) async {
+    _oldCallback.onSpeak(text);
+    // Legacy adapter: no real completion signal, returns immediately
+    // Real implementations should return when TTS playback completes
+  }
 
   @override
-  void onArrivalAnnouncement(String waypoint, {bool isDelivery = false}) =>
-      _oldCallback.onArrivalAnnouncement(waypoint, isDelivery: isDelivery);
+  Future<void> onArrivalAnnouncement(String waypoint,
+      {bool isDelivery = false}) async {
+    _oldCallback.onArrivalAnnouncement(waypoint, isDelivery: isDelivery);
+  }
 
   @override
-  void onDisplay(String url, int durationSeconds) =>
-      _oldCallback.onDisplay(url, durationSeconds);
+  Future<void> onDisplay(String url, int durationSeconds) async {
+    _oldCallback.onDisplay(url, durationSeconds);
+  }
 
   @override
-  void onDisplayDefault(String waypoint) =>
-      _oldCallback.onDisplayDefault(waypoint);
+  Future<void> onDisplayDefault(String waypoint) async {
+    _oldCallback.onDisplayDefault(waypoint);
+  }
 
   @override
-  void onCloseDisplay() => _oldCallback.onCloseDisplay();
+  Future<void> onCloseDisplay() async {
+    _oldCallback.onCloseDisplay();
+  }
 
   @override
-  Future<void> onNavigate(String waypoint) async =>
-      _oldCallback.onNavigate(waypoint);
+  Future<void> onNavigate(String waypoint) async {
+    _oldCallback.onNavigate(waypoint);
+  }
 
   @override
   void onSequenceStarted(Sequence sequence) =>
