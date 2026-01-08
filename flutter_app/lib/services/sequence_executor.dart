@@ -22,11 +22,35 @@ class SequenceExecutor implements SequenceExecutorCallback {
   // Waypoint tracking (retries handled by SequenceTaskMode or BufferSequenceExecutor)
   String? _pendingWaypoint;
 
+  // Track if we're already initialized with a specific client to prevent duplicates
+  RosbridgeClient? _initializedClient;
+
   /// Initialize with robot connection
+  ///
+  /// CRITICAL: This is called on every connect() - must handle re-initialization properly
+  /// to avoid duplicate BufferClient instances and subscriptions.
   void init(RobotConnection robot) {
     debugPrint(
-        'SequenceExecutor.init: CALLED with robot=${robot.hashCode}, isConnected=${robot.isConnected}');
+        'SequenceExecutor.init: CALLED with robot=${robot.hashCode}, client=${robot.client.hashCode}, isConnected=${robot.isConnected}');
+
+    // GUARD: If already initialized with same client, skip re-creation
+    // This prevents duplicate BufferClient instances on reconnect
+    if (_initializedClient == robot.client && _bufferClient != null) {
+      debugPrint('SequenceExecutor.init: Already initialized with this client, skipping re-creation');
+      _robot = robot;  // Still update robot reference
+      return;
+    }
+
+    // CLEANUP: Dispose old BufferClient before creating new one
+    // This is CRITICAL to prevent duplicate subscriptions!
+    if (_bufferClient != null) {
+      debugPrint('SequenceExecutor.init: Disposing old BufferClient before creating new');
+      _bufferClient!.dispose();
+      _bufferClient = null;
+    }
+
     _robot = robot;
+    _initializedClient = robot.client;
     debugPrint('SequenceExecutor.init: _robot is now set');
 
     // Set callback first
@@ -36,7 +60,7 @@ class SequenceExecutor implements SequenceExecutorCallback {
     // Create BufferClient for relay buffer support
     // The buffer will receive heartbeats from relay if connected via relay
     _bufferClient = BufferClient(robot.client);
-    debugPrint('SequenceExecutor.init: BufferClient created');
+    debugPrint('SequenceExecutor.init: BufferClient created (hash=${_bufferClient.hashCode})');
 
     // Enable buffer executor on SequenceManager
     // When sequences start, they'll use the buffer if available (heartbeats coming)
@@ -45,6 +69,21 @@ class SequenceExecutor implements SequenceExecutorCallback {
 
     debugPrint(
         'SequenceExecutor.init: Verifying - SequenceManager._callback is ${SequenceManager.instance.status}');
+  }
+
+  /// Clean up resources - call on disconnect
+  void cleanup() {
+    debugPrint('SequenceExecutor.cleanup: Disposing BufferClient and clearing SequenceManager');
+
+    // Clear buffer executor in SequenceManager first (it references our BufferClient)
+    SequenceManager.instance.clearBufferExecutor();
+
+    // Now dispose our BufferClient
+    _bufferClient?.dispose();
+    _bufferClient = null;
+    _initializedClient = null;
+    _robot = null;
+    _pendingWaypoint = null;
   }
 
   /// Get the buffer client for external monitoring

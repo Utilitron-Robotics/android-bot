@@ -591,19 +591,30 @@ class SequenceManager extends ChangeNotifier {
 
   /// Configure buffer-based executor (preferred for relay connection)
   /// When set, sequences are loaded into the relay buffer for execution
+  ///
+  /// CRITICAL: This is called on every connect() - must handle re-initialization properly
   void setBufferExecutor(BufferClient bufferClient) {
     if (_callback == null) {
       debugPrint(
           'SequenceManager: Cannot set buffer executor - no callback set');
       return;
     }
+
+    // CLEANUP: Dispose old executor before creating new one
+    // This is CRITICAL to prevent duplicate listeners and event handlers!
+    if (_bufferExecutor != null) {
+      debugPrint('SequenceManager: Disposing old buffer executor before creating new');
+      _bufferExecutor!.removeListener(_onBufferExecutorChanged);
+      _bufferExecutor!.dispose();
+    }
+
     _bufferExecutor = BufferSequenceExecutor.withClient(
       bufferClient: bufferClient,
       callback: _callback!,
     );
     _bufferExecutor!.addListener(_onBufferExecutorChanged);
     _useBufferExecutor = true;
-    debugPrint('SequenceManager: Buffer executor configured');
+    debugPrint('SequenceManager: Buffer executor configured (hash=${_bufferExecutor.hashCode})');
   }
 
   /// Clear buffer executor (fall back to old system)
