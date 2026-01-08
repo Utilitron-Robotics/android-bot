@@ -544,7 +544,7 @@ class _HudScreenState extends State<HudScreen>
                     controller: _urlController,
                     decoration: InputDecoration(
                       labelText: 'Robot URL',
-                      hintText: _connectionMode.defaultUrl,
+                      hintText: 'Enter robot IP (e.g., 192.168.x.x)',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
