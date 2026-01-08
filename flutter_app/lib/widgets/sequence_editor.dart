@@ -39,9 +39,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
   SequenceStatus? _cachedStatus;
   String? _cachedRunningSequenceId;
 
-  // Guard against auto-start during initial load
-  bool _initialized = false;
-
   @override
   void initState() {
     super.initState();
@@ -49,12 +46,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _initializeSelection();
     // Listen for running sequence changes (e.g. buffer executor reconnect restore)
     SequenceManager.instance.addListener(_onSequenceManagerChanged);
-    // Delay enabling start button to prevent phantom auto-start on load
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        setState(() => _initialized = true);
-      }
-    });
   }
 
   void _onSequenceManagerChanged() {
@@ -1141,7 +1132,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  onPressed: seq.stops.isNotEmpty && _initialized
+                  onPressed: seq.stops.isNotEmpty
                       ? () {
                           debugPrint(
                               'Starting tour with startWaypoint: ${seq.startWaypoint}');
@@ -1159,7 +1150,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
                   ),
-                  onPressed: seq.stops.isNotEmpty && _initialized
+                  onPressed: seq.stops.isNotEmpty
                       ? () {
                           widget.onStartSequence?.call(seq);
                           SequenceManager.instance.startSequence(seq);
