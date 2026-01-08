@@ -505,6 +505,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
         sequence.introText != null &&
         sequence.introText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.introText!));
+      // Add dynamic wait based on intro text length to prevent overlap with arrival announcement
+      // Estimate: ~150 words per minute = ~2.5 words per second
+      // Add 1 second buffer for speech processing
+      final wordCount = sequence.introText!.split(' ').length;
+      final waitMs = ((wordCount / 2.5) * 1000).round() + 1000; // +1s buffer
+      commands.add(BufferCommand.wait(waitMs));
+      debugPrint('BufferSequenceExecutor: Intro text has $wordCount words, waiting ${waitMs}ms after speech');
     }
 
     // Each stop
@@ -529,6 +536,10 @@ class BufferSequenceExecutor extends ChangeNotifier {
       if (sequence.announceArrival) {
         commands.add(BufferCommand.sound('arrival'));
         commands.add(BufferCommand.speak('Arrived at ${stop.waypoint}'));
+        // Add small pause after arrival announcement before custom text
+        if (stop.speakText != null && stop.speakText!.isNotEmpty) {
+          commands.add(BufferCommand.wait(500)); // 0.5s pause for clarity
+        }
       }
 
       // 4. Custom speak text (plays while display is showing)
