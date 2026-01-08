@@ -571,13 +571,33 @@ class BufferSequenceExecutor extends ChangeNotifier {
       commands.add(BufferCommand.wait(sequence.restAtEndSeconds * 1000));
     }
 
-    // End waypoint
-    if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
-      commands.add(BufferCommand.navigate(sequence.endWaypoint!));
-    }
+    // Handle looping
+    if (sequence.loop) {
+      debugPrint('BufferSequenceExecutor: Tour set to loop - will restart');
 
-    // Close display at end
-    commands.add(BufferCommand.closeDisplay());
+      // If there's an end waypoint, go there first
+      if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
+        commands.add(BufferCommand.navigate(sequence.endWaypoint!));
+        // Brief wait at end waypoint
+        commands.add(BufferCommand.wait(5000));
+      }
+
+      // Navigate back to start to begin loop
+      if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
+        commands.add(BufferCommand.navigate(sequence.startWaypoint!));
+      }
+
+      // Add loop command to restart the sequence
+      commands.add(BufferCommand.loop());
+    } else {
+      // Non-looping tour - navigate to end and close
+      if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
+        commands.add(BufferCommand.navigate(sequence.endWaypoint!));
+      }
+
+      // Close display at end
+      commands.add(BufferCommand.closeDisplay());
+    }
 
     return commands;
   }
