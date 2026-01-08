@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import '../core/sequence_mode.dart';
 import '../core/robot_connection.dart';
+import '../core/rosbridge_client.dart';
 import '../core/buffer_client.dart';
 import 'audio_announcer.dart';
 
