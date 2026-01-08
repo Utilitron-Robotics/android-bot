@@ -652,6 +652,22 @@ class CommandBuffer(
                 completeCommand(cmd.id, "success")
             }
 
+            "loop" -> {
+                // Loop command - restart the sequence from the beginning
+                // IMPORTANT: Clear any motion trigger state to prevent auto-triggering
+                Log.i(TAG, "Loop command received - restarting sequence")
+
+                // Clear motion detection state if it was active
+                withContext(Dispatchers.Main) {
+                    taskExecutor?.stopTourMode()  // Ensure we're not in motion standby
+                }
+
+                // Mark this command as complete
+                completeCommand(cmd.id, "success")
+
+                // The buffer executor will reload commands after this completes
+            }
+
             else -> {
                 Log.w(TAG, "Unknown command type: ${cmd.type}")
                 completeCommand(cmd.id, "unknown_type")
