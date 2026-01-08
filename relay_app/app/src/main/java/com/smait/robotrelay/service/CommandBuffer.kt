@@ -188,9 +188,10 @@ class CommandBuffer(
                     // All attempts exhausted - cry for help like a sad R2D2
                     Log.w(TAG, "Trapped! No escape route found after $recoveryAttempts attempts")
                     scope.launch(Dispatchers.Main) {
-                        taskExecutor?.speakText("I'm stuck. I need help please.")
-                        delay(2000)
-                        taskExecutor?.playAlertSound("sad")  // Sad beeps
+                        taskExecutor?.speakText("I'm stuck. I need help please.") {
+                            // Play sad sound after TTS completes (no more guessing!)
+                            taskExecutor?.playAlertSound("sad")
+                        }
                     }
                     waitingForNavArrival = false
                     navArrivalPending = false
@@ -410,10 +411,13 @@ class CommandBuffer(
                         delay(300)
 
                         if (recoveryConfig.announceRecovery) {
+                            val ttsComplete = CompletableDeferred<Unit>()
                             withContext(Dispatchers.Main) {
-                                taskExecutor?.speakText("Looking for an alternative path.")
+                                taskExecutor?.speakText("Looking for an alternative path.") {
+                                    ttsComplete.complete(Unit)
+                                }
                             }
-                            delay(1500)
+                            ttsComplete.await()  // Wait for actual TTS completion
                         }
 
                         // SMART VELOCITY: Send command, check if actually moving, stop if blocked
@@ -503,12 +507,14 @@ class CommandBuffer(
                 val completion = CompletableDeferred<Unit>()
 
                 withContext(Dispatchers.Main) {
-                    taskExecutor?.speakText(text)
-                    // TTS doesn't have reliable callback, estimate duration
-                    val estimatedMs = (text.split(" ").size * 300L).coerceIn(1000, 30000)
-                    delay(estimatedMs)
+                    taskExecutor?.speakText(text) {
+                        // TTS completion callback - triggered when speech is done
+                        completion.complete(Unit)
+                    }
                 }
 
+                // Wait for actual TTS completion (no more guessing!)
+                completion.await()
                 completeCommand(cmd.id, "success")
             }
 
@@ -614,7 +620,16 @@ class CommandBuffer(
 
                 Log.i(TAG, "Entering motion standby for sequence: $sequenceId, button: $buttonText")
 
-                // Activate tour mode to lock the screen
+                // Speak the greeting - await TTS completion (no guessing!)
+                val ttsComplete = CompletableDeferred<Unit>()
+                withContext(Dispatchers.Main) {
+                    taskExecutor?.speakText(greeting) {
+                        ttsComplete.complete(Unit)
+                    }
+                }
+                ttsComplete.await()
+
+                // Activate tour mode to lock the screen AFTER greeting finishes
                 withContext(Dispatchers.Main) {
                     taskExecutor?.startTourMode(pin)
                     // Notify UI to show the "Start Tour" button on the lock screen

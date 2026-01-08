@@ -102,9 +102,23 @@ class CloudTtsService(
 
     /**
      * Speak text using Cloud TTS (with cache) or fallback to device TTS
+     *
+     * IMPORTANT: New speech interrupts any current speech. The previous callback
+     * is invoked immediately (signaling completion/interruption) so callers
+     * waiting on it can proceed. This prevents buffer hangs and ensures
+     * warnings don't stack - they interrupt and replace.
      */
     fun speak(text: String, voice: String = DEFAULT_VOICE, onComplete: (() -> Unit)? = null) {
         Log.i(TAG, "speak: '$text' (apiKey=${if (apiKey != null) "set" else "none"})")
+
+        // Stop current playback and invoke old callback (so buffer doesn't hang)
+        val oldCallback = currentCallback
+        currentCallback = null
+        mediaPlayer?.stop()
+        mediaPlayer?.release()
+        mediaPlayer = null
+        fallbackTts?.stop()
+        oldCallback?.invoke()  // Signal previous speech is done (interrupted)
 
         currentCallback = onComplete
 
