@@ -225,9 +225,11 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
             newStatus.currentGoal,
           );
 
-          // Send velocity for stuck detection
+          // Send velocity for stuck detection (both linear and angular)
           if (newStatus.velocity.isNotEmpty) {
-            AudioAnnouncer().onVelocityChanged(newStatus.velocity[0]);
+            final linear = newStatus.velocity[0];
+            final angular = newStatus.velocity.length > 1 ? newStatus.velocity[1] : 0.0;
+            AudioAnnouncer().onVelocityChanged(linear, angular);
           }
 
           // Forward to sequence executor for sequence mode (legacy)

@@ -627,21 +627,27 @@ class AudioAnnouncer {
   }
 
   /// Called by RobotConnection when velocity updates
-  void onVelocityChanged(double linearVelocity) {
+  void onVelocityChanged(double linearVelocity, [double angularVelocity = 0.0]) {
     _lastVelocity = linearVelocity;
 
     // Only track stuck state during active navigation
     if (_lastNavStatus != 601) return;
 
     const stuckThreshold = 0.05; // Less than 5cm/s = stuck
+    const rotationThreshold = 0.1; // Less than 0.1 rad/s = not rotating
 
-    if (linearVelocity.abs() < stuckThreshold) {
+    // Robot is moving if EITHER linear OR angular velocity is above threshold
+    // This prevents false stuck detection when robot rotates in place at start of nav
+    final isMoving = linearVelocity.abs() >= stuckThreshold ||
+                     angularVelocity.abs() >= rotationThreshold;
+
+    if (!isMoving) {
       // Robot stopped - start tracking stuck time
       _stuckSince ??= DateTime.now();
     } else {
-      // Robot moving - reset stuck tracking and warning level
+      // Robot moving (forward or rotating) - reset stuck tracking and warning level
       if (_stuckSince != null) {
-        debugPrint('AudioAnnouncer: Robot moving again, resetting stuck timer');
+        debugPrint('AudioAnnouncer: Robot moving again (lin: ${linearVelocity.toStringAsFixed(2)}, ang: ${angularVelocity.toStringAsFixed(2)}), resetting stuck timer');
         _stuckSince = null;
         _blockedWarningLevel = 0;
       }

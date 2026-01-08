@@ -109,12 +109,18 @@ message BufferControl {
     bool resume = 3;
     bool skip = 4;
     bool clear = 5;
+    TriggerStartTour trigger_start = 6;  // NEW: Remote START TOUR button trigger
   }
 }
 
 message LoadCommands {
   repeated BufferCommand commands = 1;
   bool clear_existing = 2;
+}
+
+// UI Control - trigger actions on tablet
+message TriggerStartTour {
+  string sequence_id = 1;  // Which tour to start
 }
 
 // Crowd logic config

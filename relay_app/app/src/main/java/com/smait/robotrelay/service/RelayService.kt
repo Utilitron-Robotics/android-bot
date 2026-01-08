@@ -117,6 +117,9 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         private set
     private var discoveryService: DiscoveryService? = null
 
+    // gRPC server for WAN-ready communication (OPUS LEVEL!)
+    private var grpcServer: com.smait.robotrelay.grpc.GrpcServer? = null
+
     // Current task execution state
     private val _currentTask = MutableStateFlow<WaypointTask?>(null)
     val currentTask: StateFlow<WaypointTask?> = _currentTask
@@ -289,8 +292,22 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             }
         }
 
-        // Start relay server
+        // Start relay server (WebSocket - port 8766) - LEGACY, keeping for backward compatibility
         relayServer.start()
+
+        // Start gRPC server (port 50051) - THIS IS THE REAL WAN-READY PROTOCOL!
+        try {
+            grpcServer = com.smait.robotrelay.grpc.GrpcServer(
+                port = 50051,
+                robotClient = robotClient,
+                taskExecutor = this
+            )
+            grpcServer?.start()
+            Log.i(TAG, "✅ gRPC server started on port 50051 - WAN-READY!")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start gRPC server: ${e.message}")
+            // Continue without gRPC - legacy WebSocket still works
+        }
 
         // Start UDP discovery service for auto-discovery
         discoveryService = DiscoveryService(relayPort, robotClient)
