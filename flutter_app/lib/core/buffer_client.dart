@@ -291,6 +291,13 @@ class RobotBufferStatus {
   final List<double> ultrasonic; // Distances in meters
   final bool ultrasonicBlocked;
   final double minFrontDistance; // Min LIDAR distance in front arc (meters)
+  // Position from heartbeat - ensures we always have position even if pose messages get lost
+  final double x;
+  final double y;
+  final double theta;
+  // How old is the robot data on the Android relay (ms)?
+  // -1 means never received data, >5000 means data is stale
+  final int dataAgeMs;
 
   RobotBufferStatus({
     this.connected = false,
@@ -301,6 +308,10 @@ class RobotBufferStatus {
     this.ultrasonic = const [],
     this.ultrasonicBlocked = false,
     this.minFrontDistance = 99.0,
+    this.x = 0.0,
+    this.y = 0.0,
+    this.theta = 0.0,
+    this.dataAgeMs = -1,
   });
 
   factory RobotBufferStatus.fromJson(Map<String, dynamic> json) =>
@@ -317,7 +328,14 @@ class RobotBufferStatus {
         ultrasonicBlocked: json['ultrasonic_blocked'] as bool? ?? false,
         minFrontDistance:
             (json['min_front_distance'] as num?)?.toDouble() ?? 99.0,
+        x: (json['x'] as num?)?.toDouble() ?? 0.0,
+        y: (json['y'] as num?)?.toDouble() ?? 0.0,
+        theta: (json['theta'] as num?)?.toDouble() ?? 0.0,
+        dataAgeMs: json['data_age_ms'] as int? ?? -1,
       );
+
+  /// True if robot data is stale (>5s old or never received)
+  bool get isDataStale => dataAgeMs < 0 || dataAgeMs > 5000;
 
   /// Min ultrasonic distance in cm (for display), null if no valid data
   double? get minUltrasonicCm {
@@ -385,9 +403,25 @@ class BufferClient extends ChangeNotifier {
   // Last heartbeat tracking
   DateTime? _lastHeartbeat;
   DateTime? get lastHeartbeat => _lastHeartbeat;
-  bool get isStale =>
-      _lastHeartbeat == null ||
-      DateTime.now().difference(_lastHeartbeat!).inSeconds > 5;
+
+  /// True if connection is stale - either:
+  /// 1. No heartbeat received in 5+ seconds (relay connection lost)
+  /// 2. Robot data in heartbeat is 5+ seconds old (robot connection lost)
+  bool get isStale {
+    // No heartbeat at all
+    if (_lastHeartbeat == null) return true;
+
+    // Heartbeat not received recently (relay connection issue)
+    if (DateTime.now().difference(_lastHeartbeat!).inSeconds > 5) return true;
+
+    // Heartbeat coming but robot data is stale (robot connection issue)
+    if (_state.robot.isDataStale) return true;
+
+    return false;
+  }
+
+  /// More specific: is the robot data stale even if heartbeats are flowing?
+  bool get isRobotDataStale => _state.robot.isDataStale;
 
   BufferClient(this._client) {
     _setupMessageHandler();
