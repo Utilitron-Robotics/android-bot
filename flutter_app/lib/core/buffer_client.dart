@@ -400,24 +400,45 @@ class BufferClient extends ChangeNotifier {
   BufferEventCallback? onCommandCompleted;
   BufferEventCallback? onHeartbeat;
 
-  // Last heartbeat tracking
+  // Rhythm-based heartbeat tracking (SINC-style correlation)
   DateTime? _lastHeartbeat;
   DateTime? get lastHeartbeat => _lastHeartbeat;
 
-  /// True if connection is stale - either:
-  /// 1. No heartbeat received in 5+ seconds (relay connection lost)
-  /// 2. Robot data in heartbeat is 5+ seconds old (robot connection lost)
+  // Track the heartbeat rhythm - measured interval between beats
+  Duration _expectedInterval = const Duration(milliseconds: 500); // Default, will adapt
+  int _heartbeatCount = 0;
+  static const int _missedBeatsThreshold = 6; // Stale after missing ~6 beats (3+ seconds at 500ms)
+
+  /// True if connection is stale - rhythm-based detection:
+  /// Instead of absolute "5 seconds since last", we check if we've missed
+  /// multiple expected heartbeats based on the measured rhythm (SINC-style).
   bool get isStale {
-    // No heartbeat at all
+    // No heartbeat at all - definitely stale
     if (_lastHeartbeat == null) return true;
 
-    // Heartbeat not received recently (relay connection issue)
-    if (DateTime.now().difference(_lastHeartbeat!).inSeconds > 5) return true;
+    // Calculate how many beats we've missed based on expected rhythm
+    final elapsed = DateTime.now().difference(_lastHeartbeat!);
+    final expectedBeats = elapsed.inMilliseconds / _expectedInterval.inMilliseconds;
+
+    // If we've missed more than threshold beats, connection is stale
+    // This adapts to the actual heartbeat rhythm rather than fixed timeout
+    if (expectedBeats >= _missedBeatsThreshold) {
+      debugPrint('BufferClient: STALE - missed ${expectedBeats.toStringAsFixed(1)} beats '
+          '(expected every ${_expectedInterval.inMilliseconds}ms, last seen ${elapsed.inMilliseconds}ms ago)');
+      return true;
+    }
 
     // Heartbeat coming but robot data is stale (robot connection issue)
     if (_state.robot.isDataStale) return true;
 
     return false;
+  }
+
+  /// Number of beats missed since last heartbeat (for UI display)
+  double get missedBeats {
+    if (_lastHeartbeat == null) return double.infinity;
+    final elapsed = DateTime.now().difference(_lastHeartbeat!);
+    return elapsed.inMilliseconds / _expectedInterval.inMilliseconds;
   }
 
   /// More specific: is the robot data stale even if heartbeats are flowing?
@@ -435,6 +456,10 @@ class BufferClient extends ChangeNotifier {
       if (state == WsConnectionState.connected) {
         debugPrint(
             'BufferClient: Connection restored, re-subscribing to messages');
+        // Reset rhythm tracking on reconnect - start fresh
+        _heartbeatCount = 0;
+        _expectedInterval = const Duration(milliseconds: 500);
+        _lastHeartbeat = null;
         _setupMessageHandler();
       }
     });
@@ -467,8 +492,27 @@ class BufferClient extends ChangeNotifier {
   }
 
   void _handleHeartbeat(Map<String, dynamic> json) {
+    final now = DateTime.now();
+
+    // Learn the rhythm: measure interval between heartbeats
+    if (_lastHeartbeat != null) {
+      final interval = now.difference(_lastHeartbeat!);
+      // Use exponential moving average to smooth the rhythm measurement
+      // This adapts to the actual relay heartbeat rate
+      if (_heartbeatCount < 5) {
+        // First few beats: quick adaptation
+        _expectedInterval = interval;
+      } else {
+        // After warmup: smooth adaptation (90% old, 10% new)
+        final oldMs = _expectedInterval.inMilliseconds * 0.9;
+        final newMs = interval.inMilliseconds * 0.1;
+        _expectedInterval = Duration(milliseconds: (oldMs + newMs).round());
+      }
+    }
+    _heartbeatCount++;
+
     _state = BufferState.fromJson(json);
-    _lastHeartbeat = DateTime.now();
+    _lastHeartbeat = now;
     onHeartbeat?.call('heartbeat', _state);
     notifyListeners();
   }
