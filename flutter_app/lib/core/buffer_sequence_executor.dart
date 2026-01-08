@@ -283,8 +283,14 @@ class BufferSequenceExecutor extends ChangeNotifier {
       _countdownSeconds = (_currentWaitDurationMs / 1000).ceil();
       debugPrint(
           'BufferSequenceExecutor: Wait started, duration=${_currentWaitDurationMs}ms, countdown=$_countdownSeconds');
+    } else if (type == 'sound') {
+      // Sound command - just acknowledge it
+      debugPrint('BufferSequenceExecutor: Playing sound');
+      _currentPhase = SequencePhase.speaking; // Treat as speaking phase
+      _currentWaitDurationMs = 0;
     } else {
       _currentWaitDurationMs = 0;
+      debugPrint('BufferSequenceExecutor: Unknown command type: $type');
     }
     notifyListeners();
   }
@@ -300,9 +306,63 @@ class BufferSequenceExecutor extends ChangeNotifier {
       return;
     }
 
+    // Prevent duplicate processing - check if we're already beyond total
+    if (_totalCommandCount > 0 && _completedCommandCount >= _totalCommandCount) {
+      debugPrint(
+          'BufferSequenceExecutor: Ignoring duplicate completion - already at $_completedCommandCount/$_totalCommandCount');
+      return;
+    }
+
     _completedCommandCount++;
+
+    // Clamp to prevent impossible states
+    if (_completedCommandCount > _totalCommandCount && _totalCommandCount > 0) {
+      debugPrint(
+          'BufferSequenceExecutor: WARNING - Completed count exceeded total! Clamping $_completedCommandCount to $_totalCommandCount');
+      _completedCommandCount = _totalCommandCount;
+    }
+
     debugPrint(
         'BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
+
+    // Special handling for loop command
+    if (result.commandId.contains('loop')) {
+      if (result.isSuccess) {
+        debugPrint('BufferSequenceExecutor: Loop command completed - entering standby at start position');
+
+        // Loop command means: tour iteration complete, robot at start position
+        // Now enter standby mode - wait for manual trigger or motion detection
+
+        if (_currentSequence != null && _currentSequence!.loop) {
+          // Enter motion standby mode if configured
+          if (_currentSequence!.motionTriggerStart) {
+            debugPrint('BufferSequenceExecutor: Entering motion standby for next tour iteration');
+
+            // Send motion standby command to wait for visitors
+            _bufferClient.loadCommands([
+              BufferCommand.motionStandby(
+                sequenceId: _currentSequence!.id,
+                greeting: _currentSequence!.motionGreeting ?? 'Hello! Would you like a tour?',
+                buttonText: _currentSequence!.motionButtonText ?? 'START TOUR',
+                displayUrl: _currentSequence!.motionDisplayUrl,
+              ),
+            ], clearExisting: true);
+
+            // Keep status as running (in standby)
+            _status = SequenceExecutorStatus.running;
+            notifyListeners();
+            return;
+          }
+        }
+
+        // If no motion trigger configured, just complete the tour
+        debugPrint('BufferSequenceExecutor: Loop complete, tour ending (no motion trigger configured)');
+        // Fall through to normal completion
+      } else {
+        debugPrint('BufferSequenceExecutor: Loop command failed (${result.result}), ending tour');
+        // Fall through to normal completion handling
+      }
+    }
 
     // Handle navigation failures with retry logic (ALL in Flutter)
     if (result.isFailure) {
@@ -505,6 +565,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
         sequence.introText != null &&
         sequence.introText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.introText!));
+      // Add dynamic wait based on intro text length to prevent overlap with arrival announcement
+      // Estimate: ~150 words per minute = ~2.5 words per second
+      // Add 1 second buffer for speech processing
+      final wordCount = sequence.introText!.split(' ').length;
+      final waitMs = ((wordCount / 2.5) * 1000).round() + 1000; // +1s buffer
+      commands.add(BufferCommand.wait(waitMs));
+      debugPrint('BufferSequenceExecutor: Intro text has $wordCount words, waiting ${waitMs}ms after speech');
     }
 
     // Each stop
@@ -529,6 +596,10 @@ class BufferSequenceExecutor extends ChangeNotifier {
       if (sequence.announceArrival) {
         commands.add(BufferCommand.sound('arrival'));
         commands.add(BufferCommand.speak('Arrived at ${stop.waypoint}'));
+        // Add small pause after arrival announcement before custom text
+        if (stop.speakText != null && stop.speakText!.isNotEmpty) {
+          commands.add(BufferCommand.wait(500)); // 0.5s pause for clarity
+        }
       }
 
       // 4. Custom speak text (plays while display is showing)
@@ -560,13 +631,35 @@ class BufferSequenceExecutor extends ChangeNotifier {
       commands.add(BufferCommand.wait(sequence.restAtEndSeconds * 1000));
     }
 
-    // End waypoint
-    if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
-      commands.add(BufferCommand.navigate(sequence.endWaypoint!));
-    }
+    // Handle looping
+    if (sequence.loop) {
+      debugPrint('BufferSequenceExecutor: Tour set to loop - will restart');
 
-    // Close display at end
-    commands.add(BufferCommand.closeDisplay());
+      // If there's an end waypoint, go there first
+      if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
+        commands.add(BufferCommand.navigate(sequence.endWaypoint!));
+        // Brief wait at end waypoint
+        commands.add(BufferCommand.wait(5000));
+      }
+
+      // Navigate back to start to begin loop
+      if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
+        commands.add(BufferCommand.navigate(sequence.startWaypoint!));
+        // Wait a moment at start position before restarting
+        commands.add(BufferCommand.wait(3000));
+      }
+
+      // Add loop command to restart the sequence
+      commands.add(BufferCommand.loop());
+    } else {
+      // Non-looping tour - navigate to end and close
+      if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
+        commands.add(BufferCommand.navigate(sequence.endWaypoint!));
+      }
+
+      // Close display at end
+      commands.add(BufferCommand.closeDisplay());
+    }
 
     return commands;
   }

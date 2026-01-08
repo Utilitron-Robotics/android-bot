@@ -291,27 +291,34 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _saveSequence();
   }
 
-  void _reorderStops(int oldIndex, int newIndex) {
+  void _reorderStops(int oldIndex, int newIndex) async {
     if (_selectedSequence == null) return;
     if (newIndex > oldIndex) newIndex--;
 
-    // CRITICAL: First, save ALL current controller values to the SequenceStop data
-    // This ensures we don't lose any edits when we clear controllers
-    _saveSequence();
+    // CRITICAL FIX: Save BEFORE clearing controllers!
+    // First save all current text from controllers to the model
+    await _saveSequence();
 
-    // Clear ALL stop controllers - they will be recreated from the reordered SequenceStop data
+    // Now that data is saved, reorder the stops in the model
+    final reorderedSequence = _selectedSequence!.reorderStop(oldIndex, newIndex);
+
+    // Update the model with reordered stops
+    _selectedSequence = reorderedSequence;
+
+    // Clear controllers AFTER reordering - they'll be recreated with correct data
     for (final controller in _stopControllers.values) {
       controller.dispose();
     }
     _stopControllers.clear();
 
-    // Now reorder the (already saved) SequenceStops
+    // Force rebuild which will recreate controllers from the reordered model
     setState(() {
-      _selectedSequence = _selectedSequence!.reorderStop(oldIndex, newIndex);
+      // The setState will trigger rebuild and _getOrCreateController will
+      // recreate controllers with the preserved text data
     });
 
-    // Save the reordered sequence
-    _saveSequence();
+    // Save the final reordered sequence to storage
+    await SequenceManager.instance.saveSequence(reorderedSequence);
   }
 
   void _showCloudSyncDialog() {
@@ -798,15 +805,22 @@ class _SequenceEditorState extends State<SequenceEditor> {
     );
   }
 
+  // Debug flag for verbose logging
+  static const bool _enableVerboseLogging = false;
+
   @override
   Widget build(BuildContext context) {
-    debugPrint(
-        'SequenceEditor: build() - isEditing=$_isEditing, selectedSequence=${_selectedSequence?.name}');
+    if (_enableVerboseLogging) {
+      debugPrint(
+          'SequenceEditor: build() - isEditing=$_isEditing, selectedSequence=${_selectedSequence?.name}');
+    }
 
     // When editing, DON'T use ListenableBuilder - completely isolate from rebuilds
     // This prevents the text input chaos caused by rebuilds resetting cursor position
     if (_isEditing && _selectedSequence != null) {
-      debugPrint('SequenceEditor: Showing edit form');
+      if (_enableVerboseLogging) {
+        debugPrint('SequenceEditor: Showing edit form');
+      }
       // Return the form directly - don't wrap in Column (causes Expanded layout issues)
       return _buildSequenceEditForm(_selectedSequence!);
     }
@@ -1101,20 +1115,48 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 tooltip: 'Delete Sequence',
               ),
               const SizedBox(width: 8),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('Start'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
+              // Show prominent Start Tour button if startWaypoint exists
+              if (seq.startWaypoint != null && seq.startWaypoint!.isNotEmpty)
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.rocket_launch),
+                  label: const Text('START TOUR'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  onPressed: seq.stops.isNotEmpty
+                      ? () {
+                          debugPrint(
+                              'Starting tour with startWaypoint: ${seq.startWaypoint}');
+                          widget.onStartSequence?.call(seq);
+                          SequenceManager.instance.startSequence(seq);
+                        }
+                      : null,
+                )
+              else
+                // Regular start button if no startWaypoint
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('Start'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: seq.stops.isNotEmpty
+                      ? () {
+                          widget.onStartSequence?.call(seq);
+                          SequenceManager.instance.startSequence(seq);
+                        }
+                      : null,
                 ),
-                onPressed: seq.stops.isNotEmpty
-                    ? () {
-                        widget.onStartSequence?.call(seq);
-                        SequenceManager.instance.startSequence(seq);
-                      }
-                    : null,
-              ),
             ],
           ),
         ),

@@ -315,6 +315,19 @@ class CommandBuffer(
                 recoveryAttempts = 0
                 triggerRecovery = false
 
+                // Check if navigating to/from charger - be less paranoid about obstacles
+                val isChargingRelated = waypoint.contains("Pile", ignoreCase = true) ||
+                                       waypoint.contains("Charger", ignoreCase = true) ||
+                                       waypoint.contains("Dock", ignoreCase = true) ||
+                                       waypoint.contains("Charging", ignoreCase = true)
+
+                if (isChargingRelated) {
+                    Log.i(TAG, "Navigating to/from charger '$waypoint' - obstacle recovery disabled")
+                    // Also increase tolerance for "arrival" detection near charger
+                    // Robot WILL bump/push against charger contacts - the tongs snap in!
+                    // This is EXPECTED behavior, not a collision
+                }
+
                 robotClient.navigateToPoi(waypoint)
                 navArrivalPending = false
 
@@ -336,14 +349,18 @@ class CommandBuffer(
 
                     // If 603 received, verify robot has actually stopped before completing
                     if (navArrivalPending) {
-                        if (kotlin.math.abs(velocity) < 0.05) {
-                            // Robot velocity ~0
+                        // Special case for charger - be more lenient with "arrival" detection
+                        val arrivalVelocityThreshold = if (isChargingRelated) 0.1 else 0.05
+                        val arrivalConfirmTime = if (isChargingRelated) 300L else 500L
+
+                        if (kotlin.math.abs(velocity) < arrivalVelocityThreshold) {
+                            // Robot velocity ~0 (or close enough for charger)
                             if (stoppedSince == null) {
                                 stoppedSince = System.currentTimeMillis()
                                 Log.i(TAG, "Robot stopped after arrival report, waiting to confirm...")
-                            } else if (System.currentTimeMillis() - stoppedSince > 500) {
-                                // Stopped for 500ms - actually arrived
-                                Log.i(TAG, "Confirmed arrival at $waypoint (stopped for 500ms)")
+                            } else if (System.currentTimeMillis() - stoppedSince > arrivalConfirmTime) {
+                                // Stopped for sufficient time - actually arrived
+                                Log.i(TAG, "Confirmed arrival at $waypoint (stopped for ${arrivalConfirmTime}ms)")
                                 waitingForNavArrival = false
                                 navArrivalPending = false
                                 pendingNavWaypoint = null
@@ -374,7 +391,12 @@ class CommandBuffer(
                     val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP
 
                     // Smart recovery: push but if not moving, stop pushing and try something else
-                    val shouldRecover = triggerRecovery || (stuckTime > recoveryConfig.stuckThresholdMs && isBlocked)
+                    // BUT: Skip recovery when dealing with charger (it's supposed to be tight!)
+                    val shouldRecover = if (isChargingRelated) {
+                        false  // Never recover when docking/undocking
+                    } else {
+                        triggerRecovery || (stuckTime > recoveryConfig.stuckThresholdMs && isBlocked)
+                    }
 
                     if (shouldRecover && recoveryAttempts < recoveryConfig.maxRecoveryAttempts) {
                         val wasTriggeredBy604 = triggerRecovery
@@ -650,6 +672,22 @@ class CommandBuffer(
 
                 Log.i(TAG, "Crowd config updated: safeDistance=${crowdConfig.safeDistanceMeters}m, rampRate=${crowdConfig.rampRate}")
                 completeCommand(cmd.id, "success")
+            }
+
+            "loop" -> {
+                // Loop command - restart the sequence from the beginning
+                // IMPORTANT: Clear any motion trigger state to prevent auto-triggering
+                Log.i(TAG, "Loop command received - restarting sequence")
+
+                // Clear motion detection state if it was active
+                withContext(Dispatchers.Main) {
+                    taskExecutor?.stopTourMode()  // Ensure we're not in motion standby
+                }
+
+                // Mark this command as complete
+                completeCommand(cmd.id, "success")
+
+                // The buffer executor will reload commands after this completes
             }
 
             else -> {
