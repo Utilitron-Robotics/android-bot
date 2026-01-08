@@ -612,22 +612,24 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 var announcedThisNav = SafetyZone.CLEAR  // Track highest announced this nav session
                 var lastNavStatus = 0
+                var lastWarningTime = 0L  // Cooldown timer to prevent rapid-fire warnings
 
                 svc.getRobotStatus()
                     .collect { status ->
                         val zone = status?.safetyZone ?: SafetyZone.CLEAR
                         val navStatus = status?.navStatus ?: 0
+                        val now = System.currentTimeMillis()
 
                         // Reset when nav starts fresh
                         if (navStatus == SmaitProtocol.NAV_RUNNING && lastNavStatus != SmaitProtocol.NAV_RUNNING) {
                             announcedThisNav = SafetyZone.CLEAR
+                            lastWarningTime = 0L  // Reset cooldown on new navigation
                         }
                         lastNavStatus = navStatus
 
                         // Only announce during active navigation
                         if (navStatus != SmaitProtocol.NAV_RUNNING) return@collect
 
-                        // Only announce if MORE severe than already announced this session
                         // Severity: CLEAR(0) < WARN(1) < CREEP(2) < STOP(3)
                         val zoneSeverity = when (zone) {
                             SafetyZone.STOP -> 3
@@ -642,14 +644,27 @@ class MainActivity : AppCompatActivity() {
                             else -> 0
                         }
 
-                        if (zoneSeverity > announcedSeverity) {
-                            announcedThisNav = zone
-                            when (zone) {
-                                SafetyZone.STOP -> speak("Stop. Obstacle too close.")
-                                SafetyZone.CREEP -> speak("Robot coming through. Make way!")
-                                SafetyZone.WARN -> speak("Warning. Obstacle detected.")
-                                else -> {}
-                            }
+                        // Skip if not more severe than already announced
+                        if (zoneSeverity <= announcedSeverity) return@collect
+
+                        // Cooldown: 3s for WARN, 2s for CREEP, 0 for STOP (always immediate)
+                        val cooldownMs = when (zone) {
+                            SafetyZone.WARN -> 3000L
+                            SafetyZone.CREEP -> 2000L
+                            else -> 0L
+                        }
+                        if (now - lastWarningTime < cooldownMs) return@collect
+
+                        // Skip WARN level entirely during active navigation - too noisy
+                        // Only CREEP and STOP matter when robot is moving/turning
+                        if (zone == SafetyZone.WARN) return@collect
+
+                        announcedThisNav = zone
+                        lastWarningTime = now
+                        when (zone) {
+                            SafetyZone.STOP -> speak("Stop. Obstacle too close.")
+                            SafetyZone.CREEP -> speak("Make way please.")
+                            else -> {}
                         }
                     }
             }
