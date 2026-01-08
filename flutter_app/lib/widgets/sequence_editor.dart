@@ -1382,6 +1382,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       'start_wp_${seq.id}_${_normalizeWaypointValue(seq.startWaypoint)}'),
                   // Convert empty string to null; ensure value exists in waypoints or use null
                   initialValue: _normalizeWaypointValue(seq.startWaypoint),
+                  isExpanded: true, // Prevent overflow on long waypoint names
                   decoration: const InputDecoration(
                     labelText: 'Start At',
                     prefixIcon: Icon(Icons.play_arrow, size: 20),
@@ -1440,6 +1441,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       'end_wp_${seq.id}_${_normalizeWaypointValue(seq.endWaypoint)}'),
                   // Convert empty string to null; ensure value exists in waypoints or use null
                   initialValue: _normalizeWaypointValue(seq.endWaypoint),
+                  isExpanded: true, // Prevent overflow on long waypoint names
                   decoration: const InputDecoration(
                     labelText: 'End At',
                     prefixIcon: Icon(Icons.stop, size: 20),
