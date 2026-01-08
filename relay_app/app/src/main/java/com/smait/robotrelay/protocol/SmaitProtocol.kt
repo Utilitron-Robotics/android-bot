@@ -33,6 +33,7 @@ object SmaitProtocol {
     const val TOPIC_CANCEL_GOAL = "/move_base/cancel"
     const val TOPIC_SOFT_STOP = "/soft_stop"
     const val TOPIC_SENSORS_CORE = "/mobile_base/sensors/core"
+    const val TOPIC_PEOPLE_DETECTED = "/people_detected"
 
     // Services
     const val SERVICE_POI = "/poi"
@@ -98,6 +99,13 @@ object SmaitProtocol {
         id = "get_sensors_core",
         topic = TOPIC_SENSORS_CORE,
         type = "kobuki_msgs/CoreSensors"
+    ))
+
+    fun subscribePeopleDetected(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_people_detected",
+        topic = TOPIC_PEOPLE_DETECTED,
+        type = "std_msgs/Bool"  // True when person detected
     ))
 
     fun subscribeMap(): String = toJson(MapSubscribeMsg(
