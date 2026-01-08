@@ -102,10 +102,11 @@ class _HomeScreenState extends State<HomeScreen> {
     _saveConnectionMode(mode);
 
     // Preserve the current URL - only update protocol/port if necessary
+    // NEVER use hardcoded default IPs! User must enter their own.
     final currentUrl = _urlController.text.trim();
     if (currentUrl.isEmpty) {
-      // Empty URL - use default for this mode
-      _urlController.text = mode.defaultUrl;
+      // Empty URL - leave empty, user must enter IP
+      // DO NOT use mode.defaultUrl (hardcoded IPs are bad!)
       return;
     }
 
@@ -113,8 +114,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final host = uri?.host ?? '';
 
     if (host.isEmpty) {
-      // Invalid URL - use default
-      _urlController.text = mode.defaultUrl;
+      // Invalid URL - leave as-is, don't replace with hardcoded
       return;
     }
 
