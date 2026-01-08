@@ -118,13 +118,8 @@ class FleetDiscovery extends ChangeNotifier {
       }
     }
 
-    // Add known Pudu bases if list is empty
-    if (_knownRobots.isEmpty) {
-      _knownRobots.addAll([
-        RobotBase(ssid: 'TY126AA003F0-005878', nickname: 'Pudu Bot 1', password: '123456789'),
-        RobotBase(ssid: 'TY126AA003F0-005993', nickname: 'Pudu Bot 2', password: '123456789'),
-      ]);
-    }
+    // No default robots - user adds their own via Fleet picker
+    // Old hardcoded defaults removed - they caused ping failures and blocked selection
 
     notifyListeners();
   }

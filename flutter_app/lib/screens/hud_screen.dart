@@ -1208,11 +1208,14 @@ class _HudScreenState extends State<HudScreen>
               width: 1, height: 32, color: Colors.grey.withValues(alpha: 0.3)),
           const SizedBox(width: 12),
 
-          // Connection status
-          _HudChip(
-            icon: Icons.check_circle,
-            label: robot.robotUrl.contains('10.42.0.1') ? 'DIRECT' : 'RELAY',
-            color: _accentSecondary,
+          // Connection status - tap to open fleet picker
+          GestureDetector(
+            onTap: () => _showFleetPicker(robot),
+            child: _HudChip(
+              icon: Icons.router,
+              label: robot.robotUrl.contains('10.42.0.1') ? 'DIRECT' : 'RELAY',
+              color: _accentSecondary,
+            ),
           ),
           const SizedBox(width: 12),
 
@@ -1382,6 +1385,13 @@ class _HudScreenState extends State<HudScreen>
             const SizedBox(width: 16),
           ],
 
+          // Fleet picker button
+          IconButton(
+            icon: const Icon(Icons.router),
+            color: _accentColor,
+            tooltip: 'Switch Robot',
+            onPressed: () => _showFleetPicker(robot),
+          ),
           // Disconnect button
           IconButton(
             icon: const Icon(Icons.power_settings_new),
@@ -2172,6 +2182,14 @@ class _HudScreenState extends State<HudScreen>
       }
     }
     robot.connect(url);
+  }
+
+  /// Open fleet picker to switch robots
+  Future<void> _showFleetPicker(RobotConnection robot) async {
+    final selected = await FleetPicker.show(context);
+    if (selected != null && mounted) {
+      robot.connect(selected.wsUrl);
+    }
   }
 
   void _detectModeFromUrl(String url) {

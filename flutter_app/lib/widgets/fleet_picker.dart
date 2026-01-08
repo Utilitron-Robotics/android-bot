@@ -709,12 +709,26 @@ class _FleetPickerState extends State<FleetPicker>
   }
 
   void _selectRobot(RobotBase robot) {
-    // Block connection to offline robots
+    // Warn but allow connection to offline robots (ping may have failed due to network)
     if (!robot.isOnline) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${robot.displayName} is offline. Power on the robot first.'),
-          backgroundColor: Colors.red,
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Robot Offline'),
+          content: Text('${robot.displayName} appears offline. Try connecting anyway?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context, robot);
+              },
+              child: const Text('Try Anyway'),
+            ),
+          ],
         ),
       );
       return;
