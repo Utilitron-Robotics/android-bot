@@ -2072,7 +2072,9 @@ class _HudScreenState extends State<HudScreen>
     // Also write to file for analysis of large lists
     _writeLogToFile('robot_parameters.txt', params.join('\n'));
 
-    for (var p in params) debugPrint(p);
+    for (var p in params) {
+      debugPrint(p);
+    }
     debugPrint('==========================================');
 
     return ListView.builder(

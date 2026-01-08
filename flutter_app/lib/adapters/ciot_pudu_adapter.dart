@@ -6,6 +6,7 @@
 /// - CIOT robots
 /// - smAiT robots
 /// - Any rosbridge-compatible service robot
+library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -15,10 +16,10 @@ import '../core/robot_connection.dart' as conn;
 
 /// Safety zones for obstacle detection (LIDAR-based)
 enum SafetyZone {
-  clear,   // > 1.5m
-  warn,    // 1.0-1.5m
-  creep,   // 0.5-1.0m
-  stop,    // < 0.5m
+  clear, // > 1.5m
+  warn, // 1.0-1.5m
+  creep, // 0.5-1.0m
+  stop, // < 0.5m
 }
 
 /// Status for CIOT/Pudu/smAiT robots
@@ -74,13 +75,14 @@ class CiotPuduStatus extends adapter.RobotStatus {
     // TODO: Get safety zone from LIDAR data when available
 
     return CiotPuduStatus(
-      connected: true,  // If we got status, we're connected
+      connected: true, // If we got status, we're connected
       navStatus: status.navStatus,
       battery: status.battery.round(),
-      x: null,  // TODO: Get from pose when available
+      x: null, // TODO: Get from pose when available
       y: null,
       theta: null,
-      currentGoalName: status.currentGoal.isNotEmpty ? status.currentGoal : null,
+      currentGoalName:
+          status.currentGoal.isNotEmpty ? status.currentGoal : null,
       hardEstop: status.hardEstop,
       softEstop: status.softEstop,
       velocity: status.velocity,
@@ -134,10 +136,10 @@ class CiotPuduAdapter extends adapter.RobotAdapter {
         mapping: true,
         battery: true,
         estop: true,
-        tts: true,      // Via Android tablet
-        display: true,   // Via Android tablet
-        camera: false,   // Future
-        arm: false,      // Some models have arms
+        tts: true, // Via Android tablet
+        display: true, // Via Android tablet
+        camera: false, // Future
+        arm: false, // Some models have arms
         lidar: true,
         ultrasonic: true,
       );
@@ -199,7 +201,7 @@ class CiotPuduAdapter extends adapter.RobotAdapter {
   @override
   Future<void> disconnect() async {
     _messageSubscription?.cancel();
-    _client.disconnect();  // disconnect() is void, not Future<void>
+    _client.disconnect(); // disconnect() is void, not Future<void>
     _status = null;
     _rosbridgeStatus = null;
     notifyListeners();
