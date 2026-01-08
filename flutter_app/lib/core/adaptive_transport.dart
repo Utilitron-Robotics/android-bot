@@ -25,10 +25,14 @@ class NetworkMetrics {
     final latencyScore = min(latency.inMilliseconds / 1000, 1.0); // 0-1 scale
     final lossScore = packetLoss; // Already 0-1
     final jitterScore = min(jitter / 100, 1.0); // Normalize to 0-1
-    final bwScore = 1.0 - min(bandwidth / 1000000, 1.0); // Inverse, normalize to 1Mbps
+    final bwScore =
+        1.0 - min(bandwidth / 1000000, 1.0); // Inverse, normalize to 1Mbps
 
     // Weighted average (latency most important for control)
-    return (latencyScore * 0.4) + (lossScore * 0.3) + (jitterScore * 0.2) + (bwScore * 0.1);
+    return (latencyScore * 0.4) +
+        (lossScore * 0.3) +
+        (jitterScore * 0.2) +
+        (bwScore * 0.1);
   }
 
   bool get isAcceptable => qualityScore < 0.7;
@@ -38,20 +42,20 @@ class NetworkMetrics {
 
 /// Adaptive quality levels
 enum QualityLevel {
-  excellent,  // Full quality, all features
-  good,       // Normal quality
+  excellent, // Full quality, all features
+  good, // Normal quality
   acceptable, // Reduced quality, disable non-essentials
-  poor,       // Minimum viable, safety only
-  critical,   // Emergency mode, stop commands only
+  poor, // Minimum viable, safety only
+  critical, // Emergency mode, stop commands only
 }
 
 /// Command priority for queue management
 enum CommandPriority {
-  emergency(0),  // E-stop, safety
-  critical(1),   // Navigation cancel
-  high(2),       // Navigation commands
-  normal(3),     // Status queries
-  low(4);        // Telemetry, logs
+  emergency(0), // E-stop, safety
+  critical(1), // Navigation cancel
+  high(2), // Navigation commands
+  normal(3), // Status queries
+  low(4); // Telemetry, logs
 
   final int value;
   const CommandPriority(this.value);
@@ -90,9 +94,8 @@ class AdaptiveTransport extends ChangeNotifier {
   Timer? _metricsTimer;
 
   // Command queue with priority
-  final PriorityQueue<AdaptiveCommand> _commandQueue = PriorityQueue(
-    (a, b) => a.priority.value.compareTo(b.priority.value)
-  );
+  final PriorityQueue<AdaptiveCommand> _commandQueue =
+      PriorityQueue((a, b) => a.priority.value.compareTo(b.priority.value));
 
   // Circuit breaker per transport
   final Map<RobotTransport, CircuitBreaker> _circuitBreakers = {};
@@ -181,7 +184,6 @@ class AdaptiveTransport extends ChangeNotifier {
           debugPrint('$_tag: Connected via ${transport.type}!');
           notifyListeners();
           return;
-
         } catch (e) {
           breaker.recordFailure();
           debugPrint('$_tag: ${transport.type} failed: $e');
@@ -194,7 +196,8 @@ class AdaptiveTransport extends ChangeNotifier {
 
     // All transports failed
     _isConnected = false;
-    debugPrint('$_tag: All transports failed! Entering resilient retry mode...');
+    debugPrint(
+        '$_tag: All transports failed! Entering resilient retry mode...');
     _startResilientRetry();
   }
 
@@ -278,7 +281,8 @@ class AdaptiveTransport extends ChangeNotifier {
 
     try {
       // Compress if needed
-      if (command.compressible && _currentQuality.index >= QualityLevel.acceptable.index) {
+      if (command.compressible &&
+          _currentQuality.index >= QualityLevel.acceptable.index) {
         command.payload['_compressed'] = true;
         // Implement actual compression here
       }
@@ -290,7 +294,6 @@ class AdaptiveTransport extends ChangeNotifier {
       _commandsSent++;
 
       return ack;
-
     } catch (e) {
       _commandsFailed++;
       _circuitBreakers[transport]?.recordFailure();
@@ -300,7 +303,7 @@ class AdaptiveTransport extends ChangeNotifier {
         return _sendImmediate(command); // Retry with new transport
       }
 
-      throw e;
+      rethrow;
     }
   }
 
@@ -351,7 +354,8 @@ class AdaptiveTransport extends ChangeNotifier {
     // Simple jitter calculation
     double jitter = 0;
     for (int i = 1; i < latencies.length; i++) {
-      jitter += (latencies[i].inMilliseconds - latencies[i-1].inMilliseconds).abs();
+      jitter +=
+          (latencies[i].inMilliseconds - latencies[i - 1].inMilliseconds).abs();
     }
     jitter = jitter / max(latencies.length - 1, 1);
 
@@ -397,7 +401,8 @@ class AdaptiveTransport extends ChangeNotifier {
       _updateMetrics(_activeTransport!);
 
       // Log stats
-      debugPrint('$_tag: Stats - Sent: $_commandsSent, Failed: $_commandsFailed, '
+      debugPrint(
+          '$_tag: Stats - Sent: $_commandsSent, Failed: $_commandsFailed, '
           'Switches: $_transportSwitches, Quality: $_currentQuality');
     });
   }
@@ -432,16 +437,16 @@ class AdaptiveTransport extends ChangeNotifier {
   }
 
   Map<String, dynamic> getStats() => {
-    'connected': _isConnected,
-    'transport': _activeTransport?.type.toString(),
-    'quality': _currentQuality.toString(),
-    'commands_sent': _commandsSent,
-    'commands_failed': _commandsFailed,
-    'transport_switches': _transportSwitches,
-    'success_rate': _commandsSent > 0
-        ? ((_commandsSent - _commandsFailed) / _commandsSent * 100).toStringAsFixed(1) + '%'
-        : 'N/A',
-  };
+        'connected': _isConnected,
+        'transport': _activeTransport?.type.toString(),
+        'quality': _currentQuality.toString(),
+        'commands_sent': _commandsSent,
+        'commands_failed': _commandsFailed,
+        'transport_switches': _transportSwitches,
+        'success_rate': _commandsSent > 0
+            ? '${((_commandsSent - _commandsFailed) / _commandsSent * 100).toStringAsFixed(1)}%'
+            : 'N/A',
+      };
 
   @override
   void dispose() {
@@ -515,17 +520,18 @@ class WebSocketTransport implements RobotTransport {
       : TransportStatus.disconnected;
 
   @override
-  Stream<TransportStatus> get statusStream => _client.connectionState.map((state) {
-    switch (state) {
-      case WsConnectionState.connecting:
-        return TransportStatus.connecting;
-      case WsConnectionState.connected:
-        return TransportStatus.connected;
-      case WsConnectionState.disconnected:
-      case WsConnectionState.reconnecting:
-        return TransportStatus.disconnected;
-    }
-  });
+  Stream<TransportStatus> get statusStream =>
+      _client.connectionState.map((state) {
+        switch (state) {
+          case WsConnectionState.connecting:
+            return TransportStatus.connecting;
+          case WsConnectionState.connected:
+            return TransportStatus.connected;
+          case WsConnectionState.disconnected:
+          case WsConnectionState.reconnecting:
+            return TransportStatus.disconnected;
+        }
+      });
 
   @override
   Stream<Map<String, dynamic>> get messages => _client.messages;

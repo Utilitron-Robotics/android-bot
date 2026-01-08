@@ -13,6 +13,7 @@
 /// - Priority-based command routing
 /// - Predictive control for high-latency scenarios
 /// - Quality-adaptive behavior
+library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -26,12 +27,12 @@ import 'predictive_control.dart';
 
 /// Unified transport capabilities
 class TransportCapabilities {
-  final bool supportsStreaming;      // Can stream status updates
-  final bool supportsBidirectional;  // Can do bidirectional streaming
-  final bool supportsVideo;          // Can handle video streams
-  final bool supportsLowLatency;     // Sub-100ms RTT capable
+  final bool supportsStreaming; // Can stream status updates
+  final bool supportsBidirectional; // Can do bidirectional streaming
+  final bool supportsVideo; // Can handle video streams
+  final bool supportsLowLatency; // Sub-100ms RTT capable
   final bool supportsReliableDelivery; // Guaranteed delivery
-  final bool supportsPubSub;         // Publish/subscribe pattern
+  final bool supportsPubSub; // Publish/subscribe pattern
 
   const TransportCapabilities({
     this.supportsStreaming = false,
@@ -118,15 +119,16 @@ class TransportEndpoints {
     String? websocketUrl,
     String? httpBaseUrl,
     String? robotId,
-  }) => TransportEndpoints(
-    grpcHost: grpcHost ?? this.grpcHost,
-    grpcPort: grpcPort ?? this.grpcPort,
-    webrtcSignalingUrl: webrtcSignalingUrl ?? this.webrtcSignalingUrl,
-    mqttBrokerUrl: mqttBrokerUrl ?? this.mqttBrokerUrl,
-    websocketUrl: websocketUrl ?? this.websocketUrl,
-    httpBaseUrl: httpBaseUrl ?? this.httpBaseUrl,
-    robotId: robotId ?? this.robotId,
-  );
+  }) =>
+      TransportEndpoints(
+        grpcHost: grpcHost ?? this.grpcHost,
+        grpcPort: grpcPort ?? this.grpcPort,
+        webrtcSignalingUrl: webrtcSignalingUrl ?? this.webrtcSignalingUrl,
+        mqttBrokerUrl: mqttBrokerUrl ?? this.mqttBrokerUrl,
+        websocketUrl: websocketUrl ?? this.websocketUrl,
+        httpBaseUrl: httpBaseUrl ?? this.httpBaseUrl,
+        robotId: robotId ?? this.robotId,
+      );
 }
 
 /// Connection status for each transport
@@ -150,7 +152,11 @@ class TransportConnectionStatus {
   });
 
   bool get hasAnyConnection =>
-      grpcConnected || webrtcConnected || mqttConnected || websocketConnected || httpReachable;
+      grpcConnected ||
+      webrtcConnected ||
+      mqttConnected ||
+      websocketConnected ||
+      httpReachable;
 
   int get connectionCount =>
       (grpcConnected ? 1 : 0) +
@@ -166,7 +172,7 @@ class UnifiedTransportManager extends ChangeNotifier {
 
   // Configuration
   final TransportConfig _config;
-  TransportEndpoints _endpoints;
+  final TransportEndpoints _endpoints;
 
   // Individual transports
   GrpcRobotClient? _grpc;
@@ -183,8 +189,10 @@ class UnifiedTransportManager extends ChangeNotifier {
   Timer? _healthCheckTimer;
 
   // Streams
-  final _statusController = StreamController<TransportConnectionStatus>.broadcast();
-  final _robotStatusController = StreamController<Map<String, dynamic>>.broadcast();
+  final _statusController =
+      StreamController<TransportConnectionStatus>.broadcast();
+  final _robotStatusController =
+      StreamController<Map<String, dynamic>>.broadcast();
   final _commandResultController = StreamController<CommandAck>.broadcast();
 
   // Callbacks
@@ -196,15 +204,16 @@ class UnifiedTransportManager extends ChangeNotifier {
   UnifiedTransportManager({
     required TransportEndpoints endpoints,
     TransportConfig? config,
-  }) : _endpoints = endpoints,
-       _config = config ?? TransportConfig.instance {
+  })  : _endpoints = endpoints,
+        _config = config ?? TransportConfig.instance {
     _predictiveController = PredictiveController(config: _config);
     _predictiveController.setCommandCallback(_sendVelocityInternal);
   }
 
   // Getters
   TransportConnectionStatus get status => _status;
-  Stream<TransportConnectionStatus> get statusStream => _statusController.stream;
+  Stream<TransportConnectionStatus> get statusStream =>
+      _statusController.stream;
   Stream<Map<String, dynamic>> get robotStatus => _robotStatusController.stream;
   Stream<CommandAck> get commandResults => _commandResultController.stream;
   bool get isConnected => _status.hasAnyConnection;
@@ -314,7 +323,7 @@ class UnifiedTransportManager extends ChangeNotifier {
     await _grpc?.disconnect();
     await _webrtc?.disconnect();
     await _mqtt?.disconnect();
-    await _adaptive?.dispose();
+    _adaptive?.dispose();
 
     _grpcStatusSub?.cancel();
     _grpcCommandSub?.cancel();
@@ -569,7 +578,8 @@ class UnifiedTransportManager extends ChangeNotifier {
       final start = DateTime.now();
       try {
         // gRPC heartbeat
-        measurements['grpc'] = DateTime.now().difference(start).inMilliseconds.toDouble();
+        measurements['grpc'] =
+            DateTime.now().difference(start).inMilliseconds.toDouble();
       } catch (e) {
         debugPrint('$_tag: gRPC health check failed: $e');
       }
@@ -577,7 +587,8 @@ class UnifiedTransportManager extends ChangeNotifier {
 
     // Update network metrics based on measurements
     if (measurements.isNotEmpty) {
-      final avgRtt = measurements.values.reduce((a, b) => a + b) / measurements.length;
+      final avgRtt =
+          measurements.values.reduce((a, b) => a + b) / measurements.length;
       _config.updateNetworkMetrics(rttMs: avgRtt, jitterMs: 0);
     }
 
@@ -660,16 +671,19 @@ class UnifiedTransportManager extends ChangeNotifier {
     return CommandAck(
       commandId: command.id,
       success: success,
-      errorMessage: success ? null : 'Emergency command failed on all transports',
+      errorMessage:
+          success ? null : 'Emergency command failed on all transports',
     );
   }
 
   Future<CommandAck> _sendViaGrpc(RobotCommand command) async {
     try {
-      await _grpc!.sendCommand(command.type, command.payload.cast<String, String>());
+      await _grpc!
+          .sendCommand(command.type, command.payload.cast<String, String>());
       return CommandAck(commandId: command.id, success: true);
     } catch (e) {
-      return CommandAck(commandId: command.id, success: false, errorMessage: e.toString());
+      return CommandAck(
+          commandId: command.id, success: false, errorMessage: e.toString());
     }
   }
 
@@ -682,7 +696,8 @@ class UnifiedTransportManager extends ChangeNotifier {
       });
       return CommandAck(commandId: command.id, success: true);
     } catch (e) {
-      return CommandAck(commandId: command.id, success: false, errorMessage: e.toString());
+      return CommandAck(
+          commandId: command.id, success: false, errorMessage: e.toString());
     }
   }
 
@@ -696,29 +711,31 @@ class UnifiedTransportManager extends ChangeNotifier {
       type: command.type,
       payload: command.payload,
     ));
-    return result ?? CommandAck(commandId: command.id, success: false, errorMessage: 'No response');
+    return result ??
+        CommandAck(
+            commandId: command.id, success: false, errorMessage: 'No response');
   }
 
   /// Get comprehensive status for debugging
   Map<String, dynamic> getDebugInfo() => {
-    'status': {
-      'grpc': _status.grpcConnected,
-      'webrtc': _status.webrtcConnected,
-      'mqtt': _status.mqttConnected,
-      'websocket': _status.websocketConnected,
-      'http': _status.httpReachable,
-      'active': _status.activeTransport,
-    },
-    'config': _config.toJson(),
-    'predictive_control': _predictiveController.getMetrics(),
-    'endpoints': {
-      'grpc': _endpoints.grpcEndpoint,
-      'webrtc_signaling': _endpoints.webrtcSignalingUrl,
-      'mqtt': _endpoints.mqttBrokerUrl,
-      'websocket': _endpoints.websocketUrl,
-      'http': _endpoints.httpBaseUrl,
-    },
-  };
+        'status': {
+          'grpc': _status.grpcConnected,
+          'webrtc': _status.webrtcConnected,
+          'mqtt': _status.mqttConnected,
+          'websocket': _status.websocketConnected,
+          'http': _status.httpReachable,
+          'active': _status.activeTransport,
+        },
+        'config': _config.toJson(),
+        'predictive_control': _predictiveController.getMetrics(),
+        'endpoints': {
+          'grpc': _endpoints.grpcEndpoint,
+          'webrtc_signaling': _endpoints.webrtcSignalingUrl,
+          'mqtt': _endpoints.mqttBrokerUrl,
+          'websocket': _endpoints.websocketUrl,
+          'http': _endpoints.httpBaseUrl,
+        },
+      };
 
   @override
   void dispose() {

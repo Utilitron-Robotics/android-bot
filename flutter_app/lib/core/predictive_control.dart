@@ -5,6 +5,7 @@
 /// - Pre-sending commands based on predicted trajectory
 /// - Smoothing control inputs to hide latency from user
 /// - Dead reckoning during feedback gaps
+library;
 
 import 'dart:async';
 import 'dart:math';
@@ -37,14 +38,15 @@ class RobotState {
     double? linearVelocity,
     double? angularVelocity,
     DateTime? timestamp,
-  }) => RobotState(
-    x: x ?? this.x,
-    y: y ?? this.y,
-    theta: theta ?? this.theta,
-    linearVelocity: linearVelocity ?? this.linearVelocity,
-    angularVelocity: angularVelocity ?? this.angularVelocity,
-    timestamp: timestamp ?? this.timestamp,
-  );
+  }) =>
+      RobotState(
+        x: x ?? this.x,
+        y: y ?? this.y,
+        theta: theta ?? this.theta,
+        linearVelocity: linearVelocity ?? this.linearVelocity,
+        angularVelocity: angularVelocity ?? this.angularVelocity,
+        timestamp: timestamp ?? this.timestamp,
+      );
 
   /// Predict state after dt milliseconds using kinematics
   RobotState predictAfter(Duration dt) {
@@ -67,28 +69,32 @@ class RobotState {
   }
 
   Map<String, dynamic> toJson() => {
-    'x': x,
-    'y': y,
-    'theta': theta,
-    'linear_velocity': linearVelocity,
-    'angular_velocity': angularVelocity,
-    'timestamp': timestamp.millisecondsSinceEpoch,
-  };
+        'x': x,
+        'y': y,
+        'theta': theta,
+        'linear_velocity': linearVelocity,
+        'angular_velocity': angularVelocity,
+        'timestamp': timestamp.millisecondsSinceEpoch,
+      };
 
   factory RobotState.fromJson(Map<String, dynamic> json) => RobotState(
-    x: (json['x'] as num?)?.toDouble() ?? 0,
-    y: (json['y'] as num?)?.toDouble() ?? 0,
-    theta: (json['theta'] as num?)?.toDouble() ?? 0,
-    linearVelocity: (json['linear_velocity'] as num?)?.toDouble() ?? 0,
-    angularVelocity: (json['angular_velocity'] as num?)?.toDouble() ?? 0,
-    timestamp: json['timestamp'] != null
-        ? DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int)
-        : null,
-  );
+        x: (json['x'] as num?)?.toDouble() ?? 0,
+        y: (json['y'] as num?)?.toDouble() ?? 0,
+        theta: (json['theta'] as num?)?.toDouble() ?? 0,
+        linearVelocity: (json['linear_velocity'] as num?)?.toDouble() ?? 0,
+        angularVelocity: (json['angular_velocity'] as num?)?.toDouble() ?? 0,
+        timestamp: json['timestamp'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(json['timestamp'] as int)
+            : null,
+      );
 
   static RobotState get zero => RobotState(
-    x: 0, y: 0, theta: 0, linearVelocity: 0, angularVelocity: 0,
-  );
+        x: 0,
+        y: 0,
+        theta: 0,
+        linearVelocity: 0,
+        angularVelocity: 0,
+      );
 }
 
 /// Command with timestamp for replay/prediction
@@ -223,12 +229,16 @@ class PredictiveController extends ChangeNotifier {
   /// Apply velocity with smoothing and send command
   void applyVelocity() {
     // Smooth the velocity transition
-    _smoothedLinear = _smoothedLinear + (_targetLinear - _smoothedLinear) * _smoothingFactor;
-    _smoothedAngular = _smoothedAngular + (_targetAngular - _smoothedAngular) * _smoothingFactor;
+    _smoothedLinear =
+        _smoothedLinear + (_targetLinear - _smoothedLinear) * _smoothingFactor;
+    _smoothedAngular = _smoothedAngular +
+        (_targetAngular - _smoothedAngular) * _smoothingFactor;
 
     // Deadband to prevent drift
-    final effectiveLinear = _smoothedLinear.abs() < 0.01 ? 0.0 : _smoothedLinear;
-    final effectiveAngular = _smoothedAngular.abs() < 0.01 ? 0.0 : _smoothedAngular;
+    final effectiveLinear =
+        _smoothedLinear.abs() < 0.01 ? 0.0 : _smoothedLinear;
+    final effectiveAngular =
+        _smoothedAngular.abs() < 0.01 ? 0.0 : _smoothedAngular;
 
     // Record command
     final cmd = TimestampedCommand(
@@ -278,7 +288,8 @@ class PredictiveController extends ChangeNotifier {
       _predictedState = _lastKnownState.predictAfter(predictionHorizon);
     } else {
       // Dead reckoning - predict based on last known state
-      _predictedState = _predictedState.predictAfter(const Duration(milliseconds: 16));
+      _predictedState =
+          _predictedState.predictAfter(const Duration(milliseconds: 16));
     }
 
     _predictedStateController.add(_predictedState);
@@ -293,7 +304,8 @@ class PredictiveController extends ChangeNotifier {
     final positionError = sqrt(errorX * errorX + errorY * errorY);
 
     // If error is small, smoothly correct
-    if (positionError < 0.5) { // 0.5 meters
+    if (positionError < 0.5) {
+      // 0.5 meters
       // Blend prediction with actual
       const blendFactor = 0.5;
       _predictedState = RobotState(
@@ -305,7 +317,8 @@ class PredictiveController extends ChangeNotifier {
       );
     } else {
       // Large error - snap to actual (prediction was wrong)
-      debugPrint('$_tag: Large prediction error (${positionError.toStringAsFixed(2)}m) - resetting');
+      debugPrint(
+          '$_tag: Large prediction error (${positionError.toStringAsFixed(2)}m) - resetting');
       _predictedState = actual;
     }
 
@@ -316,19 +329,23 @@ class PredictiveController extends ChangeNotifier {
   /// Replay commands sent after a timestamp
   void _replayCommandsSince(DateTime since) {
     // Get commands that were sent after the state timestamp
-    final pendingCommands = _commandHistory.where(
-      (cmd) => cmd.timestamp.isAfter(since),
-    ).toList();
+    final pendingCommands = _commandHistory
+        .where(
+          (cmd) => cmd.timestamp.isAfter(since),
+        )
+        .toList();
 
     // Apply each command's effect on prediction
     for (final cmd in pendingCommands) {
       final cmdAge = DateTime.now().difference(cmd.timestamp);
       final effect = Duration(milliseconds: min(cmdAge.inMilliseconds, 100));
 
-      _predictedState = _predictedState.copyWith(
-        linearVelocity: cmd.linear,
-        angularVelocity: cmd.angular,
-      ).predictAfter(effect);
+      _predictedState = _predictedState
+          .copyWith(
+            linearVelocity: cmd.linear,
+            angularVelocity: cmd.angular,
+          )
+          .predictAfter(effect);
     }
   }
 

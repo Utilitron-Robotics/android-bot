@@ -7,14 +7,15 @@
 /// - Predictive control for high-latency
 /// - Circuit breaker patterns
 /// - Priority queue command handling
+library;
 
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/core/adaptive_transport.dart';
-import '../lib/core/transport_config.dart';
-import '../lib/core/robot_transport.dart';
-import '../lib/core/predictive_control.dart';
-import '../lib/core/mqtt_transport.dart';
+import 'package:droid_controller/core/adaptive_transport.dart';
+import 'package:droid_controller/core/transport_config.dart';
+import 'package:droid_controller/core/robot_transport.dart';
+import 'package:droid_controller/core/predictive_control.dart';
+import 'package:droid_controller/core/mqtt_transport.dart';
 
 // ============================================================
 // MOCK TRANSPORTS FOR TESTING
@@ -154,12 +155,14 @@ void main() {
       // Excellent network
       config.updateNetworkMetrics(rttMs: 30, jitterMs: 5);
       expect(config.currentCondition, equals(NetworkCondition.excellent));
-      expect(config.velocitySendInterval, equals(const Duration(milliseconds: 50)));
+      expect(config.velocitySendInterval,
+          equals(const Duration(milliseconds: 50)));
 
       // Poor network
       config.updateNetworkMetrics(rttMs: 400, jitterMs: 80);
       expect(config.currentCondition, equals(NetworkCondition.poor));
-      expect(config.velocitySendInterval, equals(const Duration(milliseconds: 200)));
+      expect(config.velocitySendInterval,
+          equals(const Duration(milliseconds: 200)));
 
       // Reset to defaults
       config.resetToDefaults();
@@ -325,7 +328,8 @@ void main() {
 
       final predicted = state.predictAfter(const Duration(seconds: 1));
 
-      expect(predicted.theta, closeTo(3.14159, 0.01)); // Should have rotated ~180°
+      expect(
+          predicted.theta, closeTo(3.14159, 0.01)); // Should have rotated ~180°
     });
 
     test('should smooth velocity transitions', () {
@@ -355,9 +359,12 @@ void main() {
       final filter = LatencyCompensationFilter(windowSize: 3);
 
       // Add jittery samples
-      filter.filter(RobotState(x: 1.0, y: 0, theta: 0, linearVelocity: 0, angularVelocity: 0));
-      filter.filter(RobotState(x: 1.2, y: 0, theta: 0, linearVelocity: 0, angularVelocity: 0));
-      final smoothed = filter.filter(RobotState(x: 0.9, y: 0, theta: 0, linearVelocity: 0, angularVelocity: 0));
+      filter.filter(RobotState(
+          x: 1.0, y: 0, theta: 0, linearVelocity: 0, angularVelocity: 0));
+      filter.filter(RobotState(
+          x: 1.2, y: 0, theta: 0, linearVelocity: 0, angularVelocity: 0));
+      final smoothed = filter.filter(RobotState(
+          x: 0.9, y: 0, theta: 0, linearVelocity: 0, angularVelocity: 0));
 
       // Should be average of 1.0, 1.2, 0.9 = 1.033
       expect(smoothed.x, closeTo(1.033, 0.01));
@@ -532,7 +539,9 @@ class NetworkConditionSimulator {
 
   Future<void> apply() async {
     // Simulate latency + jitter
-    final jitter = (DateTime.now().millisecondsSinceEpoch % (jitterMs * 2).toInt()) - jitterMs;
+    final jitter =
+        (DateTime.now().millisecondsSinceEpoch % (jitterMs * 2).toInt()) -
+            jitterMs;
     final totalLatency = Duration(
       milliseconds: baseLatency.inMilliseconds + jitter.toInt(),
     );
@@ -548,26 +557,26 @@ class NetworkConditionSimulator {
   }
 
   static NetworkConditionSimulator excellent() => NetworkConditionSimulator(
-    baseLatency: const Duration(milliseconds: 10),
-    jitterMs: 2,
-    packetLoss: 0,
-  );
+        baseLatency: const Duration(milliseconds: 10),
+        jitterMs: 2,
+        packetLoss: 0,
+      );
 
   static NetworkConditionSimulator good() => NetworkConditionSimulator(
-    baseLatency: const Duration(milliseconds: 50),
-    jitterMs: 10,
-    packetLoss: 0.01,
-  );
+        baseLatency: const Duration(milliseconds: 50),
+        jitterMs: 10,
+        packetLoss: 0.01,
+      );
 
   static NetworkConditionSimulator poor() => NetworkConditionSimulator(
-    baseLatency: const Duration(milliseconds: 200),
-    jitterMs: 50,
-    packetLoss: 0.05,
-  );
+        baseLatency: const Duration(milliseconds: 200),
+        jitterMs: 50,
+        packetLoss: 0.05,
+      );
 
   static NetworkConditionSimulator terrible() => NetworkConditionSimulator(
-    baseLatency: const Duration(milliseconds: 500),
-    jitterMs: 150,
-    packetLoss: 0.15,
-  );
+        baseLatency: const Duration(milliseconds: 500),
+        jitterMs: 150,
+        packetLoss: 0.15,
+      );
 }

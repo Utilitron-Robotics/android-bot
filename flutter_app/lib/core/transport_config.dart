@@ -2,6 +2,7 @@
 ///
 /// All timing values are configurable and adaptive based on network conditions.
 /// This replaces scattered hardcoded values throughout the codebase.
+library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -9,20 +10,20 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Network condition classification
 enum NetworkCondition {
-  excellent,  // RTT < 50ms, jitter < 10ms
-  good,       // RTT < 150ms, jitter < 30ms
-  fair,       // RTT < 300ms, jitter < 50ms
-  poor,       // RTT < 500ms, jitter < 100ms
-  critical,   // RTT >= 500ms or high packet loss
+  excellent, // RTT < 50ms, jitter < 10ms
+  good, // RTT < 150ms, jitter < 30ms
+  fair, // RTT < 300ms, jitter < 50ms
+  poor, // RTT < 500ms, jitter < 100ms
+  critical, // RTT >= 500ms or high packet loss
 }
 
 /// Transport type for adaptive selection
 enum AdaptiveTransportType {
-  grpc,       // Primary WAN transport - binary, bidirectional streaming
-  webrtc,     // Low-latency video + data channels
-  websocket,  // LAN fallback - rosbridge compatible
-  http,       // Absolute fallback - request/response only
-  mqtt,       // Pub/sub for event-driven updates
+  grpc, // Primary WAN transport - binary, bidirectional streaming
+  webrtc, // Low-latency video + data channels
+  websocket, // LAN fallback - rosbridge compatible
+  http, // Absolute fallback - request/response only
+  mqtt, // Pub/sub for event-driven updates
 }
 
 /// Centralized transport configuration
@@ -154,7 +155,8 @@ class TransportConfig extends ChangeNotifier {
         break;
     }
 
-    debugPrint('TransportConfig: Adapted to $_currentCondition (RTT: ${_currentRtt}ms, Jitter: ${_currentJitter}ms)');
+    debugPrint(
+        'TransportConfig: Adapted to $_currentCondition (RTT: ${_currentRtt}ms, Jitter: ${_currentJitter}ms)');
   }
 
   /// Get recommended transport for current conditions
@@ -171,8 +173,9 @@ class TransportConfig extends ChangeNotifier {
 
   /// Check if predictive control should be enabled
   bool get shouldUsePredictiveControl {
-    return _currentRtt > 100 || _currentCondition == NetworkCondition.poor ||
-           _currentCondition == NetworkCondition.critical;
+    return _currentRtt > 100 ||
+        _currentCondition == NetworkCondition.poor ||
+        _currentCondition == NetworkCondition.critical;
   }
 
   /// Get prediction horizon based on RTT
@@ -224,13 +227,18 @@ class TransportConfig extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      await prefs.setInt('grpc_keepalive_ms', grpcKeepaliveInterval.inMilliseconds);
-      await prefs.setInt('grpc_keepalive_timeout_ms', grpcKeepaliveTimeout.inMilliseconds);
+      await prefs.setInt(
+          'grpc_keepalive_ms', grpcKeepaliveInterval.inMilliseconds);
+      await prefs.setInt(
+          'grpc_keepalive_timeout_ms', grpcKeepaliveTimeout.inMilliseconds);
       await prefs.setInt('min_reconnect_ms', minReconnectDelay.inMilliseconds);
       await prefs.setInt('max_reconnect_ms', maxReconnectDelay.inMilliseconds);
-      await prefs.setInt('heartbeat_interval_ms', heartbeatInterval.inMilliseconds);
-      await prefs.setInt('fleet_sync_interval_ms', fleetSyncInterval.inMilliseconds);
-      await prefs.setInt('obstacle_cooldown_ms', obstacleAnnounceCooldown.inMilliseconds);
+      await prefs.setInt(
+          'heartbeat_interval_ms', heartbeatInterval.inMilliseconds);
+      await prefs.setInt(
+          'fleet_sync_interval_ms', fleetSyncInterval.inMilliseconds);
+      await prefs.setInt(
+          'obstacle_cooldown_ms', obstacleAnnounceCooldown.inMilliseconds);
 
       debugPrint('TransportConfig: Saved to preferences');
     } catch (e) {
@@ -268,53 +276,61 @@ class TransportConfig extends ChangeNotifier {
 
   /// Export configuration as JSON
   Map<String, dynamic> toJson() => {
-    'grpc_keepalive_ms': grpcKeepaliveInterval.inMilliseconds,
-    'grpc_keepalive_timeout_ms': grpcKeepaliveTimeout.inMilliseconds,
-    'grpc_connection_timeout_ms': grpcConnectionTimeout.inMilliseconds,
-    'grpc_idle_timeout_ms': grpcIdleTimeout.inMilliseconds,
-    'min_reconnect_ms': minReconnectDelay.inMilliseconds,
-    'max_reconnect_ms': maxReconnectDelay.inMilliseconds,
-    'reconnect_backoff_multiplier': reconnectBackoffMultiplier,
-    'max_reconnect_attempts': maxReconnectAttempts,
-    'ws_ping_interval_ms': wsPingInterval.inMilliseconds,
-    'ws_connection_timeout_ms': wsConnectionTimeout.inMilliseconds,
-    'heartbeat_interval_ms': heartbeatInterval.inMilliseconds,
-    'heartbeat_timeout_ms': heartbeatTimeout.inMilliseconds,
-    'http_poll_interval_ms': httpPollInterval.inMilliseconds,
-    'fleet_sync_interval_ms': fleetSyncInterval.inMilliseconds,
-    'obstacle_cooldown_ms': obstacleAnnounceCooldown.inMilliseconds,
-    'velocity_send_interval_ms': velocitySendInterval.inMilliseconds,
-    'network_condition': _currentCondition.name,
-    'current_rtt_ms': _currentRtt,
-    'current_jitter_ms': _currentJitter,
-    'packet_loss_percent': _packetLoss,
-  };
+        'grpc_keepalive_ms': grpcKeepaliveInterval.inMilliseconds,
+        'grpc_keepalive_timeout_ms': grpcKeepaliveTimeout.inMilliseconds,
+        'grpc_connection_timeout_ms': grpcConnectionTimeout.inMilliseconds,
+        'grpc_idle_timeout_ms': grpcIdleTimeout.inMilliseconds,
+        'min_reconnect_ms': minReconnectDelay.inMilliseconds,
+        'max_reconnect_ms': maxReconnectDelay.inMilliseconds,
+        'reconnect_backoff_multiplier': reconnectBackoffMultiplier,
+        'max_reconnect_attempts': maxReconnectAttempts,
+        'ws_ping_interval_ms': wsPingInterval.inMilliseconds,
+        'ws_connection_timeout_ms': wsConnectionTimeout.inMilliseconds,
+        'heartbeat_interval_ms': heartbeatInterval.inMilliseconds,
+        'heartbeat_timeout_ms': heartbeatTimeout.inMilliseconds,
+        'http_poll_interval_ms': httpPollInterval.inMilliseconds,
+        'fleet_sync_interval_ms': fleetSyncInterval.inMilliseconds,
+        'obstacle_cooldown_ms': obstacleAnnounceCooldown.inMilliseconds,
+        'velocity_send_interval_ms': velocitySendInterval.inMilliseconds,
+        'network_condition': _currentCondition.name,
+        'current_rtt_ms': _currentRtt,
+        'current_jitter_ms': _currentJitter,
+        'packet_loss_percent': _packetLoss,
+      };
 
   /// Import configuration from JSON
   void fromJson(Map<String, dynamic> json) {
     if (json['grpc_keepalive_ms'] != null) {
-      grpcKeepaliveInterval = Duration(milliseconds: json['grpc_keepalive_ms'] as int);
+      grpcKeepaliveInterval =
+          Duration(milliseconds: json['grpc_keepalive_ms'] as int);
     }
     if (json['grpc_keepalive_timeout_ms'] != null) {
-      grpcKeepaliveTimeout = Duration(milliseconds: json['grpc_keepalive_timeout_ms'] as int);
+      grpcKeepaliveTimeout =
+          Duration(milliseconds: json['grpc_keepalive_timeout_ms'] as int);
     }
     if (json['min_reconnect_ms'] != null) {
-      minReconnectDelay = Duration(milliseconds: json['min_reconnect_ms'] as int);
+      minReconnectDelay =
+          Duration(milliseconds: json['min_reconnect_ms'] as int);
     }
     if (json['max_reconnect_ms'] != null) {
-      maxReconnectDelay = Duration(milliseconds: json['max_reconnect_ms'] as int);
+      maxReconnectDelay =
+          Duration(milliseconds: json['max_reconnect_ms'] as int);
     }
     if (json['heartbeat_interval_ms'] != null) {
-      heartbeatInterval = Duration(milliseconds: json['heartbeat_interval_ms'] as int);
+      heartbeatInterval =
+          Duration(milliseconds: json['heartbeat_interval_ms'] as int);
     }
     if (json['fleet_sync_interval_ms'] != null) {
-      fleetSyncInterval = Duration(milliseconds: json['fleet_sync_interval_ms'] as int);
+      fleetSyncInterval =
+          Duration(milliseconds: json['fleet_sync_interval_ms'] as int);
     }
     if (json['obstacle_cooldown_ms'] != null) {
-      obstacleAnnounceCooldown = Duration(milliseconds: json['obstacle_cooldown_ms'] as int);
+      obstacleAnnounceCooldown =
+          Duration(milliseconds: json['obstacle_cooldown_ms'] as int);
     }
     if (json['velocity_send_interval_ms'] != null) {
-      velocitySendInterval = Duration(milliseconds: json['velocity_send_interval_ms'] as int);
+      velocitySendInterval =
+          Duration(milliseconds: json['velocity_send_interval_ms'] as int);
     }
     notifyListeners();
   }
