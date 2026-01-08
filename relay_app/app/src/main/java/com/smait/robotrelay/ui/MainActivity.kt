@@ -239,18 +239,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private val triggerStartTourReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            Log.i(TAG, ">>> triggerStartTourReceiver: Remotely triggering START TOUR button")
-            // Simulate button click - call same logic as physical button press
-            service?.notifyTourStarted(currentMotionSequenceId ?: standbySequenceId ?: "")
-            // Hide motion overlay
-            binding.motionOverlay.visibility = View.GONE
-            // Engage tour mode lock screen
-            service?.startTourMode(null)
-        }
-    }
-
     private val tourStandbyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             standbySequenceId = intent?.getStringExtra(RelayService.EXTRA_TOUR_SEQUENCE_ID)
@@ -382,7 +370,6 @@ class MainActivity : AppCompatActivity() {
         localBroadcastManager.registerReceiver(countdownReceiver, IntentFilter(RelayService.ACTION_COUNTDOWN))
         localBroadcastManager.registerReceiver(tourModeReceiver, IntentFilter(RelayService.ACTION_TOUR_MODE))
         localBroadcastManager.registerReceiver(tourStandbyReceiver, IntentFilter(RelayService.ACTION_TOUR_STANDBY))
-        localBroadcastManager.registerReceiver(triggerStartTourReceiver, IntentFilter(RelayService.ACTION_TRIGGER_START_TOUR))
     }
 
     override fun onStop() {
@@ -396,7 +383,6 @@ class MainActivity : AppCompatActivity() {
         localBroadcastManager.unregisterReceiver(countdownReceiver)
         localBroadcastManager.unregisterReceiver(tourModeReceiver)
         localBroadcastManager.unregisterReceiver(tourStandbyReceiver)
-        localBroadcastManager.unregisterReceiver(triggerStartTourReceiver)
     }
 
 

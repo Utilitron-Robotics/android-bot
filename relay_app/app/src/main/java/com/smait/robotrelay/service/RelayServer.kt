@@ -46,7 +46,6 @@ class RelayServer(
         fun startTourMode(pin: String?)
         fun stopTourMode()
         fun notifyTourStandby(sequenceId: String, buttonText: String)
-        fun triggerStartTourButton()
     }
     companion object {
         private const val TAG = "RelayServer"
@@ -826,11 +825,6 @@ class RelayWebSocketServer(
                     "tablet_tour_stop" -> {
                         Log.i(TAG, "Tablet tour stop")
                         taskExecutor?.stopTourMode()
-                        return
-                    }
-                    "tablet_trigger_start" -> {
-                        Log.i(TAG, "Tablet trigger start - remotely pressing START TOUR button")
-                        taskExecutor?.triggerStartTourButton()
                         return
                     }
                     // Handle rosbridge ping - respond with pong to keep connection alive
