@@ -91,25 +91,37 @@ class _MapViewState extends State<MapView> {
     // Convert ws://host:port to http://host:(port-1) for HTTP API
     // WS is on 8766, HTTP is on 8765
     final robot = _robot;
-    if (robot == null) return;
+    if (robot == null) {
+      debugPrint('MapView: _updateHttpBaseUrl - robot is null!');
+      return;
+    }
 
-    // Get the URL from the connection
+    // Get the URL from the ACTUAL connection, not saved prefs
+    // This ensures we use the robot we're CURRENTLY connected to
     final wsUrl = robot.robotUrl;
+    debugPrint('MapView: _updateHttpBaseUrl - robot.robotUrl = $wsUrl');
+
     if (wsUrl.isNotEmpty) {
       try {
         final uri = Uri.parse(wsUrl);
         // If connecting to relay WS (8766), HTTP is on 8765
         // If connecting direct to robot (9090), no HTTP map endpoint available
         if (uri.port == 8766) {
-          _httpBaseUrl = 'http://${uri.host}:8765';
+          final newUrl = 'http://${uri.host}:8765';
+          if (newUrl != _httpBaseUrl) {
+            debugPrint('MapView: HTTP base URL changed: $_httpBaseUrl -> $newUrl');
+          }
+          _httpBaseUrl = newUrl;
           debugPrint('MapView: HTTP base URL: $_httpBaseUrl');
         } else {
-          debugPrint('MapView: Direct robot connection, HTTP map not available');
+          debugPrint('MapView: Direct robot connection (port ${uri.port}), HTTP map not available');
           _httpBaseUrl = null;
         }
       } catch (e) {
         debugPrint('MapView: Failed to parse WS URL: $e');
       }
+    } else {
+      debugPrint('MapView: _updateHttpBaseUrl - wsUrl is empty!');
     }
   }
 
@@ -121,6 +133,8 @@ class _MapViewState extends State<MapView> {
 
     if (isNowConnected && !wasConnected) {
       debugPrint('MapView: Connection restored, resubscribing to map');
+      // CRITICAL: Update HTTP URL in case robot URL changed!
+      _updateHttpBaseUrl();
       _startMapPolling();
       _subscribeToPose();
     }
