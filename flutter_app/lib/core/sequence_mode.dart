@@ -1340,6 +1340,11 @@ class SequenceManager extends ChangeNotifier {
   }
 
   /// Execute actions at current stop - properly sequenced to avoid race conditions
+  ///
+  /// DEPRECATED: This method uses hardcoded TTS duration estimates.
+  /// It should NOT be reached in normal operation - SequenceTaskMode or
+  /// BufferSequenceExecutor should handle all arrivals. If you see this
+  /// warning in logs, investigate why the executor is not active.
   Future<void> _executeStopActions() async {
     final stop = currentStop;
     if (stop == null) {
@@ -1347,6 +1352,9 @@ class SequenceManager extends ChangeNotifier {
       return;
     }
 
+    // WARNING: This is legacy code path - should not be reached!
+    debugPrint('⚠️ WARNING: SequenceManager._executeStopActions called directly!');
+    debugPrint('⚠️ This uses hardcoded TTS duration guessing - investigate why executor is not active');
     debugPrint('SequenceManager: Executing actions at ${stop.waypoint}');
     debugPrint(
         '  - speakText: ${stop.speakText?.substring(0, (stop.speakText?.length ?? 0).clamp(0, 50))}...');
