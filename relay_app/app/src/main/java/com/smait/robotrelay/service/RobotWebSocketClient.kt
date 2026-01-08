@@ -65,6 +65,10 @@ class RobotWebSocketClient(
     private val _robotStatus = MutableStateFlow<RobotStatusData?>(null)
     val robotStatus: StateFlow<RobotStatusData?> = _robotStatus
 
+    // People detection from /people_detected topic
+    private val _peopleDetected = MutableStateFlow(false)
+    val peopleDetected: StateFlow<Boolean> = _peopleDetected
+
     private val safetyZone = AtomicReference(SafetyZone.CLEAR)
 
     // Obstacle classifier for intelligent crowd handling
@@ -176,6 +180,7 @@ class RobotWebSocketClient(
         send(SmaitProtocol.subscribeSensorsCore())
         send(SmaitProtocol.subscribeLaserData())
         send(SmaitProtocol.subscribeGlobalPath())  // For obstacle path intersection
+        send(SmaitProtocol.subscribePeopleDetected())  // For human motion detection
         // Subscribe to /map so it's always flowing to Flutter clients
         // This ensures map works after Flutter hot restart
         val mapSubMsg = SmaitProtocol.subscribeMapSimple()
@@ -366,6 +371,14 @@ class RobotWebSocketClient(
                     if (px != null && py != null && px.size == py.size) {
                         val pathPoints = px.zip(py).map { (x, y) -> Point2D(x, y) }
                         obstacleClassifier?.updateGlobalPath(pathPoints)
+                    }
+                }
+                SmaitProtocol.TOPIC_PEOPLE_DETECTED -> {
+                    // Robot's built-in people detection
+                    val detected = msg.get("data")?.asBoolean ?: false
+                    if (detected != _peopleDetected.value) {
+                        Log.i(TAG, "People detection changed: $detected")
+                        _peopleDetected.value = detected
                     }
                 }
             }

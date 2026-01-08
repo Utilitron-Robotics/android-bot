@@ -613,14 +613,34 @@ class CommandBuffer(
             }
 
             "motion_standby" -> {
+                // Motion detection: wait for person → greet → AUTO-START (no button!)
                 val greeting = cmd.data["greeting"] as? String ?: "Hello! Would you like a tour?"
                 val sequenceId = cmd.data["sequence_id"] as? String ?: ""
-                val buttonText = cmd.data["button_text"] as? String ?: "Start Tour"
                 val pin = cmd.data["pin"] as? String
+                val displayUrl = cmd.data["display_url"] as? String
 
-                Log.i(TAG, "Entering motion standby for sequence: $sequenceId, button: $buttonText")
+                Log.i(TAG, "Entering motion standby for sequence: $sequenceId - waiting for person...")
 
-                // Speak the greeting - await TTS completion (no guessing!)
+                // Show standby display if provided
+                if (displayUrl != null && displayUrl.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        taskExecutor?.showDisplay(displayUrl, 0)
+                    }
+                }
+
+                // Wait for person detected from /people_detected
+                while (currentCommand != null && !robotClient.peopleDetected.value) {
+                    delay(200)
+                }
+
+                if (currentCommand == null) {
+                    Log.i(TAG, "Motion standby cancelled")
+                    return@launch
+                }
+
+                Log.i(TAG, "Person detected! Speaking greeting...")
+
+                // Speak greeting
                 val ttsComplete = CompletableDeferred<Unit>()
                 withContext(Dispatchers.Main) {
                     taskExecutor?.speakText(greeting) {
@@ -629,20 +649,13 @@ class CommandBuffer(
                 }
                 ttsComplete.await()
 
-                // Activate tour mode to lock the screen AFTER greeting finishes
+                // Lock screen and auto-start tour
                 withContext(Dispatchers.Main) {
                     taskExecutor?.startTourMode(pin)
-                    // Notify UI to show the "Start Tour" button on the lock screen
-                    taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }
 
-                // Wait indefinitely until the command is completed by a button press or skipped
-                while (currentCommand != null) {
-                    delay(500)
-                }
-
-                // Command was completed externally (e.g., button press, skip, clear)
-                Log.i(TAG, "Exiting motion standby for sequence: $sequenceId")
+                Log.i(TAG, "Motion detected - auto-starting tour: $sequenceId")
+                completeCommand(cmd.id, "success")
             }
 
             "button_standby" -> {
