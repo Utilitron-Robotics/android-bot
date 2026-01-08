@@ -315,6 +315,16 @@ class CommandBuffer(
                 recoveryAttempts = 0
                 triggerRecovery = false
 
+                // Check if navigating to/from charger - be less paranoid about obstacles
+                val isChargingRelated = waypoint.contains("Pile", ignoreCase = true) ||
+                                       waypoint.contains("Charger", ignoreCase = true) ||
+                                       waypoint.contains("Dock", ignoreCase = true) ||
+                                       waypoint.contains("Charging", ignoreCase = true)
+
+                if (isChargingRelated) {
+                    Log.i(TAG, "Navigating to/from charger '$waypoint' - obstacle recovery disabled")
+                }
+
                 robotClient.navigateToPoi(waypoint)
                 navArrivalPending = false
 
@@ -374,7 +384,12 @@ class CommandBuffer(
                     val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP
 
                     // Smart recovery: push but if not moving, stop pushing and try something else
-                    val shouldRecover = triggerRecovery || (stuckTime > recoveryConfig.stuckThresholdMs && isBlocked)
+                    // BUT: Skip recovery when dealing with charger (it's supposed to be tight!)
+                    val shouldRecover = if (isChargingRelated) {
+                        false  // Never recover when docking/undocking
+                    } else {
+                        triggerRecovery || (stuckTime > recoveryConfig.stuckThresholdMs && isBlocked)
+                    }
 
                     if (shouldRecover && recoveryAttempts < recoveryConfig.maxRecoveryAttempts) {
                         val wasTriggeredBy604 = triggerRecovery
