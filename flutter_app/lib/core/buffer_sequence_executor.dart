@@ -561,17 +561,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     // Intro text (spoken at start position)
+    // Relay awaits TTS completion via callback - no more guessing duration!
     if (startIndex == 0 &&
         sequence.introText != null &&
         sequence.introText!.isNotEmpty) {
       commands.add(BufferCommand.speak(sequence.introText!));
-      // Add dynamic wait based on intro text length to prevent overlap with arrival announcement
-      // Estimate: ~150 words per minute = ~2.5 words per second
-      // Add 1 second buffer for speech processing
-      final wordCount = sequence.introText!.split(' ').length;
-      final waitMs = ((wordCount / 2.5) * 1000).round() + 1000; // +1s buffer
-      commands.add(BufferCommand.wait(waitMs));
-      debugPrint('BufferSequenceExecutor: Intro text has $wordCount words, waiting ${waitMs}ms after speech');
+      debugPrint('BufferSequenceExecutor: Intro text queued (TTS awaits completion, no wait needed)');
     }
 
     // Each stop
