@@ -323,6 +323,9 @@ class CommandBuffer(
 
                 if (isChargingRelated) {
                     Log.i(TAG, "Navigating to/from charger '$waypoint' - obstacle recovery disabled")
+                    // Also increase tolerance for "arrival" detection near charger
+                    // Robot WILL bump/push against charger contacts - the tongs snap in!
+                    // This is EXPECTED behavior, not a collision
                 }
 
                 robotClient.navigateToPoi(waypoint)
@@ -346,14 +349,18 @@ class CommandBuffer(
 
                     // If 603 received, verify robot has actually stopped before completing
                     if (navArrivalPending) {
-                        if (kotlin.math.abs(velocity) < 0.05) {
-                            // Robot velocity ~0
+                        // Special case for charger - be more lenient with "arrival" detection
+                        val arrivalVelocityThreshold = if (isChargingRelated) 0.1 else 0.05
+                        val arrivalConfirmTime = if (isChargingRelated) 300L else 500L
+
+                        if (kotlin.math.abs(velocity) < arrivalVelocityThreshold) {
+                            // Robot velocity ~0 (or close enough for charger)
                             if (stoppedSince == null) {
                                 stoppedSince = System.currentTimeMillis()
                                 Log.i(TAG, "Robot stopped after arrival report, waiting to confirm...")
-                            } else if (System.currentTimeMillis() - stoppedSince > 500) {
-                                // Stopped for 500ms - actually arrived
-                                Log.i(TAG, "Confirmed arrival at $waypoint (stopped for 500ms)")
+                            } else if (System.currentTimeMillis() - stoppedSince > arrivalConfirmTime) {
+                                // Stopped for sufficient time - actually arrived
+                                Log.i(TAG, "Confirmed arrival at $waypoint (stopped for ${arrivalConfirmTime}ms)")
                                 waitingForNavArrival = false
                                 navArrivalPending = false
                                 pendingNavWaypoint = null

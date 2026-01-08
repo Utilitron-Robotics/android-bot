@@ -306,7 +306,22 @@ class BufferSequenceExecutor extends ChangeNotifier {
       return;
     }
 
+    // Prevent duplicate processing - check if we're already beyond total
+    if (_totalCommandCount > 0 && _completedCommandCount >= _totalCommandCount) {
+      debugPrint(
+          'BufferSequenceExecutor: Ignoring duplicate completion - already at $_completedCommandCount/$_totalCommandCount');
+      return;
+    }
+
     _completedCommandCount++;
+
+    // Clamp to prevent impossible states
+    if (_completedCommandCount > _totalCommandCount && _totalCommandCount > 0) {
+      debugPrint(
+          'BufferSequenceExecutor: WARNING - Completed count exceeded total! Clamping $_completedCommandCount to $_totalCommandCount');
+      _completedCommandCount = _totalCommandCount;
+    }
+
     debugPrint(
         'BufferSequenceExecutor: Command completed: ${result.result} ($_completedCommandCount/$_totalCommandCount)');
 

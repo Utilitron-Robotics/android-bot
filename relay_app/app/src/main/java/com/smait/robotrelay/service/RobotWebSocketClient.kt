@@ -308,10 +308,22 @@ class RobotWebSocketClient(
                         Log.d(TAG, "Ultrasonic: ${ultrasonicMm}mm (${String.format("%.2f", ultrasonicMeters)}m)")
                     }
 
+                    // Check if we're docking with charger - ignore bumper/cliff during docking
+                    val currentGoal = _robotStatus.value?.currentGoalName ?: ""
+                    val isDocking = currentGoal.contains("Pile", ignoreCase = true) ||
+                                  currentGoal.contains("Charger", ignoreCase = true) ||
+                                  currentGoal.contains("Dock", ignoreCase = true)
+
                     if (bumper > 0 || cliff > 0) {
-                        safetyZone.set(SafetyZone.STOP)
-                        Log.w(TAG, "SAFETY STOP: Bumper or Cliff detected!")
-                        stop()
+                        if (!isDocking) {
+                            // Normal collision - stop!
+                            safetyZone.set(SafetyZone.STOP)
+                            Log.w(TAG, "SAFETY STOP: Bumper or Cliff detected!")
+                            stop()
+                        } else {
+                            // Docking with charger - this is expected! The tongs snap in!
+                            Log.i(TAG, "Bumper contact during docking - charging tongs engaging!")
+                        }
                     }
                     _robotStatus.value = current.copy(
                         sensors = SensorStatus(
