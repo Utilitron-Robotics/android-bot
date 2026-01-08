@@ -6,6 +6,7 @@
 /// - QoS levels for guaranteed delivery
 /// - Works well through firewalls/NAT
 /// - Excellent for fleet management (many robots, one broker)
+library;
 
 import 'dart:async';
 import 'dart:convert';
@@ -15,9 +16,9 @@ import 'transport_config.dart';
 
 /// MQTT QoS levels
 enum MqttQos {
-  atMostOnce(0),   // Fire and forget
-  atLeastOnce(1),  // Guaranteed delivery, may duplicate
-  exactlyOnce(2);  // Guaranteed exactly once
+  atMostOnce(0), // Fire and forget
+  atLeastOnce(1), // Guaranteed delivery, may duplicate
+  exactlyOnce(2); // Guaranteed exactly once
 
   final int value;
   const MqttQos(this.value);
@@ -94,9 +95,10 @@ class MqttTransport implements RobotTransport {
     required String robotId,
     String? clientId,
     TransportConfig? config,
-  }) : _robotId = robotId,
-       _clientId = clientId ?? 'flutter_${DateTime.now().millisecondsSinceEpoch}',
-       _config = config ?? TransportConfig.instance {
+  })  : _robotId = robotId,
+        _clientId =
+            clientId ?? 'flutter_${DateTime.now().millisecondsSinceEpoch}',
+        _config = config ?? TransportConfig.instance {
     // Setup topic patterns
     _commandTopic = 'robot/$_robotId/command';
     _statusTopic = 'robot/$_robotId/status';
@@ -106,7 +108,8 @@ class MqttTransport implements RobotTransport {
 
   // RobotTransport interface
   @override
-  TransportType get type => TransportType.http; // Using http as placeholder until MQTT type added
+  TransportType get type =>
+      TransportType.http; // Using http as placeholder until MQTT type added
 
   @override
   TransportStatus get status {
@@ -158,7 +161,6 @@ class MqttTransport implements RobotTransport {
       subscribe(_eventTopic);
 
       debugPrint('$_tag: Connected to broker');
-
     } catch (e) {
       debugPrint('$_tag: Connection failed: $e');
       _setState(MqttState.disconnected);
@@ -261,7 +263,8 @@ class MqttTransport implements RobotTransport {
     debugPrint('$_tag: Publishing to ${message.topic}');
 
     // Handle QoS
-    if (message.qos == MqttQos.atLeastOnce || message.qos == MqttQos.exactlyOnce) {
+    if (message.qos == MqttQos.atLeastOnce ||
+        message.qos == MqttQos.exactlyOnce) {
       final msgId = ++_messageId;
       final completer = Completer<void>();
       _pendingAcks[msgId] = completer;
@@ -456,14 +459,15 @@ class MqttFleetManager {
 
   final String brokerUrl;
   final Map<String, MqttTransport> _robots = {};
-  MqttState _state = MqttState.disconnected;
+  final MqttState _state = MqttState.disconnected;
 
   // Fleet-wide topics
   static const String fleetStatusTopic = 'fleet/status';
   static const String fleetCommandTopic = 'fleet/command';
   static const String fleetAlertTopic = 'fleet/alert';
 
-  final _fleetStatusController = StreamController<Map<String, dynamic>>.broadcast();
+  final _fleetStatusController =
+      StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get fleetStatus => _fleetStatusController.stream;
 
   MqttFleetManager({required this.brokerUrl});
@@ -503,7 +507,8 @@ class MqttFleetManager {
   }
 
   /// Send command to specific robot
-  Future<CommandAck> sendCommandToRobot(String robotId, RobotCommand command) async {
+  Future<CommandAck> sendCommandToRobot(
+      String robotId, RobotCommand command) async {
     final transport = _robots[robotId];
     if (transport == null) {
       return CommandAck(

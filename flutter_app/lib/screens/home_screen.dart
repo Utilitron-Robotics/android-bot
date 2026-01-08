@@ -53,16 +53,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // Load saved connection mode
       final hadSavedMode = await _loadConnectionMode();
-      debugPrint('Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
+      debugPrint(
+          'Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
 
       // ONLY detect mode from URL if there was NO saved mode
       if (!hadSavedMode) {
-        debugPrint('HomeScreen: No saved mode found, detecting from URL: $savedUrl');
+        debugPrint(
+            'HomeScreen: No saved mode found, detecting from URL: $savedUrl');
         _detectModeFromUrl(savedUrl);
       } else {
-        debugPrint('HomeScreen: Using saved mode: ${_connectionMode.name}, NOT detecting from URL');
+        debugPrint(
+            'HomeScreen: Using saved mode: ${_connectionMode.name}, NOT detecting from URL');
       }
-      debugPrint('Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
+      debugPrint(
+          'Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
       debugPrint('=== END INIT ===');
     });
   }
@@ -169,7 +173,8 @@ class _HomeScreenState extends State<HomeScreen> {
             builder: (context, robot, _) {
               return Row(
                 children: [
-                  _ConnectionIndicator(state: robot.state, robotUrl: robot.robotUrl),
+                  _ConnectionIndicator(
+                      state: robot.state, robotUrl: robot.robotUrl),
                   if (robot.isConnected)
                     IconButton(
                       icon: const Icon(Icons.refresh),
@@ -263,7 +268,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Icon(mode.icon, size: 16),
                           const SizedBox(width: 6),
-                          Text(mode.label, style: const TextStyle(fontSize: 13)),
+                          Text(mode.label,
+                              style: const TextStyle(fontSize: 13)),
                         ],
                       ),
                     );
@@ -278,12 +284,12 @@ class _HomeScreenState extends State<HomeScreen> {
             Expanded(
               child: TextField(
                 controller: _urlController,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Robot URL',
                   hintText: 'Enter robot IP (e.g., 192.168.x.x)',
-                  border: const OutlineInputBorder(),
+                  border: OutlineInputBorder(),
                   isDense: true,
-                  prefixIcon: const Icon(Icons.link),
+                  prefixIcon: Icon(Icons.link),
                 ),
                 enabled: robot.state != RobotConnectionState.connecting,
                 onSubmitted: (_) => _connect(robot),
@@ -396,9 +402,21 @@ class _ConnectionIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (color, icon, label) = switch (state) {
-      RobotConnectionState.disconnected => (Colors.grey, Icons.link_off, 'Disconnected'),
-      RobotConnectionState.connecting => (Colors.orange, Icons.sync, 'Connecting...'),
-      RobotConnectionState.connected => (Colors.green, Icons.check_circle, _robotName),
+      RobotConnectionState.disconnected => (
+          Colors.grey,
+          Icons.link_off,
+          'Disconnected'
+        ),
+      RobotConnectionState.connecting => (
+          Colors.orange,
+          Icons.sync,
+          'Connecting...'
+        ),
+      RobotConnectionState.connected => (
+          Colors.green,
+          Icons.check_circle,
+          _robotName
+        ),
       RobotConnectionState.error => (Colors.red, Icons.error, 'Error'),
     };
 

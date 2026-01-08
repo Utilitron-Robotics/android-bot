@@ -5,6 +5,7 @@
 /// - Data channels for control commands (lower latency than gRPC)
 /// - Peer-to-peer connection when possible (bypasses cloud)
 /// - TURN/STUN for NAT traversal
+library;
 
 import 'dart:async';
 import 'dart:convert';
@@ -25,10 +26,10 @@ class IceServer {
   });
 
   Map<String, dynamic> toJson() => {
-    'urls': urls,
-    if (username != null) 'username': username,
-    if (credential != null) 'credential': credential,
-  };
+        'urls': urls,
+        if (username != null) 'username': username,
+        if (credential != null) 'credential': credential,
+      };
 }
 
 /// WebRTC connection state
@@ -79,7 +80,8 @@ class WebRtcTransport extends ChangeNotifier {
   // Streams
   final _stateController = StreamController<WebRtcState>.broadcast();
   final _videoFrameController = StreamController<Uint8List>.broadcast();
-  final _dataMessageController = StreamController<Map<String, dynamic>>.broadcast();
+  final _dataMessageController =
+      StreamController<Map<String, dynamic>>.broadcast();
   final _latencyController = StreamController<double>.broadcast();
 
   // Metrics
@@ -94,8 +96,8 @@ class WebRtcTransport extends ChangeNotifier {
   WebRtcTransport({
     TransportConfig? config,
     List<IceServer>? iceServers,
-  }) : _config = config ?? TransportConfig.instance,
-       _iceServers = iceServers ?? _defaultIceServers;
+  })  : _config = config ?? TransportConfig.instance,
+        _iceServers = iceServers ?? _defaultIceServers;
 
   // Default STUN/TURN servers
   static final List<IceServer> _defaultIceServers = [
@@ -119,7 +121,8 @@ class WebRtcTransport extends ChangeNotifier {
 
   Stream<WebRtcState> get stateStream => _stateController.stream;
   Stream<Uint8List> get videoFrames => _videoFrameController.stream;
-  Stream<Map<String, dynamic>> get dataMessages => _dataMessageController.stream;
+  Stream<Map<String, dynamic>> get dataMessages =>
+      _dataMessageController.stream;
   Stream<double> get latencyStream => _latencyController.stream;
 
   /// Set signaling message callback
@@ -325,7 +328,8 @@ class WebRtcTransport extends ChangeNotifier {
       // Handle ping/pong for latency measurement
       if (message['type'] == 'pong') {
         final sentTime = message['timestamp'] as int;
-        _currentLatency = (DateTime.now().millisecondsSinceEpoch - sentTime) / 2.0;
+        _currentLatency =
+            (DateTime.now().millisecondsSinceEpoch - sentTime) / 2.0;
         _latencyController.add(_currentLatency);
 
         // Update config with new RTT measurement
@@ -379,15 +383,15 @@ a=$type''';
 
   /// Get connection statistics
   Map<String, dynamic> getStats() => {
-    'state': _state.name,
-    'data_channel_state': _dataChannelState.name,
-    'latency_ms': _currentLatency,
-    'bytes_received': _bytesReceived,
-    'bytes_sent': _bytesSent,
-    'connection_duration_ms': _connectionStart != null
-        ? DateTime.now().difference(_connectionStart!).inMilliseconds
-        : 0,
-  };
+        'state': _state.name,
+        'data_channel_state': _dataChannelState.name,
+        'latency_ms': _currentLatency,
+        'bytes_received': _bytesReceived,
+        'bytes_sent': _bytesSent,
+        'connection_duration_ms': _connectionStart != null
+            ? DateTime.now().difference(_connectionStart!).inMilliseconds
+            : 0,
+      };
 
   @override
   void dispose() {

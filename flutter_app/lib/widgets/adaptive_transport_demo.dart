@@ -6,7 +6,7 @@ import '../core/robot_transport.dart';
 /// Demo widget showing the POWER of adaptive multi-protocol transport
 /// This bad boy will maintain connection through apocalyptic network conditions
 class AdaptiveTransportDemo extends StatefulWidget {
-  const AdaptiveTransportDemo({Key? key}) : super(key: key);
+  const AdaptiveTransportDemo({super.key});
 
   @override
   State<AdaptiveTransportDemo> createState() => _AdaptiveTransportDemoState();
@@ -30,7 +30,7 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
 
     // Initialize with multiple fallback options
     _transport.initialize(
-      websocketUrl: 'ws://192.168.88.37:8766',  // Primary
+      websocketUrl: 'ws://192.168.88.37:8766', // Primary
       httpEndpoint: 'http://192.168.88.37:8765', // Fallback
       // grpcEndpoint: '192.168.88.37:50051',    // Future WAN option
     );
@@ -80,7 +80,8 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
 
   void _addEvent(String event) {
     setState(() {
-      _eventLog.insert(0, '${DateTime.now().toLocal().toString().substring(11, 19)} $event');
+      _eventLog.insert(
+          0, '${DateTime.now().toLocal().toString().substring(11, 19)} $event');
       if (_eventLog.length > 20) {
         _eventLog.removeLast();
       }
@@ -122,9 +123,10 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
       id: 'test_${DateTime.now().millisecondsSinceEpoch}',
       type: type,
       payload: type == 'velocity'
-        ? {'linear': 0.1, 'angular': 0.0}
-        : {'waypoint': 'P1'},
-      priority: type == 'stop' ? CommandPriority.emergency : CommandPriority.normal,
+          ? {'linear': 0.1, 'angular': 0.0}
+          : {'waypoint': 'P1'},
+      priority:
+          type == 'stop' ? CommandPriority.emergency : CommandPriority.normal,
     );
 
     _addEvent('📤 Sending $type command...');
@@ -178,16 +180,16 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
                       Text(
                         'Adaptive Transport System',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                              fontWeight: FontWeight.bold,
+                            ),
                       ),
                       Text(
                         isConnected
-                          ? 'Connected via ${_stats['transport'] ?? 'unknown'}'
-                          : 'Disconnected',
+                            ? 'Connected via ${_stats['transport'] ?? 'unknown'}'
+                            : 'Disconnected',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: isConnected ? Colors.green : Colors.red,
-                        ),
+                              color: isConnected ? Colors.green : Colors.red,
+                            ),
                       ),
                     ],
                   ),
@@ -221,19 +223,23 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
               Text(
                 'STATISTICS',
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  letterSpacing: 1.2,
-                  fontWeight: FontWeight.bold,
-                ),
+                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 16,
                 runSpacing: 8,
                 children: [
-                  _buildStatChip('Commands Sent', _stats['commands_sent']?.toString() ?? '0'),
-                  _buildStatChip('Failed', _stats['commands_failed']?.toString() ?? '0'),
-                  _buildStatChip('Success Rate', _stats['success_rate']?.toString() ?? 'N/A'),
-                  _buildStatChip('Transport Switches', _stats['transport_switches']?.toString() ?? '0'),
+                  _buildStatChip('Commands Sent',
+                      _stats['commands_sent']?.toString() ?? '0'),
+                  _buildStatChip(
+                      'Failed', _stats['commands_failed']?.toString() ?? '0'),
+                  _buildStatChip('Success Rate',
+                      _stats['success_rate']?.toString() ?? 'N/A'),
+                  _buildStatChip('Transport Switches',
+                      _stats['transport_switches']?.toString() ?? '0'),
                 ],
               ),
             ],
@@ -246,26 +252,29 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
             Text(
               'TEST COMMANDS',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.bold,
-              ),
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.bold,
+                  ),
             ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               children: [
                 ElevatedButton.icon(
-                  onPressed: isConnected ? () => _sendTestCommand('velocity') : null,
+                  onPressed:
+                      isConnected ? () => _sendTestCommand('velocity') : null,
                   icon: const Icon(Icons.speed),
                   label: const Text('Velocity'),
                 ),
                 ElevatedButton.icon(
-                  onPressed: isConnected ? () => _sendTestCommand('navigate') : null,
+                  onPressed:
+                      isConnected ? () => _sendTestCommand('navigate') : null,
                   icon: const Icon(Icons.location_on),
                   label: const Text('Navigate'),
                 ),
                 ElevatedButton.icon(
-                  onPressed: isConnected ? () => _sendTestCommand('stop') : null,
+                  onPressed:
+                      isConnected ? () => _sendTestCommand('stop') : null,
                   icon: const Icon(Icons.stop),
                   label: const Text('E-STOP'),
                   style: ElevatedButton.styleFrom(
@@ -288,9 +297,9 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
             Text(
               'EVENT LOG',
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.bold,
-              ),
+                    letterSpacing: 1.2,
+                    fontWeight: FontWeight.bold,
+                  ),
             ),
             const SizedBox(height: 8),
             Container(
@@ -326,7 +335,7 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -340,8 +349,8 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
           Text(
             value,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.bold,
-            ),
+                  fontWeight: FontWeight.bold,
+                ),
           ),
         ],
       ),
