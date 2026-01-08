@@ -373,14 +373,11 @@ class _HudScreenState extends State<HudScreen>
           final tourRunning = tourManager.status == SequenceStatus.running;
 
           // WAKE LOCK: Keep screen on during tours to prevent connection drops
-          // (Update via post-frame callback to avoid setState during build)
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (tourRunning && !_wakelockEnabled) {
-              _enableWakelock();
-            } else if (!tourRunning && _wakelockEnabled) {
-              _disableWakelock();
-            }
-          });
+          if (tourRunning && !_wakelockEnabled) {
+            _enableWakelock();
+          } else if (!tourRunning && _wakelockEnabled) {
+            _disableWakelock();
+          }
 
           // Debug: Log when sequence status changes
           if (_enableVerboseLogging &&
