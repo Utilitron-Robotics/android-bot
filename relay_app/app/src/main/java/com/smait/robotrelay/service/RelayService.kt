@@ -834,12 +834,12 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         return checkHasTtsApiKey()
     }
 
-    override fun speakText(text: String) {
-        Log.i(TAG, ">>> speakText() called from TaskExecutor: '$text'")
+    override fun speakText(text: String, onComplete: (() -> Unit)?) {
+        Log.i(TAG, ">>> speakText() called from TaskExecutor: '$text' (callback=${onComplete != null})")
         // Stop any current speech to prevent queuing (for blocked path warnings)
         cloudTts?.stop()
         tts?.stop()
-        speak(text, null)
+        speak(text, onComplete)
     }
 
     override fun stopSpeak() {
