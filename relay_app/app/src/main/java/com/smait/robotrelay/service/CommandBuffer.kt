@@ -635,7 +635,7 @@ class CommandBuffer(
 
                 if (currentCommand == null) {
                     Log.i(TAG, "Motion standby cancelled")
-                    return@launch
+                    return
                 }
 
                 Log.i(TAG, "Person detected! Speaking greeting...")
