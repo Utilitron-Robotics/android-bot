@@ -131,13 +131,15 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
     _robotUrl = url;
     notifyListeners();
 
+    // Save URL immediately so user doesn't have to retype on failure
+    await _saveUrl(url);
+
     // Set up reconnect callbacks
     _client.onDisconnect = _onClientDisconnect;
     _client.onReconnect = _onClientReconnect;
 
     try {
       await _client.connect(url);
-      await _saveUrl(url);
 
       // Inject dependency for audio announcements
       AudioAnnouncer().setRobotConnection(this);
