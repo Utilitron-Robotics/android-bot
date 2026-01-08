@@ -483,8 +483,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Load all commands into the relay buffer
     _bufferClient.loadCommands(commands, clearExisting: true);
 
-    // Start tour mode on tablet - locks screen for customer-facing display
-    _bufferClient.startTourMode();
+    // Start sequence mode on tablet - locks screen for customer-facing display
+    _bufferClient.startSequenceMode();
 
     notifyListeners();
   }
@@ -677,8 +677,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _callback.onCloseDisplay();
     _callback.onSequenceStopped(currentStop, _currentStopIndex);
 
-    // Stop tour mode on tablet - unlocks screen
-    _bufferClient.stopTourMode();
+    // Stop sequence mode on tablet - unlocks screen
+    _bufferClient.stopSequenceMode();
 
     // Clear saved sequence ID - no longer running
     _saveRunningSequenceId(null);
@@ -725,8 +725,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _stopCountdown();
     _callback.onSequenceCompleted();
 
-    // Stop tour mode on tablet - unlocks screen
-    _bufferClient.stopTourMode();
+    // Stop sequence mode on tablet - unlocks screen
+    _bufferClient.stopSequenceMode();
 
     // Clear saved sequence ID - no longer running
     _saveRunningSequenceId(null);
@@ -771,8 +771,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
     }
 
-    // Stop tour mode on tablet - unlocks screen
-    _bufferClient.stopTourMode();
+    // Stop sequence mode on tablet - unlocks screen
+    _bufferClient.stopSequenceMode();
 
     // Clear saved sequence ID - no longer running
     _saveRunningSequenceId(null);

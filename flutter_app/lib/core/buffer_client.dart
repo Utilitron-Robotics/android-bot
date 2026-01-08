@@ -492,21 +492,29 @@ class BufferClient extends ChangeNotifier {
     });
   }
 
-  /// Start tour mode - locks tablet screen to prevent access to controls
+  /// Start sequence mode - locks tablet screen to prevent access to controls
+  /// Works for ALL sequence types: Tour, Delivery, Patrol, Busser, Comic, etc.
   /// @param pin Optional PIN code to unlock (default is 1234)
-  void startTourMode({String? pin}) {
-    debugPrint('BufferClient: Starting tour mode on tablet');
+  void startSequenceMode({String? pin}) {
+    debugPrint('BufferClient: Starting sequence mode on tablet');
     _client.send({
-      'op': 'tablet_tour_start',
+      'op': 'tablet_tour_start', // Wire protocol kept for relay_app compatibility
       if (pin != null) 'pin': pin,
     });
   }
 
-  /// Stop tour mode - unlocks tablet screen
-  void stopTourMode() {
-    debugPrint('BufferClient: Stopping tour mode on tablet');
-    _client.send({'op': 'tablet_tour_stop'});
+  /// Stop sequence mode - unlocks tablet screen
+  void stopSequenceMode() {
+    debugPrint('BufferClient: Stopping sequence mode on tablet');
+    _client.send({'op': 'tablet_tour_stop'}); // Wire protocol kept for relay_app compatibility
   }
+
+  // Legacy aliases for backwards compatibility
+  @Deprecated('Use startSequenceMode instead')
+  void startTourMode({String? pin}) => startSequenceMode(pin: pin);
+
+  @Deprecated('Use stopSequenceMode instead')
+  void stopTourMode() => stopSequenceMode();
 
   // === Convenience Methods ===
 
