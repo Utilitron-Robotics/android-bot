@@ -165,11 +165,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Check for paused state
     if (state.paused && _status == SequenceExecutorStatus.running) {
       _status = SequenceExecutorStatus.paused;
-      notifyListeners();
     } else if (!state.paused && _status == SequenceExecutorStatus.paused) {
       _status = SequenceExecutorStatus.running;
-      notifyListeners();
     }
+
+    // CRITICAL: Notify listeners on EVERY heartbeat so UI updates with phase/countdown changes
+    // Without this, Flutter UI goes stale during tour execution!
+    notifyListeners();
   }
 
   /// Restore executor state from heartbeat on reconnect

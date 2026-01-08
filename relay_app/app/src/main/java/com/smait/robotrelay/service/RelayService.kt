@@ -65,6 +65,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         const val ACTION_COUNTDOWN = "com.smait.robotrelay.COUNTDOWN"
         const val ACTION_TOUR_MODE = "com.smait.robotrelay.TOUR_MODE"
         const val ACTION_TOUR_STANDBY = "com.smait.robotrelay.TOUR_STANDBY"
+        const val ACTION_TRIGGER_START_TOUR = "com.smait.robotrelay.TRIGGER_START_TOUR"
         const val EXTRA_URL = "url"
         const val EXTRA_STATUS = "status"
         const val EXTRA_COUNTDOWN_SECONDS = "countdown_seconds"
@@ -622,6 +623,14 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     fun notifyTourStarted(sequenceId: String) {
         Log.i(TAG, "Tour started via button press for sequence: $sequenceId")
         relayServer.commandBuffer.notifyTourStarted()
+    }
+
+    override fun triggerStartTourButton() {
+        Log.i(TAG, "Remote trigger: Simulating START TOUR button press from Flutter")
+        mainHandler.post {
+            val intent = Intent(ACTION_TRIGGER_START_TOUR)
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        }
     }
 
     // === Obstacle Intelligence ===

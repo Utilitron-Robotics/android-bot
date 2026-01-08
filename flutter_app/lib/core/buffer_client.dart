@@ -505,6 +505,12 @@ class BufferClient extends ChangeNotifier {
     _client.send({'op': 'tablet_tour_stop'});
   }
 
+  /// Trigger START TOUR button remotely - simulates pressing the button on tablet
+  void triggerStartTourButton() {
+    debugPrint('BufferClient: Remotely triggering START TOUR button on tablet');
+    _client.send({'op': 'tablet_trigger_start'});
+  }
+
   // === Convenience Methods ===
 
   /// Load a sequence of waypoints with actions

@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package robotcontrol;
+
+option java_package = "com.smait.robotrelay.grpc";
+option java_outer_classname = "RobotControlProto";
+
+// Robot Control Service - replaces WebSocket for reliable communication
+service RobotControl {
+  // Bidirectional streaming for real-time updates and commands
+  rpc ControlStream(stream ClientMessage) returns (stream ServerMessage);
+
+  // Unary RPC for simple commands
+  rpc SendCommand(Command) returns (CommandResponse);
+
+  // Server-streaming for heartbeat/status updates
+  rpc StreamHeartbeat(HeartbeatRequest) returns (stream Heartbeat);
+}
+
+// Client messages (Flutter → Relay)
+message ClientMessage {
+  oneof message {
+    Command command = 1;
+    HeartbeatRequest heartbeat_request = 2;
+    BufferControl buffer_control = 3;
+  }
+}
+
+// Server messages (Relay → Flutter)
+message ServerMessage {
+  oneof message {
+    Heartbeat heartbeat = 1;
+    CommandResult command_result = 2;
+    RobotStatus robot_status = 3;
+    BufferState buffer_state = 4;
+  }
+}
+
+// Command from Flutter to relay/robot
+message Command {
+  string id = 1;
+  string type = 2;  // navigate, speak, display, etc.
+  map<string, string> data = 3;
+}
+
+message CommandResponse {
+  bool success = 1;
+  string message = 2;
+  string command_id = 3;
+}
+
+message CommandResult {
+  string command_id = 1;
+  string status = 2;  // success, failed, cancelled
+  string message = 3;
+}
+
+// Heartbeat with full system state
+message Heartbeat {
+  int64 timestamp = 1;
+  RobotStatus robot = 2;
+  BufferState buffer = 3;
+  CrowdConfig crowd_config = 4;
+}
+
+message HeartbeatRequest {
+  // Empty for now - can add filters later
+}
+
+// Robot status
+message RobotStatus {
+  bool connected = 1;
+  int32 nav_status = 2;
+  string nav_goal = 3;
+  int32 battery = 4;
+  string safety_zone = 5;
+  Pose2D pose = 6;
+  double linear_velocity = 7;
+  double angular_velocity = 8;
+}
+
+message Pose2D {
+  double x = 1;
+  double y = 2;
+  double theta = 3;
+}
+
+// Buffer state
+message BufferState {
+  bool paused = 1;
+  BufferCommand current = 2;
+  int32 pending_count = 3;
+  int32 completed_count = 4;
+}
+
+message BufferCommand {
+  string id = 1;
+  string type = 2;
+  int64 started_at = 3;
+  int64 elapsed_ms = 4;
+  map<string, string> data = 5;
+}
+
+// Buffer control commands
+message BufferControl {
+  oneof control {
+    LoadCommands load = 1;
+    bool pause = 2;
+    bool resume = 3;
+    bool skip = 4;
+    bool clear = 5;
+  }
+}
+
+message LoadCommands {
+  repeated BufferCommand commands = 1;
+  bool clear_existing = 2;
+}
+
+// Crowd logic config
+message CrowdConfig {
+  double safe_distance_meters = 1;
+  double ramp_rate = 2;
+}
