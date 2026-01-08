@@ -283,8 +283,14 @@ class BufferSequenceExecutor extends ChangeNotifier {
       _countdownSeconds = (_currentWaitDurationMs / 1000).ceil();
       debugPrint(
           'BufferSequenceExecutor: Wait started, duration=${_currentWaitDurationMs}ms, countdown=$_countdownSeconds');
+    } else if (type == 'sound') {
+      // Sound command - just acknowledge it
+      debugPrint('BufferSequenceExecutor: Playing sound');
+      _currentPhase = SequencePhase.speaking; // Treat as speaking phase
+      _currentWaitDurationMs = 0;
     } else {
       _currentWaitDurationMs = 0;
+      debugPrint('BufferSequenceExecutor: Unknown command type: $type');
     }
     notifyListeners();
   }
