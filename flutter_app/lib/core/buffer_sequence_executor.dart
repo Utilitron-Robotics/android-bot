@@ -313,39 +313,36 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Special handling for loop command
     if (result.commandId.contains('loop')) {
       if (result.isSuccess) {
-        debugPrint('BufferSequenceExecutor: Loop command completed - restarting sequence');
+        debugPrint('BufferSequenceExecutor: Loop command completed - entering standby at start position');
 
-        // Reset state for the new loop iteration
-        _currentStopIndex = -1;
-        _completedCommandCount = 0;
-        _navRetryCount = 0;
+        // Loop command means: tour iteration complete, robot at start position
+        // Now enter standby mode - wait for manual trigger or motion detection
 
-        // Keep status as running (don't change to completed)
-        _status = SequenceExecutorStatus.running;
+        if (_currentSequence != null && _currentSequence!.loop) {
+          // Enter motion standby mode if configured
+          if (_currentSequence!.motionTriggerStart) {
+            debugPrint('BufferSequenceExecutor: Entering motion standby for next tour iteration');
 
-        // Rebuild commands WITHOUT motion trigger (already triggered on first run)
-        if (_currentSequence != null) {
-          final loopSequence = _currentSequence!.copyWith(
-            motionTriggerStart: false,  // Clear motion trigger
-            motionGreeting: null,
-            motionButtonText: null,
-          );
+            // Send motion standby command to wait for visitors
+            _bufferClient.loadCommands([
+              BufferCommand.motionStandby(
+                sequenceId: _currentSequence!.id,
+                greeting: _currentSequence!.motionGreeting ?? 'Hello! Would you like a tour?',
+                buttonText: _currentSequence!.motionButtonText ?? 'START TOUR',
+                displayUrl: _currentSequence!.motionDisplayUrl,
+              ),
+            ], clearExisting: true);
 
-          final commands = _buildSequenceCommands(loopSequence);
-          _totalCommandCount = commands.length;
-
-          debugPrint('BufferSequenceExecutor: Reloading ${commands.length} commands for loop');
-
-          // Start tour mode again for the new iteration
-          _bufferClient.startTourMode();
-
-          // Reload commands
-          _bufferClient.loadCommands(commands, clearExisting: true);
-
-          // Notify listeners that we're still running
-          notifyListeners();
+            // Keep status as running (in standby)
+            _status = SequenceExecutorStatus.running;
+            notifyListeners();
+            return;
+          }
         }
-        return;
+
+        // If no motion trigger configured, just complete the tour
+        debugPrint('BufferSequenceExecutor: Loop complete, tour ending (no motion trigger configured)');
+        // Fall through to normal completion
       } else {
         debugPrint('BufferSequenceExecutor: Loop command failed (${result.result}), ending tour');
         // Fall through to normal completion handling
