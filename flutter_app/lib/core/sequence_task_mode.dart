@@ -361,7 +361,7 @@ class SequenceTaskMode extends TaskMode {
       if (sequence.loop) {
         _currentStopIndex = 0;
       } else {
-        _completeTour();
+        _completeSequence();
         return;
       }
     }
@@ -470,8 +470,8 @@ class SequenceTaskMode extends TaskMode {
     }
   }
 
-  /// Complete the sequence
-  void _completeTour() {
+  /// Complete the sequence (works for any mode: Tour, Delivery, Patrol, etc.)
+  void _completeSequence() {
     _stopCountdown();
 
     // Play outro
