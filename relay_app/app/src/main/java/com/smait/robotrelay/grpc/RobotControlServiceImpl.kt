@@ -3,12 +3,13 @@ package com.smait.robotrelay.grpc
 import android.util.Log
 import com.smait.robotrelay.service.RobotWebSocketClient
 import com.smait.robotrelay.service.RelayServer
+import com.smait.robotrelay.service.ConnectionState
 import io.grpc.stub.StreamObserver
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.concurrent.ConcurrentHashMap
-import robotcontrol.RobotControlProto.*
-import robotcontrol.RobotControlGrpc
+import com.smait.robotrelay.grpc.RobotControlProto.*
+import com.smait.robotrelay.grpc.RobotControlGrpc
 
 /**
  * gRPC service implementation for robot control
@@ -59,30 +60,32 @@ class RobotControlServiceImpl(
 
         // Subscribe to robot status updates
         val statusJob = scope.launch {
-            robotClient.status.collect { status ->
-                val robotStatus = RobotStatus.newBuilder()
-                    .setConnected(robotClient.isConnected.value)
-                    .setNavStatus(status.navStatus)
-                    .setNavGoal(status.currentGoal ?: "")
-                    .setBattery(status.batteryPercent)
-                    .setSafetyZone(status.safetyZone ?: "CLEAR")
-                    .setPose(Pose2D.newBuilder()
-                        .setX(status.position?.x ?: 0.0)
-                        .setY(status.position?.y ?: 0.0)
-                        .setTheta(status.position?.theta ?: 0.0)
-                        .build())
-                    .setLinearVelocity(status.velocity?.linear?.x ?: 0.0)
-                    .setAngularVelocity(status.velocity?.angular?.z ?: 0.0)
-                    .build()
+            robotClient.robotStatus.collect { status ->
+                if (status != null) {
+                    val robotStatus = RobotStatus.newBuilder()
+                        .setConnected(robotClient.connectionState.value == ConnectionState.CONNECTED)
+                        .setNavStatus(status.navStatus)
+                        .setNavGoal(status.currentGoalName ?: "")
+                        .setBattery(status.battery)
+                        .setSafetyZone(status.safetyZone.name)
+                        .setPose(Pose2D.newBuilder()
+                            .setX(status.x)
+                            .setY(status.y)
+                            .setTheta(status.theta)
+                            .build())
+                        .setLinearVelocity(status.velocity.getOrNull(0) ?: 0.0)
+                        .setAngularVelocity(status.velocity.getOrNull(1) ?: 0.0)
+                        .build()
 
-                val message = ServerMessage.newBuilder()
-                    .setRobotStatus(robotStatus)
-                    .build()
+                    val message = ServerMessage.newBuilder()
+                        .setRobotStatus(robotStatus)
+                        .build()
 
-                try {
-                    responseObserver.onNext(message)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to send status update: ${e.message}")
+                    try {
+                        responseObserver.onNext(message)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to send status update: ${e.message}")
+                    }
                 }
             }
         }
@@ -180,7 +183,9 @@ class RobotControlServiceImpl(
             when (command.type) {
                 "navigate" -> {
                     val waypoint = command.dataMap["waypoint"] ?: return false
-                    robotClient.callService("/poi", mapOf("poi" to waypoint))
+                    // Navigate using rosbridge protocol
+                    val navMsg = """{"op":"call_service","service":"/poi","args":{"poi":"$waypoint"}}"""
+                    robotClient.send(navMsg)
                     true
                 }
                 "velocity" -> {
@@ -245,23 +250,24 @@ class RobotControlServiceImpl(
     }
 
     private fun buildHeartbeat(): Heartbeat {
-        val status = robotClient.latestStatus.value
+        val status = robotClient.robotStatus.value
+        val isConnected = robotClient.connectionState.value == ConnectionState.CONNECTED
 
         return Heartbeat.newBuilder()
             .setTimestamp(System.currentTimeMillis())
             .setRobot(RobotStatus.newBuilder()
-                .setConnected(robotClient.isConnected.value)
-                .setNavStatus(status.navStatus)
-                .setNavGoal(status.currentGoal ?: "")
-                .setBattery(status.batteryPercent)
-                .setSafetyZone(status.safetyZone ?: "CLEAR")
+                .setConnected(isConnected)
+                .setNavStatus(status?.navStatus ?: 0)
+                .setNavGoal(status?.currentGoalName ?: "")
+                .setBattery(status?.battery ?: 0)
+                .setSafetyZone(status?.safetyZone?.name ?: "CLEAR")
                 .setPose(Pose2D.newBuilder()
-                    .setX(status.position?.x ?: 0.0)
-                    .setY(status.position?.y ?: 0.0)
-                    .setTheta(status.position?.theta ?: 0.0)
+                    .setX(status?.x ?: 0.0)
+                    .setY(status?.y ?: 0.0)
+                    .setTheta(status?.theta ?: 0.0)
                     .build())
-                .setLinearVelocity(status.velocity?.linear?.x ?: 0.0)
-                .setAngularVelocity(status.velocity?.angular?.z ?: 0.0)
+                .setLinearVelocity(status?.velocity?.getOrNull(0) ?: 0.0)
+                .setAngularVelocity(status?.velocity?.getOrNull(1) ?: 0.0)
                 .build())
             .setBuffer(BufferState.newBuilder()
                 .setPaused(false)
