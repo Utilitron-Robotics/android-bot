@@ -149,15 +149,15 @@ class CommandBuffer(
 
     /**
      * Called when the "Start Tour" button is pressed on the tablet.
-     * Completes the current motion_standby command.
+     * Completes the current standby command (motion_standby or button_standby).
      */
     fun notifyTourStarted() {
         val cmd = currentCommand ?: return
-        if (cmd.type != "motion_standby") {
+        if (cmd.type != "motion_standby" && cmd.type != "button_standby") {
             Log.w(TAG, "notifyTourStarted called but current command is ${cmd.type}")
             return
         }
-        Log.i(TAG, "Tour started via button press, completing motion_standby")
+        Log.i(TAG, "Tour started via button press, completing ${cmd.type}")
         completeCommand(cmd.id, "success")
     }
 
