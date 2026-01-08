@@ -324,6 +324,10 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   /// Disconnect from robot
   void disconnect() {
+    // Clean up SequenceExecutor first (before client disconnect)
+    // This disposes BufferClient and prevents duplicate subscriptions on reconnect
+    SequenceExecutor().cleanup();
+
     // Unsubscribe from robot topics before disconnecting
     if (_statusSubscription != null) {
       _client.unsubscribe(topic: '/robot_status');
