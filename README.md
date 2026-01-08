@@ -38,6 +38,28 @@ Every Pudu, CIOT, and smAiT robot ships with:
 - **Forward Thinkers** ready for true automation
 - **Anyone** with a Pudu/CIOT/smAiT robot gathering dust
 
+## Screenshots & Real World Deployments
+
+### Flutter Control App
+![Flutter Map View](map%20of%20droid%2039%20at%20Front%20Door.jpg)
+*Real-time SLAM map showing Droid 39 navigating to Front Door waypoint*
+
+![Tour Management](Screenshot%202026-01-01%20at%2012.45.18%20PM.jpg)
+*Tour sequence editor with multi-stop configuration and timing controls*
+
+### Robot Hardware
+
+![smAiT Robot with RobotOS Pro](IMG_3048.jpeg)
+*smAiT service robot running RobotOS Pro - Android tablet displaying real-time navigation map with path planning*
+
+![Robot Base Close-up](IMG_3049.jpg)
+*Robot base unit showing ultrasonic sensors, status indicators, and clean industrial design*
+
+### Coming Soon
+- Food service deployments in restaurants
+- Healthcare facility implementations
+- Corporate office installations
+
 ## Overview
 
 RobotOS Pro is a comprehensive multi-mode operating system that transforms underutilized service robots into versatile business automation platforms. Built for Pudu, smAiT, CIOT, and compatible platforms using the rosbridge protocol, it enables sophisticated operations across hospitality, healthcare, office, and retail environments.
@@ -387,8 +409,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Support
 
 - Documentation: [docs/](docs/)
-- Issues: [GitHub Issues](https://github.com/yourusername/robotour-pro/issues)
-- Email: support@robotour.pro
+- Email: alan@utilitron.io
 
 ---
 
