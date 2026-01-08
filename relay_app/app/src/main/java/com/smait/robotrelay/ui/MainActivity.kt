@@ -532,9 +532,8 @@ class MainActivity : AppCompatActivity() {
         binding.btnLockStartTour.setOnClickListener {
             Log.i(TAG, "Lock screen START TOUR pressed - starting sequence: $standbySequenceId")
             standbySequenceId?.let { seqId ->
-                // Greet the visitor
-                speak("Follow me!")
-                // Start the currently saved/loaded sequence
+                // Start the sequence - greeting comes from buffer (motion_standby or intro text)
+                // DON'T speak here - it would overlap with the buffer's intro text!
                 service?.notifyTourStarted(seqId)
             }
             // Hide the start button after pressing, tour is now active
