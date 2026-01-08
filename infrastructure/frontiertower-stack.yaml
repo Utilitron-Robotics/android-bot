@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'TurboTurf - Robot Fleet Management Backend'
+Description: 'Frontier Tower - Robot Fleet Management Backend'
 
 Parameters:
   Environment:
@@ -17,7 +17,7 @@ Resources:
   RobotsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-robots-${Environment}'
+      TableName: !Sub 'frontiertower-robots-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: robot_id
@@ -40,7 +40,7 @@ Resources:
   CommandsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-commands-${Environment}'
+      TableName: !Sub 'frontiertower-commands-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: robot_id
@@ -59,7 +59,7 @@ Resources:
   AlertsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-alerts-${Environment}'
+      TableName: !Sub 'frontiertower-alerts-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: robot_id
@@ -79,7 +79,7 @@ Resources:
   FleetConfigTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub 'turboturf-fleet-config-${Environment}'
+      TableName: !Sub 'frontiertower-fleet-config-${Environment}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: config_key
@@ -88,11 +88,77 @@ Resources:
         - AttributeName: config_key
           KeyType: HASH
 
+  # Floors table - physical floors in buildings
+  FloorsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'frontiertower-floors-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: floor_id
+          AttributeType: S
+        - AttributeName: building
+          AttributeType: S
+      KeySchema:
+        - AttributeName: floor_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: by-building
+          KeySchema:
+            - AttributeName: building
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # Maps table - SLAM maps belong to floors, shared by robots
+  MapsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'frontiertower-maps-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: map_id
+          AttributeType: S
+        - AttributeName: floor_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: map_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: by-floor
+          KeySchema:
+            - AttributeName: floor_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # Tours table - tours belong to maps, shared by all robots on that map
+  ToursTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'frontiertower-tours-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: tour_id
+          AttributeType: S
+        - AttributeName: map_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: tour_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: by-map
+          KeySchema:
+            - AttributeName: map_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
   # Lambda Execution Role
   LambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub 'turboturf-lambda-role-${Environment}'
+      RoleName: !Sub 'frontiertower-lambda-role-${Environment}'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -121,12 +187,18 @@ Resources:
                   - !GetAtt CommandsTable.Arn
                   - !GetAtt AlertsTable.Arn
                   - !GetAtt FleetConfigTable.Arn
+                  - !GetAtt FloorsTable.Arn
+                  - !Sub '${FloorsTable.Arn}/index/*'
+                  - !GetAtt MapsTable.Arn
+                  - !Sub '${MapsTable.Arn}/index/*'
+                  - !GetAtt ToursTable.Arn
+                  - !Sub '${ToursTable.Arn}/index/*'
 
   # API Lambda Functions
   FleetApiFunction:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !Sub 'turboturf-fleet-api-${Environment}'
+      FunctionName: !Sub 'frontiertower-fleet-api-${Environment}'
       Runtime: python3.11
       Handler: index.handler
       Role: !GetAtt LambdaRole.Arn
@@ -138,6 +210,9 @@ Resources:
           COMMANDS_TABLE: !Ref CommandsTable
           ALERTS_TABLE: !Ref AlertsTable
           FLEET_CONFIG_TABLE: !Ref FleetConfigTable
+          FLOORS_TABLE: !Ref FloorsTable
+          MAPS_TABLE: !Ref MapsTable
+          TOURS_TABLE: !Ref ToursTable
           ENVIRONMENT: !Ref Environment
       Code:
         ZipFile: |
@@ -153,6 +228,9 @@ Resources:
           commands_table = dynamodb.Table(os.environ['COMMANDS_TABLE'])
           alerts_table = dynamodb.Table(os.environ['ALERTS_TABLE'])
           config_table = dynamodb.Table(os.environ['FLEET_CONFIG_TABLE'])
+          floors_table = dynamodb.Table(os.environ['FLOORS_TABLE'])
+          maps_table = dynamodb.Table(os.environ['MAPS_TABLE'])
+          tours_table = dynamodb.Table(os.environ['TOURS_TABLE'])
 
           def decimal_default(obj):
               if isinstance(obj, Decimal):
@@ -177,6 +255,10 @@ Resources:
                   path = path.split('/', 2)[2] if path.count('/') >= 2 else path
                   path = '/' + path
               body = json.loads(event.get('body', '{}') or '{}')
+
+              # Handle CORS preflight OPTIONS requests
+              if method == 'OPTIONS':
+                  return response(200, {})
 
               # Route requests
               if path == '/fleet/register' and method == 'POST':
@@ -211,6 +293,45 @@ Resources:
               elif path.startswith('/fleet/config/') and method == 'POST':
                   key = path.split('/')[-1]
                   return set_config_key(key, body)
+              # Floors API
+              elif path == '/floors' and method == 'GET':
+                  return get_floors(event.get('queryStringParameters', {}))
+              elif path == '/floors' and method == 'POST':
+                  return create_floor(body)
+              elif path.startswith('/floors/') and method == 'GET':
+                  floor_id = path.split('/')[-1]
+                  return get_floor(floor_id)
+              elif path.startswith('/floors/') and method == 'DELETE':
+                  floor_id = path.split('/')[-1]
+                  return delete_floor(floor_id)
+              # Maps API
+              elif path == '/maps' and method == 'GET':
+                  return get_maps(event.get('queryStringParameters', {}))
+              elif path == '/maps' and method == 'POST':
+                  return create_map(body)
+              elif path.startswith('/maps/') and method == 'GET':
+                  map_id = path.split('/')[-1]
+                  return get_map(map_id)
+              elif path.startswith('/maps/') and method == 'PUT':
+                  map_id = path.split('/')[-1]
+                  return update_map(map_id, body)
+              elif path.startswith('/maps/') and method == 'DELETE':
+                  map_id = path.split('/')[-1]
+                  return delete_map(map_id)
+              # Tours API - shared by all robots on a map
+              elif path == '/tours' and method == 'GET':
+                  return get_tours(event.get('queryStringParameters', {}))
+              elif path == '/tours' and method == 'POST':
+                  return create_tour(body)
+              elif path.startswith('/tours/') and method == 'GET':
+                  tour_id = path.split('/')[-1]
+                  return get_tour(tour_id)
+              elif path.startswith('/tours/') and method == 'PUT':
+                  tour_id = path.split('/')[-1]
+                  return update_tour(tour_id, body)
+              elif path.startswith('/tours/') and method == 'DELETE':
+                  tour_id = path.split('/')[-1]
+                  return delete_tour(tour_id)
 
               return response(404, {'error': 'Not found'})
 
@@ -382,13 +503,192 @@ Resources:
               })
               return response(200, {'status': 'set', 'key': key})
 
+          # Floors functions
+          def get_floors(params):
+              building = params.get('building') if params else None
+              if building:
+                  result = floors_table.query(
+                      IndexName='by-building',
+                      KeyConditionExpression='building = :b',
+                      ExpressionAttributeValues={':b': building}
+                  )
+              else:
+                  result = floors_table.scan()
+              return response(200, {'floors': result.get('Items', [])})
+
+          def create_floor(body):
+              floor_id = body.get('floor_id') or str(uuid.uuid4())
+              floors_table.put_item(Item={
+                  'floor_id': floor_id,
+                  'name': body.get('name', ''),
+                  'building': body.get('building', ''),
+                  'level_number': body.get('level_number', 0),
+                  'created_at': int(time.time() * 1000)
+              })
+              return response(200, {'status': 'created', 'floor_id': floor_id})
+
+          def get_floor(floor_id):
+              result = floors_table.get_item(Key={'floor_id': floor_id})
+              item = result.get('Item')
+              if item:
+                  return response(200, item)
+              return response(404, {'error': 'Floor not found'})
+
+          def delete_floor(floor_id):
+              floors_table.delete_item(Key={'floor_id': floor_id})
+              return response(200, {'status': 'deleted'})
+
+          # Maps functions
+          def get_maps(params):
+              floor_id = params.get('floor_id') if params else None
+              if floor_id:
+                  result = maps_table.query(
+                      IndexName='by-floor',
+                      KeyConditionExpression='floor_id = :f',
+                      ExpressionAttributeValues={':f': floor_id}
+                  )
+              else:
+                  result = maps_table.scan()
+              return response(200, {'maps': result.get('Items', [])})
+
+          def create_map(body):
+              map_id = body.get('map_id') or str(uuid.uuid4())
+              maps_table.put_item(Item=convert_floats({
+                  'map_id': map_id,
+                  'name': body.get('name', ''),
+                  'floor_id': body.get('floor_id', ''),
+                  'resolution': body.get('resolution', 0.05),
+                  'origin_x': body.get('origin_x', 0),
+                  'origin_y': body.get('origin_y', 0),
+                  'width': body.get('width', 0),
+                  'height': body.get('height', 0),
+                  'waypoints': body.get('waypoints', []),
+                  'created_at': int(time.time() * 1000)
+              }))
+              return response(200, {'status': 'created', 'map_id': map_id})
+
+          def get_map(map_id):
+              result = maps_table.get_item(Key={'map_id': map_id})
+              item = result.get('Item')
+              if item:
+                  return response(200, item)
+              return response(404, {'error': 'Map not found'})
+
+          def update_map(map_id, body):
+              update_expr = 'SET updated_at = :t'
+              expr_values = {':t': int(time.time() * 1000)}
+              for key in ['name', 'waypoints', 'resolution', 'origin_x', 'origin_y', 'width', 'height']:
+                  if key in body:
+                      update_expr += f', {key} = :{key[0]}'
+                      expr_values[f':{key[0]}'] = convert_floats(body[key])
+              maps_table.update_item(
+                  Key={'map_id': map_id},
+                  UpdateExpression=update_expr,
+                  ExpressionAttributeValues=expr_values
+              )
+              return response(200, {'status': 'updated', 'map_id': map_id})
+
+          def delete_map(map_id):
+              maps_table.delete_item(Key={'map_id': map_id})
+              return response(200, {'status': 'deleted'})
+
+          # Tours functions - shared by all robots on a map
+          # Tours store full sequence data: waypoints with speak/display actions, timing, etc.
+          def get_tours(params):
+              map_id = params.get('map_id') if params else None
+              if map_id:
+                  result = tours_table.query(
+                      IndexName='by-map',
+                      KeyConditionExpression='map_id = :m',
+                      ExpressionAttributeValues={':m': map_id}
+                  )
+              else:
+                  result = tours_table.scan()
+              return response(200, {'tours': result.get('Items', [])})
+
+          def create_tour(body):
+              tour_id = body.get('tour_id') or str(uuid.uuid4())
+              now = int(time.time() * 1000)
+              # Store ALL fields from body - Flutter sends complete tour data
+              item = convert_floats({
+                  'tour_id': tour_id,
+                  'map_id': body.get('map_id', ''),
+                  'name': body.get('name', ''),
+                  'description': body.get('description', ''),
+                  'waypoints': body.get('waypoints', []),  # List of {name, speak_text, display_url, display_duration, wait_seconds}
+                  'dwell_times': body.get('dwell_times', {}),
+                  'loop': body.get('loop', False),
+                  'announce_arrival': body.get('announce_arrival', False),
+                  'rest_at_end_seconds': body.get('rest_at_end_seconds', 0),  # Wait at end before returning to start
+                  'intro_text': body.get('intro_text'),
+                  'outro_text': body.get('outro_text'),
+                  'start_waypoint': body.get('start_waypoint'),
+                  'end_waypoint': body.get('end_waypoint'),
+                  'modified_at': body.get('modified_at', now),
+                  'created_at': body.get('created_at', now),
+                  'updated_at': now
+              })
+              # Remove None values to avoid DynamoDB null issues
+              item = {k: v for k, v in item.items() if v is not None}
+              tours_table.put_item(Item=item)
+              return response(200, {'status': 'created', 'tour_id': tour_id})
+
+          def get_tour(tour_id):
+              result = tours_table.get_item(Key={'tour_id': tour_id})
+              item = result.get('Item')
+              if item:
+                  return response(200, item)
+              return response(404, {'error': 'Tour not found'})
+
+          def update_tour(tour_id, body):
+              now = int(time.time() * 1000)
+              # Build dynamic update expression for all provided fields
+              update_expr_parts = ['updated_at = :updated_at']
+              expr_values = {':updated_at': now}
+              expr_names = {}
+
+              # All supported tour fields
+              field_map = {
+                  'name': 'n', 'description': 'd', 'waypoints': 'w', 'dwell_times': 'dt',
+                  'loop': 'l', 'announce_arrival': 'aa', 'rest_at_end_seconds': 'rae',
+                  'intro_text': 'it', 'outro_text': 'ot',
+                  'start_waypoint': 'sw', 'end_waypoint': 'ew', 'modified_at': 'ma', 'map_id': 'mi'
+              }
+
+              for field, abbrev in field_map.items():
+                  if field in body:
+                      # Handle reserved words
+                      if field in ['name']:
+                          expr_names[f'#{abbrev}'] = field
+                          update_expr_parts.append(f'#{abbrev} = :{abbrev}')
+                      else:
+                          update_expr_parts.append(f'{field} = :{abbrev}')
+                      expr_values[f':{abbrev}'] = convert_floats(body[field])
+
+              update_expr = 'SET ' + ', '.join(update_expr_parts)
+
+              update_args = {
+                  'Key': {'tour_id': tour_id},
+                  'UpdateExpression': update_expr,
+                  'ExpressionAttributeValues': expr_values
+              }
+              if expr_names:
+                  update_args['ExpressionAttributeNames'] = expr_names
+
+              tours_table.update_item(**update_args)
+              return response(200, {'status': 'updated', 'tour_id': tour_id})
+
+          def delete_tour(tour_id):
+              tours_table.delete_item(Key={'tour_id': tour_id})
+              return response(200, {'status': 'deleted'})
+
           def response(status_code, body):
               return {
                   'statusCode': status_code,
                   'headers': {
                       'Content-Type': 'application/json',
                       'Access-Control-Allow-Origin': '*',
-                      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
                       'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
                   },
                   'body': json.dumps(body, default=decimal_default)
@@ -398,7 +698,7 @@ Resources:
   FleetApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: !Sub 'turboturf-api-${Environment}'
+      Name: !Sub 'frontiertower-api-${Environment}'
       ProtocolType: HTTP
       CorsConfiguration:
         AllowOrigins:
@@ -406,10 +706,13 @@ Resources:
         AllowMethods:
           - GET
           - POST
+          - PUT
+          - DELETE
           - OPTIONS
         AllowHeaders:
           - Content-Type
           - X-API-Key
+        MaxAge: 300
 
   FleetApiIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -446,7 +749,7 @@ Outputs:
     Description: Fleet API Endpoint
     Value: !Sub 'https://${FleetApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
     Export:
-      Name: !Sub 'TurboTurf-ApiEndpoint-${Environment}'
+      Name: !Sub 'FrontierTower-ApiEndpoint-${Environment}'
 
   RobotsTableName:
     Description: DynamoDB Robots Table
@@ -463,3 +766,15 @@ Outputs:
   FleetConfigTableName:
     Description: DynamoDB Fleet Config Table (shared across ALL robots)
     Value: !Ref FleetConfigTable
+
+  FloorsTableName:
+    Description: DynamoDB Floors Table
+    Value: !Ref FloorsTable
+
+  MapsTableName:
+    Description: DynamoDB Maps Table (maps belong to floors)
+    Value: !Ref MapsTable
+
+  ToursTableName:
+    Description: DynamoDB Tours Table (tours belong to maps, shared by robots)
+    Value: !Ref ToursTable

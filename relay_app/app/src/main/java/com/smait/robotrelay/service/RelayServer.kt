@@ -3,6 +3,7 @@ package com.smait.robotrelay.service
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.smait.robotrelay.protocol.SmaitProtocol
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
 import kotlinx.coroutines.*
@@ -31,12 +32,20 @@ class RelayServer(
 
     interface TaskExecutor {
         fun speakText(text: String)
+        fun stopSpeak()  // Stop current TTS to prevent queue buildup
         fun displayUrl(url: String)
         fun closeDisplay()
         fun runTask(type: String, data: String, waitSeconds: Int)
         fun cancelTask()
+        fun playAlertSound(soundType: String)
         fun setTtsApiKey(apiKey: String?)
         fun hasTtsApiKey(): Boolean
+        // Countdown timer overlay
+        fun updateCountdown(seconds: Int, label: String)
+        // Tour mode lock screen
+        fun startTourMode(pin: String?)
+        fun stopTourMode()
+        fun notifyTourStandby(sequenceId: String, buttonText: String)
     }
     companion object {
         private const val TAG = "RelayServer"
@@ -54,8 +63,24 @@ class RelayServer(
     private val _connectedClients = MutableStateFlow(0)
     val connectedClients: StateFlow<Int> = _connectedClients
 
+    private var messageForwarderJob: Job? = null
+    private var connectionWatcherJob: Job? = null
+    private var navStatusWatcherJob: Job? = null
+    private var lastRobotConnectedState = false
+
+    // Command buffer for task execution
+    lateinit var commandBuffer: CommandBuffer
+        private set
+
     fun start() {
         try {
+            // Initialize command buffer
+            commandBuffer = CommandBuffer(robotClient, taskExecutor) { statusJson ->
+                // Broadcast buffer status to all connected Flutter clients
+                wsServer?.broadcast(statusJson)
+            }
+            commandBuffer.start()
+
             // Start HTTP server on port
             httpServer = RelayHttpServer(port, robotClient, gson, taskExecutor, configStore)
             httpServer?.start()
@@ -63,25 +88,139 @@ class RelayServer(
             // Start WebSocket server on port + 1
             wsServer = RelayWebSocketServer(port + 1, robotClient, scope, { count ->
                 _connectedClients.value = count
-            }, taskExecutor)
+            }, taskExecutor, commandBuffer)
             wsServer?.start()
 
             _isRunning.value = true
             Log.i(TAG, "Relay server started on HTTP:$port, WS:${port + 1}")
 
             // Forward robot messages to connected WebSocket clients
-            scope.launch {
-                robotClient.incomingMessages.collect { message ->
-                    wsServer?.broadcast(message)
-                }
-            }
+            // Use SupervisorJob and restart on failure to handle client disconnects gracefully
+            startMessageForwarder()
+
+            // CRITICAL: Watch robot connection state and restart forwarder on reconnect
+            startConnectionWatcher()
+
+            // Watch nav status for command buffer completion
+            startNavStatusWatcher()
         } catch (e: IOException) {
             Log.e(TAG, "Failed to start server: ${e.message}")
             _isRunning.value = false
         }
     }
 
+    /**
+     * Watch robot nav status and forward to command buffer
+     */
+    private fun startNavStatusWatcher() {
+        navStatusWatcherJob?.cancel()
+        navStatusWatcherJob = scope.launch {
+            robotClient.robotStatus.collect { status ->
+                if (status != null) {
+                    commandBuffer.onNavStatus(status.navStatus, status.currentGoalName ?: "")
+                }
+            }
+        }
+    }
+
+    /**
+     * Watch robot connection state and restart the message forwarder when robot reconnects.
+     * This is critical because the SharedFlow collect() can get stuck when robot disconnects.
+     */
+    private fun startConnectionWatcher() {
+        connectionWatcherJob?.cancel()
+        connectionWatcherJob = scope.launch {
+            robotClient.connectionState.collect { state ->
+                val isConnected = state == ConnectionState.CONNECTED
+                Log.i(TAG, "Robot connection state: $state (was connected: $lastRobotConnectedState)")
+
+                // Detect reconnection: was disconnected/error, now connected
+                if (isConnected && !lastRobotConnectedState) {
+                    Log.i(TAG, ">>> Robot reconnected! Restarting message forwarder...")
+                    // Give robot time to establish subscriptions
+                    delay(1000)
+                    startMessageForwarder()
+                }
+
+                lastRobotConnectedState = isConnected
+            }
+        }
+    }
+
+    /**
+     * Start the message forwarder coroutine with auto-restart on failure.
+     * This is critical for resilience - if a client disconnects abruptly (e.g., Flutter hot reload),
+     * the forwarder should continue working for other clients.
+     */
+    private fun startMessageForwarder() {
+        messageForwarderJob?.cancel()
+        messageForwarderJob = scope.launch {
+            var restartCount = 0
+            var mapMsgCount = 0
+            var lastMapTime = 0L
+            var lastMessageTime = System.currentTimeMillis()
+            var totalMessageCount = 0L
+
+            // Start liveness monitor that logs heartbeat every 10 seconds
+            val livenessJob = launch {
+                while (isActive) {
+                    delay(10_000)
+                    val timeSinceLastMsg = System.currentTimeMillis() - lastMessageTime
+                    val robotConnected = robotClient.connectionState.value == ConnectionState.CONNECTED
+                    Log.i(TAG, "Forwarder heartbeat: ${totalMessageCount} msgs, last msg ${timeSinceLastMsg}ms ago, robot=$robotConnected")
+
+                    // If robot is connected but we haven't received messages in 30 seconds, log warning
+                    if (robotConnected && timeSinceLastMsg > 30_000) {
+                        Log.w(TAG, ">>> WARNING: No messages in ${timeSinceLastMsg}ms despite robot being connected!")
+                    }
+                }
+            }
+
+            while (isActive && _isRunning.value) {
+                try {
+                    Log.i(TAG, "Message forwarder starting (restart #$restartCount)")
+                    robotClient.incomingMessages.collect { message ->
+                        try {
+                            lastMessageTime = System.currentTimeMillis()
+                            totalMessageCount++
+
+                            // Track /map messages - they're large but needed for Flutter clients
+                            val isMapMsg = message.contains("\"/map\"") || message.contains("\"topic\":\"/map\"")
+                            if (isMapMsg) {
+                                mapMsgCount++
+                                val timeSinceLast = lastMessageTime - lastMapTime
+                                Log.i(TAG, ">>> /map #$mapMsgCount (${message.length} bytes, ${timeSinceLast}ms since last)")
+                                lastMapTime = lastMessageTime
+                            }
+
+                            wsServer?.broadcast(message)
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Broadcast error (continuing): ${t.javaClass.simpleName}: ${t.message}")
+                        }
+                    }
+                    Log.i(TAG, "Message forwarder flow completed, will restart...")
+                } catch (t: Throwable) {
+                    Log.e(TAG, "Message forwarder error: ${t.javaClass.simpleName}: ${t.message}")
+                    t.printStackTrace()
+                }
+                // Minimal delay before restart - speed is critical for safety
+                if (isActive && _isRunning.value) {
+                    restartCount++
+                    delay(100)  // Reduced from 500ms for faster recovery
+                }
+            }
+            livenessJob.cancel()
+            Log.i(TAG, "Message forwarder stopped")
+        }
+    }
+
     fun stop() {
+        connectionWatcherJob?.cancel()
+        messageForwarderJob?.cancel()
+        navStatusWatcherJob?.cancel()
+        if (::commandBuffer.isInitialized) {
+            commandBuffer.stop()
+        }
         httpServer?.stop()
         wsServer?.stop()
         _isRunning.value = false
@@ -134,6 +273,7 @@ class RelayHttpServer(
         }
 
         val response = when {
+            uri == "/discovery" && method == Method.GET -> handleDiscovery()
             uri == "/status" && method == Method.GET -> handleGetStatus()
             uri == "/cmd" && method == Method.POST -> handleRawCommand(session)
             uri == "/velocity" && method == Method.POST -> handleVelocity(session)
@@ -142,6 +282,9 @@ class RelayHttpServer(
             uri == "/estop" && method == Method.POST -> handleEStop(session)
             uri == "/cancel" && method == Method.POST -> handleCancel()
             uri == "/info" && method == Method.GET -> handleGetInfo()
+            // Map endpoint - HTTP transport for large map data (more reliable than WS)
+            uri == "/map" && method == Method.GET -> handleGetMap()
+            uri == "/map/refresh" && method == Method.POST -> handleRefreshMap()
             // Task endpoints
             uri == "/speak" && method == Method.POST -> handleSpeak(session)
             uri == "/display" && method == Method.POST -> handleDisplay(session)
@@ -203,6 +346,22 @@ class RelayHttpServer(
             </html>
         """.trimIndent()
         return newFixedLengthResponse(Response.Status.OK, "text/html", html)
+    }
+
+    private fun handleDiscovery(): Response {
+        val status = robotClient.robotStatus.value
+        val data = mapOf(
+            "type" to "SMAIT_RELAY",
+            "version" to "1.0",
+            "relayHttpPort" to (this as NanoHTTPD).listeningPort,
+            "relayWsPort" to (this as NanoHTTPD).listeningPort + 1,
+            "robotConnected" to (robotClient.connectionState.value == ConnectionState.CONNECTED),
+            "robotIp" to robotClient.robotIp,
+            "deviceName" to android.os.Build.MODEL,
+            "battery" to (status?.battery ?: 0),
+            "navStatus" to (status?.navStatus ?: 0)
+        )
+        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(data))
     }
 
     private fun handleGetStatus(): Response {
@@ -281,6 +440,40 @@ class RelayHttpServer(
         robotClient.cancelNavigation()
         return newFixedLengthResponse(Response.Status.OK, "application/json",
             gson.toJson(mapOf("cancelled" to true)))
+    }
+
+    // === Map HTTP Transport ===
+    // More reliable than WebSocket for large payloads
+
+    private fun handleGetMap(): Response {
+        val mapJson = robotClient.cachedMapMessage
+        if (mapJson == null) {
+            Log.w(TAG, "GET /map - no cached map available")
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json",
+                gson.toJson(mapOf(
+                    "error" to "No map data available",
+                    "hint" to "Robot may not be publishing /map or relay just started"
+                )))
+        }
+
+        val age = System.currentTimeMillis() - robotClient.mapLastUpdated
+        Log.i(TAG, "GET /map - serving cached map (${mapJson.length} bytes, ${age}ms old)")
+
+        // Return the raw rosbridge message (contains topic and msg)
+        return newFixedLengthResponse(Response.Status.OK, "application/json", mapJson).apply {
+            addHeader("X-Map-Age-Ms", age.toString())
+            addHeader("X-Map-Size", mapJson.length.toString())
+        }
+    }
+
+    private fun handleRefreshMap(): Response {
+        Log.i(TAG, "POST /map/refresh - triggering map refresh")
+        robotClient.refreshMap()
+        return newFixedLengthResponse(Response.Status.OK, "application/json",
+            gson.toJson(mapOf(
+                "refreshing" to true,
+                "message" to "Map refresh initiated, GET /map in a few seconds"
+            )))
     }
 
     // === Task Endpoints ===
@@ -399,7 +592,8 @@ class RelayWebSocketServer(
     private val robotClient: RobotWebSocketClient,
     private val scope: CoroutineScope,
     private val onClientCountChanged: (Int) -> Unit,
-    private val taskExecutor: RelayServer.TaskExecutor? = null
+    private val taskExecutor: RelayServer.TaskExecutor? = null,
+    private val commandBuffer: CommandBuffer? = null
 ) : NanoWSD(port) {
 
     companion object {
@@ -444,7 +638,7 @@ class RelayWebSocketServer(
     }
 
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
-        return RelayWebSocket(handshake, robotClient, scope, taskExecutor) { ws, connected ->
+        return RelayWebSocket(handshake, robotClient, scope, taskExecutor, commandBuffer) { ws, connected ->
             synchronized(clients) {
                 if (connected) {
                     clients.add(ws)
@@ -458,13 +652,20 @@ class RelayWebSocketServer(
     }
 
     fun broadcast(message: String) {
+        val deadClients = mutableListOf<WebSocket>()
         synchronized(clients) {
             clients.forEach { client ->
                 try {
                     client.send(message)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Broadcast error: ${e.message}")
+                    Log.e(TAG, "Broadcast error, removing dead client: ${e.message}")
+                    deadClients.add(client)
                 }
+            }
+            // Remove dead clients
+            if (deadClients.isNotEmpty()) {
+                clients.removeAll(deadClients)
+                onClientCountChanged(clients.size)
             }
         }
     }
@@ -474,6 +675,7 @@ class RelayWebSocketServer(
         private val robotClient: RobotWebSocketClient,
         private val scope: CoroutineScope,
         private val taskExecutor: RelayServer.TaskExecutor?,
+        private val commandBuffer: CommandBuffer?,
         private val onConnectionChanged: (WebSocket, Boolean) -> Unit
     ) : NanoWSD.WebSocket(handshake) {
 
@@ -482,6 +684,9 @@ class RelayWebSocketServer(
         override fun onOpen() {
             Log.i(TAG, "Client connected")
             onConnectionChanged(this, true)
+            // Force /map refresh using the robust refreshMap method
+            Log.i(TAG, "Triggering map refresh for new Flutter client")
+            robotClient.refreshMap()
         }
 
         override fun onClose(code: WebSocketFrame.CloseCode, reason: String, initiatedByRemote: Boolean) {
@@ -497,12 +702,54 @@ class RelayWebSocketServer(
                 val json = gson.fromJson(payload, com.google.gson.JsonObject::class.java)
                 val op = json.get("op")?.asString
 
-                // Log all ops that start with "tablet_" for debugging
-                if (op?.startsWith("tablet_") == true) {
-                    Log.i(TAG, ">>> Received tablet command: op=$op, executor=${taskExecutor != null}")
+                // Log all ops that start with "tablet_" or "buffer_" for debugging
+                if (op?.startsWith("tablet_") == true || op?.startsWith("buffer_") == true) {
+                    Log.i(TAG, ">>> Received command: op=$op")
                 }
 
                 when (op) {
+                    // === BUFFER PROTOCOL (new, preferred) ===
+                    "buffer_load" -> {
+                        val commands = json.getAsJsonArray("commands")?.map { cmdJson ->
+                            BufferCommand.fromJson(cmdJson.asJsonObject)
+                        } ?: emptyList()
+                        val clearExisting = json.get("clear_existing")?.asBoolean ?: false
+                        Log.i(TAG, "Buffer load: ${commands.size} commands, clear=$clearExisting")
+                        commandBuffer?.loadCommands(commands, clearExisting)
+                        return
+                    }
+                    "buffer_clear" -> {
+                        Log.i(TAG, "Buffer clear")
+                        commandBuffer?.clear()
+                        return
+                    }
+                    "buffer_pause" -> {
+                        Log.i(TAG, "Buffer pause")
+                        commandBuffer?.pause()
+                        return
+                    }
+                    "buffer_resume" -> {
+                        Log.i(TAG, "Buffer resume")
+                        commandBuffer?.resume()
+                        return
+                    }
+                    "buffer_skip" -> {
+                        Log.i(TAG, "Buffer skip")
+                        commandBuffer?.skip()
+                        return
+                    }
+                    "buffer_status" -> {
+                        Log.i(TAG, "Buffer status request")
+                        // Heartbeat will send current status
+                        return
+                    }
+
+                    // === LEGACY TABLET COMMANDS (still supported) ===
+                    "tablet_stop_speak" -> {
+                        Log.i(TAG, "Tablet stop speak")
+                        taskExecutor?.stopSpeak()
+                        return
+                    }
                     "tablet_speak" -> {
                         val text = json.get("text")?.asString
                         if (text == null) {
@@ -547,6 +794,37 @@ class RelayWebSocketServer(
                     "tablet_cancel" -> {
                         Log.i(TAG, "Tablet cancel task")
                         taskExecutor?.cancelTask()
+                        return
+                    }
+                    "tablet_play_sound" -> {
+                        val sound = json.get("sound")?.asString ?: "beep"
+                        Log.i(TAG, "Tablet play sound: $sound")
+                        taskExecutor?.playAlertSound(sound)
+                        return
+                    }
+                    "tablet_refresh_map" -> {
+                        Log.i(TAG, ">>> Manual map refresh requested by Flutter")
+                        robotClient.refreshMap()
+                        return
+                    }
+                    // Countdown timer overlay
+                    "tablet_countdown" -> {
+                        val seconds = json.get("seconds")?.asInt ?: 0
+                        val label = json.get("label")?.asString ?: "Next stop in"
+                        Log.i(TAG, "Tablet countdown: ${seconds}s - $label")
+                        taskExecutor?.updateCountdown(seconds, label)
+                        return
+                    }
+                    // Tour mode lock screen
+                    "tablet_tour_start" -> {
+                        val pin = json.get("pin")?.asString
+                        Log.i(TAG, "Tablet tour start (pin=${if (pin.isNullOrEmpty()) "default" else "custom"})")
+                        taskExecutor?.startTourMode(pin)
+                        return
+                    }
+                    "tablet_tour_stop" -> {
+                        Log.i(TAG, "Tablet tour stop")
+                        taskExecutor?.stopTourMode()
                         return
                     }
                     // Handle rosbridge ping - respond with pong to keep connection alive

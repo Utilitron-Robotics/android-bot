@@ -709,6 +709,16 @@ class _FleetPickerState extends State<FleetPicker>
   }
 
   void _selectRobot(RobotBase robot) {
+    // Block connection to offline robots
+    if (!robot.isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${robot.displayName} is offline. Power on the robot first.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
     Navigator.pop(context, robot);
   }
 }

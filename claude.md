@@ -82,6 +82,52 @@ Based on "smAiT Upper Computer Communication Protocol" - JSON over WebSocket (ro
 - Linear: max 0.5 m/s (0.25 m/s in SLAM safe mode)
 - Angular: max 1.0 rad/s
 
+## Tour Mode
+
+The system supports automated guided tours with customer-facing tablet display.
+
+### Tour Sequence Execution
+Tours are defined as sequences of stops, each with:
+- **Waypoint** - Navigation destination
+- **Display URL** - Website/image shown on tablet (or default POI branding)
+- **Speak Text** - TTS narration at the stop
+- **Wait Time** - Dwell time AFTER speech completes
+
+**Execution Order per Stop:**
+1. Navigate to waypoint
+2. Display content (custom URL or default POI name)
+3. Arrival sound + announcement (if enabled)
+4. Custom speak text
+5. Wait timer (additional time after speech)
+
+### Tour Configuration
+| Field | Description |
+|-------|-------------|
+| `startWaypoint` | Navigate here before starting tour |
+| `endWaypoint` | Navigate here after completing tour |
+| `restAtEndSeconds` | Wait at end before returning to start (for loops) |
+| `introText` | Spoken before starting tour |
+| `outroText` | Spoken after completing tour |
+| `announceArrival` | Say "Arrived at [waypoint]" at each stop |
+| `loop` | Repeat tour continuously |
+
+### Tablet Lock Screen (Tour Mode)
+When a tour starts, the tablet enters **Tour Mode**:
+- Screen is locked to prevent customer access to controls
+- Displays company branding or custom URLs
+- Shows floating countdown timer (bottom-right corner)
+
+**Unlock:** Staff-only unlock mechanism (not documented for security reasons)
+
+### Tablet WebSocket Commands
+| Command | Description |
+|---------|-------------|
+| `tablet_countdown` | Update countdown timer overlay |
+| `tablet_tour_start` | Start tour mode (lock screen) |
+| `tablet_tour_stop` | Stop tour mode (unlock screen) |
+| `tablet_display` | Show URL in WebView |
+| `tablet_speak` | TTS announcement |
+
 ## Flutter App Structure
 
 ### Key Files
@@ -92,12 +138,17 @@ flutter_app/lib/
 │   ├── robot_connection.dart    # RobotConnection ChangeNotifier
 │   ├── rosbridge_client.dart    # Low-level WebSocket client
 │   ├── fleet_discovery.dart     # Robot fleet management
-│   └── dual_connection.dart     # Direct + relay mode switching
+│   ├── dual_connection.dart     # Direct + relay mode switching
+│   ├── sequence_mode.dart       # Tour/sequence definitions & SequenceManager
+│   ├── buffer_client.dart       # Command buffer client for relay
+│   └── buffer_sequence_executor.dart  # Tour execution via buffer
 ├── screens/
-│   └── home_screen.dart         # Main UI with connection bar
+│   ├── home_screen.dart         # Main UI with connection bar
+│   └── hud_screen.dart          # HUD with tour controls & countdown
 ├── services/
 │   ├── robot_introspection.dart # Capability discovery
-│   └── audio_announcer.dart     # TTS singleton for announcements
+│   ├── audio_announcer.dart     # TTS singleton for announcements
+│   └── sequence_executor.dart   # Tour execution service
 └── widgets/
     ├── widget_factory.dart      # Dynamic UI based on capabilities
     ├── waypoint_grid.dart       # POI navigation buttons
@@ -105,7 +156,8 @@ flutter_app/lib/
     ├── voice_control.dart       # Speech-to-text waypoint selection
     ├── map_view.dart            # Real-time SLAM map display
     ├── status_panel.dart        # Battery, nav status display
-    └── fleet_picker.dart        # Robot selection dialog
+    ├── fleet_picker.dart        # Robot selection dialog
+    └── sequence_editor.dart     # Tour creation/editing UI
 ```
 
 ### State Management
@@ -122,6 +174,7 @@ flutter_app/lib/
 
 ### Overview
 Runs on Android tablet mounted on robot. Bridges house WiFi to robot WiFi.
+Provides both technician controls and customer-facing tour display.
 
 ### Ports
 | Port | Protocol | Description |
@@ -142,14 +195,22 @@ POST /estop    - {"enabled": true/false}
 POST /cancel   - Cancel navigation
 ```
 
+### UI Layers
+The tablet UI has multiple overlays:
+1. **Main Layout** - Technician controls (joystick, status, waypoint buttons)
+2. **WebView** - Customer-facing display (URLs, company branding)
+3. **Countdown Overlay** - Floating timer (bottom-right, above WebView)
+4. **Lock Overlay** - Tour mode lock screen (full screen, above all)
+
 ### Key Files
 ```
 relay_app/app/src/main/java/com/smait/robotrelay/
 ├── ui/
-│   └── MainActivity.kt          # UI with joystick, status display
+│   └── MainActivity.kt          # UI with joystick, tour mode, lock screen
 ├── service/
-│   ├── RelayService.kt          # Foreground service
+│   ├── RelayService.kt          # Foreground service, TTS, tour mode
 │   ├── RelayServer.kt           # HTTP + WebSocket servers
+│   ├── CommandBuffer.kt         # Sequence command execution
 │   └── RobotWebSocketClient.kt  # Connection to robot base
 ├── protocol/
 │   └── SmaitProtocol.kt         # Protocol message builders
@@ -211,6 +272,56 @@ curl -X POST http://tablet-ip:8765/velocity -H "Content-Type: application/json" 
 curl -X POST http://tablet-ip:8765/navigate -H "Content-Type: application/json" -d '{"poi":"P1"}'
 ```
 
+## Navigation Recovery System
+
+When navigation fails (status 604) or robot gets stuck, the CommandBuffer performs intelligent recovery:
+
+### Recovery Sequence
+1. **Detect Block** - LIDAR zone (STOP/CREEP), ultrasonic sensors, or nav failure (604)
+2. **Cancel Nav** - Stop current navigation attempt
+3. **Announce** - "Looking for an alternative path" (if enabled)
+4. **Backup** - Reverse slowly (5cm/s tortoise speed) for ~3 seconds
+5. **Spin Search** - Rotate to find clear direction (both LIDAR AND ultrasonic must be clear)
+6. **Nudge Forward** - Move slightly into the clear space
+7. **Retry Nav** - Re-issue navigation command
+8. **Give Up** - After max attempts, play sad R2D2 sounds and ask for help
+
+### Sensor Fusion
+The recovery system uses multiple sensor inputs:
+
+| Sensor | Topic | Detection |
+|--------|-------|-----------|
+| LIDAR | `/laser_data` | SafetyZone (STOP/CREEP/WARN/CLEAR) based on nearest obstacle |
+| Ultrasonic | `/mobile_base/sensors/core` → `analog_input` | Cardboard, glass, soft objects LIDAR can't see |
+| Odometry | `/robot_status` → `velocity` | Detect when pushing but not moving (invisible obstacle) |
+| Bumper | `/mobile_base/sensors/core` → `bumper` | Physical contact detection |
+
+### Smart Velocity
+Raw velocity commands check actual vs commanded motion:
+- If commanding motion but `velocity ≈ 0` for 3 consecutive checks (~600ms)
+- Robot is blocked by something (glass window, heavy object)
+- Stop pushing immediately - don't be stubborn
+
+### Recovery Configuration
+Configurable via `set_recovery_config` command from Flutter:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stuckThresholdMs` | 15000 | Time stuck before recovery triggers |
+| `maxRecoveryAttempts` | 3 | Retries before giving up |
+| `backupSpeed` | 0.05 m/s | Reverse speed (tortoise - safe for wheelchairs) |
+| `backupDurationMs` | 3000 | How long to reverse |
+| `spinSpeed` | 0.3 rad/s | Rotation speed while searching |
+| `nudgeSpeed` | 0.05 m/s | Forward nudge after finding clear |
+| `nudgeDurationMs` | 2000 | How long to nudge |
+| `announceRecovery` | true | TTS announcements during recovery |
+
+### Failure Behavior
+When all recovery attempts exhausted:
+1. TTS: "I'm stuck. I need help please."
+2. Play sad R2D2 sounds (descending woeful tones)
+3. Complete command with `robot_failed` status
+
 ## Audio Announcements
 
 The Flutter app uses TTS to announce:
@@ -222,17 +333,52 @@ The Flutter app uses TTS to announce:
 
 Toggle audio in joystick widget.
 
+## Alert Sounds
+
+Generated tones via AudioTrack (works on all devices):
+
+| Sound | Pattern | Use Case |
+|-------|---------|----------|
+| `beep` | Single A5 (880Hz) | Attention |
+| `horn` | A4→F4→D4 descending | Alarm/warning |
+| `arrival` | A5→C6→A5 beep-boop | POI arrival |
+| `delivery` | C5→E5→G5→C6 triumphant | Delivery complete |
+| `sad` | A5→F5→C5→G4→E4→C4→A3 | Stuck/needs help (R2D2 whimper) |
+
+## Cloud Fleet Management
+
+### AWS Infrastructure
+CloudFormation stack in `infrastructure/frontiertower-stack.yaml`:
+
+| Resource | Purpose |
+|----------|---------|
+| API Gateway | HTTP API for tour sync, fleet status |
+| Lambda | Request processing |
+| DynamoDB | Tours, maps, floors, robots, commands, alerts |
+
+### Tour Cloud Sync
+Tours can sync to cloud for fleet-wide sharing:
+1. Deploy CloudFormation stack
+2. Get API endpoint from stack outputs
+3. Enter URL in Cloud Sync dialog (Flutter app)
+4. Push/Pull tours by map ID
+
+### DynamoDB Tables
+| Table | Key | Description |
+|-------|-----|-------------|
+| `frontiertower-tours-{env}` | `tour_id` | Tour sequences with stops, speak text, URLs |
+| `frontiertower-maps-{env}` | `map_id` | SLAM maps, waypoints |
+| `frontiertower-floors-{env}` | `floor_id` | Physical floors in buildings |
+| `frontiertower-robots-{env}` | `robot_id` | Robot status, position, battery |
+| `frontiertower-commands-{env}` | `robot_id + command_id` | Pending commands |
+| `frontiertower-alerts-{env}` | `robot_id + timestamp` | Alerts, warnings |
+| `frontiertower-fleet-config-{env}` | `config_key` | Fleet-wide settings |
+
 ## Future Development
 
 ### Planned Features
 - Camera/microphone integration for video calling
-- AWS IoT cloud fleet management
 - Multi-robot coordination
-- Obstacle avoidance visualization
+- Obstacle avoidance visualization on map
 - Route planning interface
-
-### Infrastructure
-AWS CloudFormation stack defined in `infrastructure/turboturf-stack.yaml` for:
-- IoT Core for robot fleet
-- Lambda for command processing
-- DynamoDB for telemetry storage
+- IoT Core for real-time telemetry

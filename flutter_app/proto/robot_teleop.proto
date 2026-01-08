@@ -1,0 +1,238 @@
+syntax = "proto3";
+
+package smait.teleop.v1;
+
+option java_package = "com.smait.teleop.v1";
+option java_multiple_files = true;
+
+// Robot Teleop Service - gRPC wrapper for robot control
+// Provides reliable WAN communication with command acknowledgment
+
+service RobotTeleop {
+  // Send a command to the robot with acknowledgment
+  rpc SendCommand(CommandRequest) returns (CommandResponse);
+
+  // Stream commands (for real-time velocity control)
+  rpc StreamCommands(stream CommandRequest) returns (stream CommandResponse);
+
+  // Subscribe to robot status updates
+  rpc SubscribeStatus(StatusSubscription) returns (stream RobotStatus);
+
+  // Get current robot status (one-shot)
+  rpc GetStatus(GetStatusRequest) returns (RobotStatus);
+
+  // Navigate to a waypoint
+  rpc Navigate(NavigateRequest) returns (NavigateResponse);
+
+  // Cancel current navigation
+  rpc CancelNavigation(CancelRequest) returns (CancelResponse);
+
+  // Set soft e-stop
+  rpc SetSoftEstop(SoftEstopRequest) returns (SoftEstopResponse);
+
+  // Get available waypoints
+  rpc GetWaypoints(GetWaypointsRequest) returns (GetWaypointsResponse);
+
+  // Task mode operations
+  rpc StartTask(StartTaskRequest) returns (TaskResponse);
+  rpc StopTask(StopTaskRequest) returns (TaskResponse);
+  rpc GetTaskStatus(GetTaskStatusRequest) returns (TaskStatusResponse);
+}
+
+// Command types
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_NAVIGATE = 1;
+  COMMAND_TYPE_VELOCITY = 2;
+  COMMAND_TYPE_STOP = 3;
+  COMMAND_TYPE_CANCEL = 4;
+  COMMAND_TYPE_SOFT_ESTOP = 5;
+}
+
+// Command status for acknowledgment
+enum CommandStatus {
+  COMMAND_STATUS_UNSPECIFIED = 0;
+  COMMAND_STATUS_PENDING = 1;
+  COMMAND_STATUS_SENT = 2;
+  COMMAND_STATUS_ACKNOWLEDGED = 3;
+  COMMAND_STATUS_EXECUTING = 4;
+  COMMAND_STATUS_COMPLETED = 5;
+  COMMAND_STATUS_FAILED = 6;
+  COMMAND_STATUS_TIMEOUT = 7;
+}
+
+// Navigation status from robot
+enum NavStatus {
+  NAV_STATUS_UNSPECIFIED = 0;
+  NAV_STATUS_IDLE = 600;
+  NAV_STATUS_MOVING = 601;
+  NAV_STATUS_CANCELLED = 602;
+  NAV_STATUS_ARRIVED = 603;
+  NAV_STATUS_FAILED = 604;
+  NAV_STATUS_STANDBY = 605;
+}
+
+// Generic command request
+message CommandRequest {
+  string command_id = 1;
+  string robot_id = 2;
+  CommandType type = 3;
+
+  // Command-specific payload
+  oneof payload {
+    NavigatePayload navigate = 10;
+    VelocityPayload velocity = 11;
+    SoftEstopPayload soft_estop = 12;
+  }
+
+  // Retry configuration
+  int32 max_retries = 20;
+  int32 timeout_ms = 21;
+}
+
+message NavigatePayload {
+  string waypoint = 1;
+}
+
+message VelocityPayload {
+  double linear_x = 1;
+  double angular_z = 2;
+}
+
+message SoftEstopPayload {
+  bool enabled = 1;
+}
+
+// Command response with acknowledgment
+message CommandResponse {
+  string command_id = 1;
+  CommandStatus status = 2;
+  string error_message = 3;
+  int64 timestamp_ms = 4;
+}
+
+// Robot status subscription
+message StatusSubscription {
+  string robot_id = 1;
+  int32 interval_ms = 2; // Status update interval (0 = as fast as possible)
+  repeated string topics = 3; // Specific topics to subscribe to
+}
+
+message GetStatusRequest {
+  string robot_id = 1;
+}
+
+// Full robot status
+message RobotStatus {
+  string robot_id = 1;
+  int64 timestamp_ms = 2;
+
+  // Navigation
+  NavStatus nav_status = 10;
+  string current_goal = 11;
+
+  // Position
+  double x = 20;
+  double y = 21;
+  double theta = 22;
+
+  // Battery
+  double battery_percent = 30;
+  int32 charger_status = 31;
+
+  // Safety
+  bool soft_estop = 40;
+  bool hard_estop = 41;
+
+  // Velocity
+  double linear_velocity = 50;
+  double angular_velocity = 51;
+
+  // Location
+  string building_name = 60;
+  string floor_name = 61;
+
+  // Connection health
+  bool is_stale = 70;
+  int64 last_update_ms = 71;
+}
+
+// Navigation request
+message NavigateRequest {
+  string robot_id = 1;
+  string waypoint = 2;
+  int32 max_retries = 3;
+}
+
+message NavigateResponse {
+  string command_id = 1;
+  bool accepted = 2;
+  string error_message = 3;
+}
+
+// Cancel navigation
+message CancelRequest {
+  string robot_id = 1;
+}
+
+message CancelResponse {
+  bool success = 1;
+}
+
+// Soft e-stop
+message SoftEstopRequest {
+  string robot_id = 1;
+  bool enabled = 2;
+}
+
+message SoftEstopResponse {
+  bool success = 1;
+  bool current_state = 2;
+}
+
+// Waypoints
+message GetWaypointsRequest {
+  string robot_id = 1;
+}
+
+message GetWaypointsResponse {
+  repeated Waypoint waypoints = 1;
+}
+
+message Waypoint {
+  string name = 1;
+  double x = 2;
+  double y = 3;
+  string description = 4;
+}
+
+// Task operations
+message StartTaskRequest {
+  string robot_id = 1;
+  string task_type = 2; // 'tour', 'delivery', 'patrol', etc.
+  string task_id = 3;
+  bytes task_config = 4; // JSON-encoded task configuration
+}
+
+message StopTaskRequest {
+  string robot_id = 1;
+}
+
+message GetTaskStatusRequest {
+  string robot_id = 1;
+}
+
+message TaskResponse {
+  bool success = 1;
+  string task_id = 2;
+  string error_message = 3;
+}
+
+message TaskStatusResponse {
+  string task_id = 1;
+  string task_type = 2;
+  string status = 3; // 'idle', 'running', 'paused', 'completed', 'failed'
+  double progress = 4; // 0.0 - 1.0
+  string current_step = 5;
+  string error_message = 6;
+}

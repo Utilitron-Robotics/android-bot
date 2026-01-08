@@ -32,7 +32,16 @@ enum RobotSpeedMode {
 
 /// Virtual joystick for manual robot control
 class JoystickControl extends StatefulWidget {
-  const JoystickControl({super.key});
+  /// Ultrasonic distance in cm (from relay heartbeat), null if not available
+  final double? ultrasonicCm;
+  /// Whether ultrasonic detects blocking obstacle
+  final bool ultrasonicBlocked;
+
+  const JoystickControl({
+    super.key,
+    this.ultrasonicCm,
+    this.ultrasonicBlocked = false,
+  });
 
   @override
   State<JoystickControl> createState() => _JoystickControlState();
@@ -209,8 +218,8 @@ class _JoystickControlState extends State<JoystickControl> {
     _obstacleRight = minRight < creepDistance;
     _minFrontRange = minFront;
 
-    // Announce when entering danger zones
-    if (_slamSafe && _audioEnabled) {
+    // Announce when entering danger zones - only when actively using joystick
+    if (_slamSafe && _audioEnabled && _sendTimer != null) {
       if (minFront < stopDistance && !wasObstacle) {
         AudioAnnouncer().speak('Stop! Too close!');
       } else if (_obstacleAhead && !wasObstacle) {
@@ -228,42 +237,48 @@ class _JoystickControlState extends State<JoystickControl> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // Header with title
+            // Header with title (compact for narrow layouts)
             Row(
               children: [
-                Icon(Icons.gamepad,
+                Icon(Icons.gamepad, size: 18,
                   color: _slamSafe ? Colors.orange : null),
-                const SizedBox(width: 8),
-                Text(
-                  'Manual Control',
-                  style: Theme.of(context).textTheme.titleLarge,
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    'Control',
+                    style: Theme.of(context).textTheme.titleMedium,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 if (_slamSafe)
                   Container(
-                    margin: const EdgeInsets.only(left: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    margin: const EdgeInsets.only(left: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
                       color: Colors.orange,
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Text('SAFE',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
                   ),
               ],
             ),
             const SizedBox(height: 12),
 
-            // Control toggles row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Control toggles - compact for narrow layouts
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 8,
+              runSpacing: 4,
               children: [
-                // SLAM Safe toggle
+                // SLAM Safe toggle (compact)
                 FilterChip(
-                  label: const Text('SLAM Safe'),
+                  label: const Text('Safe', style: TextStyle(fontSize: 11)),
                   avatar: Icon(_slamSafe ? Icons.shield : Icons.shield_outlined,
-                    size: 18),
+                    size: 16),
                   selected: _slamSafe,
                   selectedColor: Colors.orange.shade700,
+                  visualDensity: VisualDensity.compact,
                   onSelected: (value) {
                     setState(() => _slamSafe = value);
                     if (_audioEnabled) {
@@ -272,14 +287,14 @@ class _JoystickControlState extends State<JoystickControl> {
                     }
                   },
                 ),
-                const SizedBox(width: 12),
-                // Audio toggle
+                // Audio toggle (compact)
                 FilterChip(
-                  label: const Text('Audio'),
+                  label: const Text('Audio', style: TextStyle(fontSize: 11)),
                   avatar: Icon(_audioEnabled ? Icons.volume_up : Icons.volume_off,
-                    size: 18),
+                    size: 16),
                   selected: _audioEnabled,
                   selectedColor: Colors.blue.shade700,
+                  visualDensity: VisualDensity.compact,
                   onSelected: (value) {
                     setState(() => _audioEnabled = value);
                     AudioAnnouncer().enabled = value;
@@ -290,18 +305,18 @@ class _JoystickControlState extends State<JoystickControl> {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
-            // Robot base speed mode selector
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            // Robot base speed mode selector (compact)
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
               children: [
-                const Icon(Icons.speed, size: 16),
-                const SizedBox(width: 8),
-                const Text('Base Mode: ', style: TextStyle(fontSize: 12)),
+                const Icon(Icons.speed, size: 14),
                 if (_speedModeLoading)
                   const SizedBox(
-                    width: 16, height: 16,
+                    width: 14, height: 14,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 else
@@ -312,7 +327,7 @@ class _JoystickControlState extends State<JoystickControl> {
                     items: RobotSpeedMode.values.map((mode) {
                       return DropdownMenuItem(
                         value: mode,
-                        child: Text(mode.label, style: const TextStyle(fontSize: 12)),
+                        child: Text(mode.label, style: const TextStyle(fontSize: 11)),
                       );
                     }).toList(),
                     onChanged: (mode) {
@@ -345,45 +360,51 @@ class _JoystickControlState extends State<JoystickControl> {
             const SizedBox(height: 16),
 
             // Velocity and Distance display (shows actual ramped velocity)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 8,
               children: [
                 _VelocityIndicator(
-                  label: 'Linear',
+                  label: 'Lin',
                   value: _actualLinear,  // Show actual velocity being sent
                   max: _maxLinear,
                   unit: 'm/s',
                 ),
-                const SizedBox(width: 24),
-                // Distance gauge
+                // LIDAR distance gauge
                 _DistanceGauge(
                   distance: _minFrontRange,
                   stopDist: stopDistance,
                   creepDist: creepDistance,
                   warnDist: warnDistance,
                 ),
-                const SizedBox(width: 24),
+                // Ultrasonic gauge (sees cardboard, glass, etc that LIDAR misses)
+                if (widget.ultrasonicCm != null)
+                  _UltrasonicGauge(
+                    distanceCm: widget.ultrasonicCm!,
+                    isBlocked: widget.ultrasonicBlocked,
+                  ),
                 _VelocityIndicator(
-                  label: 'Angular',
+                  label: 'Ang',
                   value: _actualAngular,  // Show actual velocity being sent
                   max: _maxAngular,
-                  unit: 'rad/s',
+                  unit: 'r/s',
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            // Obstacle zone indicator in safe mode
+            // Obstacle zone indicator in safe mode (compact)
             if (_slamSafe && _minFrontRange < warnDistance)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                margin: const EdgeInsets.only(bottom: 6),
                 decoration: BoxDecoration(
                   color: _minFrontRange < stopDistance
                       ? Colors.red.shade900
                       : _minFrontRange < creepDistance
                           ? Colors.orange.shade900
                           : Colors.yellow.shade900,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: _minFrontRange < stopDistance
                         ? Colors.red
@@ -402,15 +423,15 @@ class _JoystickControlState extends State<JoystickControl> {
                           : _minFrontRange < creepDistance
                               ? Colors.orange
                               : Colors.yellow,
-                      size: 16,
+                      size: 14,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     Text(
                       _minFrontRange < stopDistance
-                          ? 'STOPPED - ${_minFrontRange.toStringAsFixed(2)}m'
+                          ? 'STOP ${_minFrontRange.toStringAsFixed(1)}m'
                           : _minFrontRange < creepDistance
-                              ? 'CREEPING - ${_minFrontRange.toStringAsFixed(2)}m'
-                              : 'WARNING - ${_minFrontRange.toStringAsFixed(2)}m',
+                              ? 'CREEP ${_minFrontRange.toStringAsFixed(1)}m'
+                              : 'WARN ${_minFrontRange.toStringAsFixed(1)}m',
                       style: TextStyle(
                         color: _minFrontRange < stopDistance
                             ? Colors.red
@@ -418,7 +439,7 @@ class _JoystickControlState extends State<JoystickControl> {
                                 ? Colors.orange
                                 : Colors.yellow,
                         fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                        fontSize: 10,
                       ),
                     ),
                   ],
@@ -426,11 +447,13 @@ class _JoystickControlState extends State<JoystickControl> {
               ),
             Text(
               _slamSafe
-                ? 'Safe: Stop<${stopDistance}m • Creep<${creepDistance}m • Warn<${warnDistance}m'
-                : 'Drag to control • Full speed (${maxLinearFast}m/s)',
+                ? 'Stop<${stopDistance}m Creep<${creepDistance}m'
+                : 'Drag • ${maxLinearFast}m/s max',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: _slamSafe ? Colors.orange : Colors.grey,
+                fontSize: 10,
               ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -770,6 +793,120 @@ class _DistanceGauge extends StatelessWidget {
         // Distance value
         Text(
           distance.isInfinite ? '>2m' : '${distance.toStringAsFixed(2)}m',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontFamily: 'monospace',
+            color: zoneColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        Text(
+          zoneLabel,
+          style: TextStyle(
+            fontSize: 9,
+            color: zoneColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Visual gauge for ultrasonic sensor (sees cardboard, glass, etc)
+class _UltrasonicGauge extends StatelessWidget {
+  final double distanceCm;
+  final bool isBlocked;
+
+  // Ultrasonic thresholds (in cm)
+  static const double blockDist = 20.0;   // <20cm = blocked
+  static const double warnDist = 50.0;    // <50cm = warning
+  static const double maxDist = 100.0;    // Display max
+
+  const _UltrasonicGauge({
+    required this.distanceCm,
+    required this.isBlocked,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Determine zone and color
+    Color zoneColor;
+    String zoneLabel;
+    if (isBlocked || distanceCm < blockDist) {
+      zoneColor = Colors.purple;
+      zoneLabel = 'BLOCK';
+    } else if (distanceCm < warnDist) {
+      zoneColor = Colors.deepPurple;
+      zoneLabel = 'NEAR';
+    } else {
+      zoneColor = Colors.indigo;
+      zoneLabel = 'OK';
+    }
+
+    // Clamp display distance for gauge
+    final displayDist = distanceCm.clamp(0.0, maxDist);
+    final gaugePercent = (displayDist / maxDist).clamp(0.0, 1.0);
+
+    return Column(
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.sensors, size: 12, color: zoneColor),
+            const SizedBox(width: 2),
+            Text('US', style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: zoneColor,
+            )),
+          ],
+        ),
+        const SizedBox(height: 4),
+        // Vertical gauge bar (purple theme for ultrasonic)
+        Container(
+          width: 24,
+          height: 60,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.purple.shade600),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Stack(
+            alignment: Alignment.bottomCenter,
+            children: [
+              // Background zones
+              Column(
+                children: [
+                  Expanded(
+                    flex: 50,  // 50-100cm = OK
+                    child: Container(color: Colors.indigo.withValues(alpha: 0.2)),
+                  ),
+                  Expanded(
+                    flex: 30,  // 20-50cm = warn
+                    child: Container(color: Colors.deepPurple.withValues(alpha: 0.2)),
+                  ),
+                  Expanded(
+                    flex: 20,  // 0-20cm = block
+                    child: Container(color: Colors.purple.withValues(alpha: 0.3)),
+                  ),
+                ],
+              ),
+              // Distance indicator fill
+              FractionallySizedBox(
+                heightFactor: gaugePercent,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: zoneColor.withValues(alpha: 0.7),
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(3),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        // Distance value
+        Text(
+          distanceCm > 99 ? '>99' : '${distanceCm.toStringAsFixed(0)}cm',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             fontFamily: 'monospace',
             color: zoneColor,

@@ -69,35 +69,51 @@ class TaskStep {
       );
 }
 
-/// A mode is a named group of ordered task steps
-class TaskMode {
+/// Mode types - how the mode operates
+enum ModeType {
+  perWaypoint('Per-Waypoint', 'Executes when arriving at assigned waypoint'),
+  sequence('Sequence', 'Executes through multiple waypoints in order');
+
+  final String label;
+  final String description;
+  const ModeType(this.label, this.description);
+}
+
+/// A WaypointTask is a named group of ordered task steps assigned to a waypoint
+/// This defines WHAT happens at a waypoint (speak, display, wait, etc.)
+class WaypointTask {
   final String id;
   final String name;
   final String description;
   final List<TaskStep> steps;
   final bool announceArrival; // Say "Arrived at [waypoint]" first
-  final bool isBuiltIn; // Delivery, Tour are built-in
+  final bool isDefault; // Default tasks can't be deleted, only reset
+  final ModeType modeType; // How this task operates
 
-  const TaskMode({
+  const WaypointTask({
     required this.id,
     required this.name,
     this.description = '',
     this.steps = const [],
     this.announceArrival = true,
-    this.isBuiltIn = false,
+    this.isDefault = false,
+    this.modeType = ModeType.perWaypoint,
   });
 
+  // Legacy getter for compatibility
+  bool get isBuiltIn => isDefault;
+
   /// Built-in Delivery mode: speak + display + wait + return
-  static TaskMode delivery({
+  static WaypointTask delivery({
     String speakText = 'Your delivery has arrived',
     String displayUrl = '',
     int waitSeconds = 30,
   }) =>
-      TaskMode(
+      WaypointTask(
         id: 'delivery',
         name: 'Delivery',
         description: 'Announce arrival, wait for pickup, return to origin',
-        isBuiltIn: true,
+        isDefault: true,
         steps: [
           if (speakText.isNotEmpty)
             TaskStep(
@@ -118,16 +134,16 @@ class TaskMode {
       );
 
   /// Built-in Announce mode: just speak + display (no return)
-  static TaskMode announce({
+  static WaypointTask announce({
     String speakText = '',
     String displayUrl = '',
     int displayDuration = 5,
   }) =>
-      TaskMode(
+      WaypointTask(
         id: 'announce',
         name: 'Announce',
         description: 'Speak and/or display content',
-        isBuiltIn: true,
+        isDefault: true,
         steps: [
           if (speakText.isNotEmpty)
             TaskStep(
@@ -144,16 +160,190 @@ class TaskMode {
         ],
       );
 
+  /// Built-in Comic mode: attention beep, tell joke, wait for laughter
+  static WaypointTask comic({
+    String jokeText = 'Why did the robot go to therapy? Because it had too many bugs!',
+    String punchlineUrl = '',
+    int laughterWait = 3,
+  }) =>
+      WaypointTask(
+        id: 'comic',
+        name: 'Comic',
+        description: 'Tell a joke and wait for laughter',
+        isDefault: true,
+        announceArrival: false, // Don't announce, just tell joke
+        steps: [
+          const TaskStep(
+              id: '1',
+              action: TaskAction.speak,
+              data: 'beep'), // Attention beep
+          TaskStep(
+              id: '2',
+              action: TaskAction.speak,
+              data: jokeText,
+              parallel: punchlineUrl.isNotEmpty),
+          if (punchlineUrl.isNotEmpty)
+            TaskStep(
+                id: '3',
+                action: TaskAction.display,
+                data: punchlineUrl,
+                durationSeconds: laughterWait + 2),
+          TaskStep(
+              id: '4',
+              action: TaskAction.wait,
+              durationSeconds: laughterWait),
+        ],
+      );
+
+  /// Built-in Greeter mode: welcome message, display logo, wait for interaction
+  static WaypointTask greeter({
+    String greetingText = 'Welcome! How can I help you today?',
+    String logoUrl = '',
+    int waitSeconds = 30,
+  }) =>
+      WaypointTask(
+        id: 'greeter',
+        name: 'Greeter',
+        description: 'Welcome visitors and wait for interaction',
+        isDefault: true,
+        announceArrival: false,
+        steps: [
+          const TaskStep(
+              id: '1',
+              action: TaskAction.speak,
+              data: 'chime'), // Friendly chime
+          TaskStep(
+              id: '2',
+              action: TaskAction.speak,
+              data: greetingText,
+              parallel: logoUrl.isNotEmpty),
+          if (logoUrl.isNotEmpty)
+            TaskStep(
+                id: '3',
+                action: TaskAction.display,
+                data: logoUrl,
+                durationSeconds: waitSeconds),
+          TaskStep(
+              id: '4',
+              action: TaskAction.wait,
+              durationSeconds: waitSeconds),
+        ],
+      );
+
+  /// Built-in Busser mode: ask for items, wait, then return to bus station
+  static WaypointTask busser({
+    String askText = 'Please place any finished items on my tray',
+    String loadingUrl = '',
+    int waitSeconds = 20,
+  }) =>
+      WaypointTask(
+        id: 'busser',
+        name: 'Busser',
+        description: 'Collect finished items from tables',
+        isDefault: true,
+        steps: [
+          TaskStep(
+              id: '1',
+              action: TaskAction.speak,
+              data: askText,
+              parallel: loadingUrl.isNotEmpty),
+          if (loadingUrl.isNotEmpty)
+            TaskStep(
+                id: '2',
+                action: TaskAction.display,
+                data: loadingUrl,
+                durationSeconds: waitSeconds),
+          TaskStep(
+              id: '3',
+              action: TaskAction.wait,
+              durationSeconds: waitSeconds),
+          // Note: Return to bus station handled by sequence, not here
+        ],
+      );
+
+  /// Built-in Emergency mode: loud alarm, evacuation announcement
+  static WaypointTask emergency({
+    String alertText = 'EMERGENCY! Please evacuate immediately. Follow the exit signs.',
+    String evacuationMapUrl = '',
+    bool repeatAlert = true,
+  }) =>
+      WaypointTask(
+        id: 'emergency',
+        name: 'Emergency',
+        description: 'Emergency alert with evacuation guidance',
+        isDefault: true,
+        announceArrival: false,
+        steps: [
+          const TaskStep(
+              id: '1',
+              action: TaskAction.speak,
+              data: 'alarm'), // Loud alarm
+          TaskStep(
+              id: '2',
+              action: TaskAction.speak,
+              data: alertText,
+              parallel: evacuationMapUrl.isNotEmpty),
+          if (evacuationMapUrl.isNotEmpty)
+            TaskStep(
+                id: '3',
+                action: TaskAction.display,
+                data: evacuationMapUrl,
+                durationSeconds: 0), // Keep displayed
+          if (repeatAlert)
+            const TaskStep(
+                id: '4',
+                action: TaskAction.wait,
+                durationSeconds: 10), // Wait then repeat
+          if (repeatAlert)
+            TaskStep(
+                id: '5',
+                action: TaskAction.speak,
+                data: alertText),
+        ],
+      );
+
+  /// Built-in Tour Stop mode: narrate exhibit, display media
+  static WaypointTask tourStop({
+    String narrationText = '',
+    String mediaUrl = '',
+    int displayDuration = 15,
+  }) =>
+      WaypointTask(
+        id: 'tour_stop',
+        name: 'Tour Stop',
+        description: 'Narrate and display content at tour stop',
+        isDefault: true,
+        steps: [
+          if (narrationText.isNotEmpty)
+            TaskStep(
+                id: '1',
+                action: TaskAction.speak,
+                data: narrationText,
+                parallel: mediaUrl.isNotEmpty),
+          if (mediaUrl.isNotEmpty)
+            TaskStep(
+                id: '2',
+                action: TaskAction.display,
+                data: mediaUrl,
+                durationSeconds: displayDuration),
+          TaskStep(
+              id: '3',
+              action: TaskAction.wait,
+              durationSeconds: displayDuration),
+        ],
+      );
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
         'description': description,
         'steps': steps.map((s) => s.toJson()).toList(),
         'announce_arrival': announceArrival,
-        'is_built_in': isBuiltIn,
+        'is_default': isDefault,
+        'mode_type': modeType.name,
       };
 
-  factory TaskMode.fromJson(Map<String, dynamic> json) => TaskMode(
+  factory WaypointTask.fromJson(Map<String, dynamic> json) => WaypointTask(
         id: json['id'] as String? ??
             DateTime.now().millisecondsSinceEpoch.toString(),
         name: json['name'] as String? ?? 'Custom',
@@ -163,35 +353,41 @@ class TaskMode {
                 .toList() ??
             [],
         announceArrival: json['announce_arrival'] as bool? ?? true,
-        isBuiltIn: json['is_built_in'] as bool? ?? false,
+        isDefault: json['is_default'] as bool? ?? json['is_built_in'] as bool? ?? false,
+        modeType: ModeType.values.firstWhere(
+          (t) => t.name == json['mode_type'],
+          orElse: () => ModeType.perWaypoint,
+        ),
       );
 
-  TaskMode copyWith({
+  WaypointTask copyWith({
     String? id,
     String? name,
     String? description,
     List<TaskStep>? steps,
     bool? announceArrival,
-    bool? isBuiltIn,
+    bool? isDefault,
+    ModeType? modeType,
   }) =>
-      TaskMode(
+      WaypointTask(
         id: id ?? this.id,
         name: name ?? this.name,
         description: description ?? this.description,
         steps: steps ?? this.steps,
         announceArrival: announceArrival ?? this.announceArrival,
-        isBuiltIn: isBuiltIn ?? this.isBuiltIn,
+        isDefault: isDefault ?? this.isDefault,
+        modeType: modeType ?? this.modeType,
       );
 }
 
 /// Waypoint task assignment - links a waypoint to a mode
-class WaypointModeAssignment {
+class WaypointTaskAssignment {
   final String waypointId;
   final String? modeId; // null = no task (just announce arrival)
   final Map<String, String>
       params; // Mode-specific params (speakText, displayUrl, etc)
 
-  const WaypointModeAssignment({
+  const WaypointTaskAssignment({
     required this.waypointId,
     this.modeId,
     this.params = const {},
@@ -203,8 +399,8 @@ class WaypointModeAssignment {
         if (params.isNotEmpty) 'params': params,
       };
 
-  factory WaypointModeAssignment.fromJson(Map<String, dynamic> json) =>
-      WaypointModeAssignment(
+  factory WaypointTaskAssignment.fromJson(Map<String, dynamic> json) =>
+      WaypointTaskAssignment(
         waypointId: json['waypoint_id'] as String? ?? '',
         modeId: json['mode_id'] as String?,
         params: (json['params'] as Map<String, dynamic>?)?.map(
@@ -218,6 +414,7 @@ class WaypointModeAssignment {
 abstract class TaskExecutorCallback {
   void onSpeak(String text);
   void onDisplay(String url, int durationSeconds);
+  void onDisplayDefault(String waypoint); // Show default waypoint display
   void onCloseDisplay();
   void onNavigate(String waypoint);
   void onWait(int seconds);
@@ -229,13 +426,13 @@ class TaskEngine extends ChangeNotifier {
   static const String _assignmentsKey = 'waypoint_mode_assignments';
   static TaskEngine? _instance;
 
-  final Map<String, TaskMode> _modes = {};
-  final Map<String, WaypointModeAssignment> _assignments = {};
+  final Map<String, WaypointTask> _modes = {};
+  final Map<String, WaypointTaskAssignment> _assignments = {};
   bool _loaded = false;
 
   // Execution state
   String? _currentWaypoint;
-  TaskMode? _currentMode;
+  WaypointTask? _currentMode;
   int _currentStepIndex = 0;
   bool _isExecuting = false;
   String? _originWaypoint; // For return-to-origin
@@ -251,7 +448,7 @@ class TaskEngine extends ChangeNotifier {
 
   bool get isExecuting => _isExecuting;
   String? get currentWaypoint => _currentWaypoint;
-  TaskMode? get currentMode => _currentMode;
+  WaypointTask? get currentMode => _currentMode;
 
   /// Set the callback for task execution
   void setCallback(TaskExecutorCallback callback) {
@@ -270,7 +467,7 @@ class TaskEngine extends ChangeNotifier {
       if (modesJson != null) {
         final modes = jsonDecode(modesJson) as Map<String, dynamic>;
         modes.forEach((id, data) {
-          _modes[id] = TaskMode.fromJson(data as Map<String, dynamic>);
+          _modes[id] = WaypointTask.fromJson(data as Map<String, dynamic>);
         });
       }
 
@@ -280,7 +477,7 @@ class TaskEngine extends ChangeNotifier {
         final assigns = jsonDecode(assignJson) as Map<String, dynamic>;
         assigns.forEach((wp, data) {
           _assignments[wp] =
-              WaypointModeAssignment.fromJson(data as Map<String, dynamic>);
+              WaypointTaskAssignment.fromJson(data as Map<String, dynamic>);
         });
       }
 
@@ -319,16 +516,21 @@ class TaskEngine extends ChangeNotifier {
   }
 
   /// Get all available modes (built-in + custom)
-  List<TaskMode> get allModes {
+  List<WaypointTask> get allModes {
     final builtIn = [
-      TaskMode.delivery(),
-      TaskMode.announce(),
+      WaypointTask.delivery(),
+      WaypointTask.announce(),
+      WaypointTask.comic(),
+      WaypointTask.greeter(),
+      WaypointTask.busser(),
+      WaypointTask.emergency(),
+      WaypointTask.tourStop(),
     ];
     return [...builtIn, ..._modes.values.where((m) => !m.isBuiltIn)];
   }
 
   /// Add or update a custom mode
-  void saveMode(TaskMode mode) {
+  void saveMode(WaypointTask mode) {
     _modes[mode.id] = mode;
     save();
     notifyListeners();
@@ -349,7 +551,7 @@ class TaskEngine extends ChangeNotifier {
     if (modeId == null) {
       _assignments.remove(waypoint);
     } else {
-      _assignments[waypoint] = WaypointModeAssignment(
+      _assignments[waypoint] = WaypointTaskAssignment(
         waypointId: waypoint,
         modeId: modeId,
         params: params,
@@ -360,27 +562,65 @@ class TaskEngine extends ChangeNotifier {
   }
 
   /// Get the mode assignment for a waypoint
-  WaypointModeAssignment? getAssignment(String waypoint) =>
+  WaypointTaskAssignment? getAssignment(String waypoint) =>
       _assignments[waypoint];
 
   /// Get a mode by ID (with parameter substitution)
-  TaskMode? getMode(String modeId, {Map<String, String> params = const {}}) {
+  WaypointTask? getMode(String modeId, {Map<String, String> params = const {}}) {
     // Check built-in modes first
-    if (modeId == 'delivery') {
-      return TaskMode.delivery(
-        speakText: params['speak_text'] ?? 'Your delivery has arrived',
-        displayUrl: params['display_url'] ?? '',
-        waitSeconds: int.tryParse(params['wait_seconds'] ?? '30') ?? 30,
-      );
+    switch (modeId) {
+      case 'delivery':
+        return WaypointTask.delivery(
+          speakText: params['speak_text'] ?? 'Your delivery has arrived',
+          displayUrl: params['display_url'] ?? '',
+          waitSeconds: int.tryParse(params['wait_seconds'] ?? '30') ?? 30,
+        );
+
+      case 'announce':
+        return WaypointTask.announce(
+          speakText: params['speak_text'] ?? '',
+          displayUrl: params['display_url'] ?? '',
+          displayDuration: int.tryParse(params['display_duration'] ?? '5') ?? 5,
+        );
+
+      case 'comic':
+        return WaypointTask.comic(
+          jokeText: params['joke_text'] ?? 'Why did the robot go to therapy? Because it had too many bugs!',
+          punchlineUrl: params['punchline_url'] ?? '',
+          laughterWait: int.tryParse(params['laughter_wait'] ?? '3') ?? 3,
+        );
+
+      case 'greeter':
+        return WaypointTask.greeter(
+          greetingText: params['greeting_text'] ?? 'Welcome! How can I help you today?',
+          logoUrl: params['logo_url'] ?? '',
+          waitSeconds: int.tryParse(params['wait_seconds'] ?? '30') ?? 30,
+        );
+
+      case 'busser':
+        return WaypointTask.busser(
+          askText: params['ask_text'] ?? 'Please place any finished items on my tray',
+          loadingUrl: params['loading_url'] ?? '',
+          waitSeconds: int.tryParse(params['wait_seconds'] ?? '20') ?? 20,
+        );
+
+      case 'emergency':
+        return WaypointTask.emergency(
+          alertText: params['alert_text'] ?? 'EMERGENCY! Please evacuate immediately. Follow the exit signs.',
+          evacuationMapUrl: params['evacuation_map_url'] ?? '',
+          repeatAlert: params['repeat_alert'] != 'false',
+        );
+
+      case 'tour_stop':
+        return WaypointTask.tourStop(
+          narrationText: params['narration_text'] ?? '',
+          mediaUrl: params['media_url'] ?? '',
+          displayDuration: int.tryParse(params['display_duration'] ?? '15') ?? 15,
+        );
+
+      default:
+        return _modes[modeId];
     }
-    if (modeId == 'announce') {
-      return TaskMode.announce(
-        speakText: params['speak_text'] ?? '',
-        displayUrl: params['display_url'] ?? '',
-        displayDuration: int.tryParse(params['display_duration'] ?? '5') ?? 5,
-      );
-    }
-    return _modes[modeId];
   }
 
   /// Check if waypoint has a mode assigned
@@ -389,17 +629,31 @@ class TaskEngine extends ChangeNotifier {
   /// Execute the mode assigned to a waypoint
   Future<void> executeForWaypoint(String waypoint,
       {String? fromWaypoint}) async {
+    debugPrint('TaskEngine: executeForWaypoint($waypoint) called');
+    debugPrint('TaskEngine: callback=${_callback != null ? "set" : "NULL"}, assignments=${_assignments.length}');
+
     final assignment = _assignments[waypoint];
+    debugPrint('TaskEngine: assignment for $waypoint = ${assignment?.modeId ?? "NONE"}, params=${assignment?.params}');
+
     if (assignment == null || assignment.modeId == null) {
-      // No mode - just announce arrival if callback set
+      // No mode - announce arrival and show default display
+      // NOTE: Display stays until robot leaves (AudioAnnouncer closes it on nav start)
+      debugPrint('TaskEngine: No mode assigned, showing default display');
       if (_callback != null) {
+        _callback!.onDisplayDefault(waypoint);
         _callback!.onSpeak('Arrived at $waypoint');
+      } else {
+        debugPrint('TaskEngine: ERROR - callback is null!');
       }
       return;
     }
 
     final mode = getMode(assignment.modeId!, params: assignment.params);
-    if (mode == null) return;
+    debugPrint('TaskEngine: mode=${mode?.name ?? "NULL"}, steps=${mode?.steps.length ?? 0}');
+    if (mode == null) {
+      debugPrint('TaskEngine: ERROR - mode is null for modeId=${assignment.modeId}');
+      return;
+    }
 
     _currentWaypoint = waypoint;
     _currentMode = mode;
@@ -449,6 +703,7 @@ class TaskEngine extends ChangeNotifier {
         break;
 
       case TaskAction.display:
+        debugPrint('TaskEngine: Displaying URL: ${step.data} for ${step.durationSeconds}s');
         _callback?.onDisplay(step.data, step.durationSeconds);
         if (step.parallel && nextStep != null) {
           _currentStepIndex++;
@@ -526,7 +781,7 @@ class TaskEngine extends ChangeNotifier {
           final assigns = json['assignments'] as Map<String, dynamic>;
           assigns.forEach((wp, data) {
             _assignments[wp] =
-                WaypointModeAssignment.fromJson(data as Map<String, dynamic>);
+                WaypointTaskAssignment.fromJson(data as Map<String, dynamic>);
           });
         }
 
@@ -534,7 +789,7 @@ class TaskEngine extends ChangeNotifier {
         if (json.containsKey('modes')) {
           final modes = json['modes'] as Map<String, dynamic>;
           modes.forEach((id, data) {
-            final mode = TaskMode.fromJson(data as Map<String, dynamic>);
+            final mode = WaypointTask.fromJson(data as Map<String, dynamic>);
             if (!mode.isBuiltIn) {
               _modes[id] = mode;
             }
@@ -602,14 +857,14 @@ class TaskEngine extends ChangeNotifier {
         final assigns = data['assignments'] as Map<String, dynamic>;
         assigns.forEach((wp, d) {
           _assignments[wp] =
-              WaypointModeAssignment.fromJson(d as Map<String, dynamic>);
+              WaypointTaskAssignment.fromJson(d as Map<String, dynamic>);
         });
       }
 
       if (data.containsKey('modes')) {
         final modes = data['modes'] as Map<String, dynamic>;
         modes.forEach((id, d) {
-          final mode = TaskMode.fromJson(d as Map<String, dynamic>);
+          final mode = WaypointTask.fromJson(d as Map<String, dynamic>);
           if (!mode.isBuiltIn) {
             _modes[id] = mode;
           }

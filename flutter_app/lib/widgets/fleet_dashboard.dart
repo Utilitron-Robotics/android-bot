@@ -47,7 +47,7 @@ class _FleetDashboardState extends State<FleetDashboard> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Connect to TurboTurf cloud to manage your robot fleet',
+              'Connect to Frontier Tower cloud to manage your robot fleet',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey),
             ),
@@ -57,7 +57,7 @@ class _FleetDashboardState extends State<FleetDashboard> {
                 controller: _endpointController,
                 decoration: const InputDecoration(
                   labelText: 'API Endpoint',
-                  hintText: 'https://api.turboturf.smait.com',
+                  hintText: 'From CloudFormation output',
                   border: OutlineInputBorder(),
                 ),
               ),
