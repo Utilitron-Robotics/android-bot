@@ -48,6 +48,9 @@ class _HudScreenState extends State<HudScreen>
   // Edge panel states
   bool _leftPanelExpanded = true;
   bool _rightPanelExpanded = true;
+
+  // Debug flag for verbose logging
+  static const bool _enableVerboseLogging = false;
   bool _bottomPanelExpanded = false;
 
   // Left panel tab (0 = waypoints, 1 = tour, 2 = crowd)
@@ -291,7 +294,8 @@ class _HudScreenState extends State<HudScreen>
           final tourRunning = tourManager.status == SequenceStatus.running;
 
           // Debug: Log when sequence status changes
-          if (tourRunning || tourManager.status != SequenceStatus.idle) {
+          if (_enableVerboseLogging &&
+              (tourRunning || tourManager.status != SequenceStatus.idle)) {
             debugPrint(
                 'HUD: Sequence status=${tourManager.status}, tourRunning=$tourRunning, phase=${tourManager.currentPhase}, countdown=${tourManager.countdownSeconds}');
           }
@@ -696,8 +700,10 @@ class _HudScreenState extends State<HudScreen>
     final stop = tourManager.currentStop;
     final status = tourManager.status;
 
-    debugPrint(
-        'HUD._buildTourOverlay: seq=${seq?.name}, phase=$phase, countdown=$countdown, stopIndex=$stopIndex, status=$status');
+    if (_enableVerboseLogging) {
+      debugPrint(
+          'HUD._buildTourOverlay: seq=${seq?.name}, phase=$phase, countdown=$countdown, stopIndex=$stopIndex, status=$status');
+    }
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -835,6 +841,26 @@ class _HudScreenState extends State<HudScreen>
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // START TOUR button - only shows when idle (not started yet)
+                  if (seq?.startWaypoint != null &&
+                      status == SequenceStatus.idle) ...[
+                    _MiniControlButton(
+                      icon: Icons.rocket_launch,
+                      color: Colors.green,
+                      onTap: () {
+                        debugPrint('START TOUR - trigger welcome screen');
+                        // Enable motion trigger to show welcome screen
+                        final motionSequence = seq!.copyWith(
+                          motionTriggerStart: true,
+                          motionGreeting: 'Hello! Would you like a tour?',
+                          motionButtonText: 'START TOUR',
+                        );
+                        tourManager.startSequence(motionSequence);
+                      },
+                      tooltip: 'Start Tour',
+                    ),
+                    const SizedBox(width: 4),
+                  ],
                   // Skip button
                   _MiniControlButton(
                     icon: Icons.skip_next,
@@ -1099,6 +1125,10 @@ class _HudScreenState extends State<HudScreen>
 
   Widget _buildTopStatusBar(RobotConnection robot) {
     final status = robot.status;
+    final tourManager = context.watch<SequenceManager>();
+    final tourRunning = tourManager.status == SequenceStatus.running;
+    final tourPaused = tourManager.status == SequenceStatus.paused;
+    final currentSequence = tourManager.currentSequence;
 
     return Container(
       height: 52,
@@ -1240,6 +1270,90 @@ class _HudScreenState extends State<HudScreen>
               label: 'DATA STALE',
               color: Colors.amber,
               pulse: true,
+            ),
+          ],
+
+          // Tour Status in Center
+          if (currentSequence != null) ...[
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: tourRunning
+                    ? Colors.green.withValues(alpha: 0.2)
+                    : tourPaused
+                        ? Colors.orange.withValues(alpha: 0.2)
+                        : Colors.grey.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: tourRunning
+                      ? Colors.green
+                      : tourPaused
+                          ? Colors.orange
+                          : Colors.grey,
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    tourRunning
+                        ? Icons.tour
+                        : tourPaused
+                            ? Icons.pause_circle
+                            : Icons.tour_outlined,
+                    size: 18,
+                    color: tourRunning
+                        ? Colors.green
+                        : tourPaused
+                            ? Colors.orange
+                            : Colors.grey,
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        currentSequence.name,
+                        style: TextStyle(
+                          color: tourRunning ? Colors.green : Colors.white70,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (tourManager.currentStop != null)
+                        Text(
+                          'Stop ${tourManager.currentStopIndex + 1}/${currentSequence.stops.length}: ${tourManager.currentStop!.waypoint}',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 9,
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (tourManager.countdownSeconds > 0) ...[
+                    const SizedBox(width: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${tourManager.countdownSeconds}s',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
           ],
 
@@ -1413,9 +1527,56 @@ class _HudScreenState extends State<HudScreen>
 
   Widget _buildSequenceContent(
       List<String> waypoints, SequenceManager tourManager) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: SequenceEditor(availableWaypoints: waypoints),
+    final currentSequence = tourManager.currentSequence;
+    final hasStartWaypoint = currentSequence?.startWaypoint != null &&
+        currentSequence!.startWaypoint!.isNotEmpty;
+
+    return Column(
+      children: [
+        // Add START TOUR button at the top if there's a startWaypoint
+        if (hasStartWaypoint &&
+            tourManager.status != SequenceStatus.running) ...[
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.rocket_launch, size: 24),
+              label: Text(
+                'START TOUR FROM ${currentSequence.startWaypoint!.toUpperCase()}',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(50),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () {
+                debugPrint(
+                    'START TOUR pressed - setting up motion standby at ${currentSequence.startWaypoint}');
+                // Enable motion trigger to show welcome screen
+                final motionSequence = currentSequence.copyWith(
+                  motionTriggerStart: true,
+                  motionGreeting: 'Hello! Would you like a tour?',
+                  motionButtonText: 'START TOUR',
+                );
+                SequenceManager.instance.startSequence(motionSequence);
+                // This will navigate to startWaypoint, then show welcome screen
+                // When visitor taps button -> "Follow me!" -> Tour begins!
+              },
+            ),
+          ),
+        ],
+        // The existing sequence editor
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: SequenceEditor(availableWaypoints: waypoints),
+          ),
+        ),
+      ],
     );
   }
 

@@ -65,6 +65,9 @@ class BufferCommand {
         data: {'sound': sound},
       );
 
+  /// Loop command - tells the buffer to restart the sequence from the beginning
+  factory BufferCommand.loop() => BufferCommand(type: 'loop');
+
   /// Enter motion standby mode - wait for motion detection to trigger tour start
   /// When motion is detected, speaks greeting and shows start button
   factory BufferCommand.motionStandby({

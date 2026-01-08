@@ -586,8 +586,19 @@ class AudioAnnouncer {
           }
           // Start/restart blocked path detection (always, even during tours)
           // This resets the timer when chaining to a new waypoint
-          debugPrint('AudioAnnouncer: Starting blocked detection for $goalName');
-          _startBlockedDetection();
+          // BUT: Skip for charger-related waypoints (docking is supposed to be tight)
+          final goalLower = goalName.toLowerCase();
+          final isChargingRelated = goalLower.contains('pile') ||
+                                   goalLower.contains('charger') ||
+                                   goalLower.contains('dock') ||
+                                   goalLower.contains('charging');
+
+          if (!isChargingRelated) {
+            debugPrint('AudioAnnouncer: Starting blocked detection for $goalName');
+            _startBlockedDetection();
+          } else {
+            debugPrint('AudioAnnouncer: Skipping blocked detection for charger waypoint $goalName');
+          }
         }
         break;
       case 603: // Arrived
