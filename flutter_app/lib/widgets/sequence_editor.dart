@@ -705,9 +705,15 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   final pushed =
                       await SequenceManager.instance.pushAllToCloud();
                   if (mounted) {
+                    final totalTours = SequenceManager.instance.sequences.length;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                          content: Text('Pushed $pushed tour(s) to cloud!')),
+                        content: Text(pushed == totalTours
+                            ? 'Pushed $pushed tour(s) to cloud!'
+                            : 'ERROR: Only pushed $pushed/$totalTours tours! Check debug console for errors.'),
+                        backgroundColor: pushed == totalTours ? null : Colors.red,
+                        duration: Duration(seconds: pushed == totalTours ? 2 : 5),
+                      ),
                     );
                     setState(() {});
                   }

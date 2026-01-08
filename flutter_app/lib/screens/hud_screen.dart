@@ -835,6 +835,19 @@ class _HudScreenState extends State<HudScreen>
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // START button (only show when in motion standby - awaiting visitor)
+                  if (phase == SequencePhase.awaitingVisitor)
+                    _MiniControlButton(
+                      icon: Icons.play_circle,
+                      color: Colors.green,
+                      onTap: () {
+                        // Remotely trigger START TOUR button on tablet
+                        tourManager.bufferClient?.triggerStartTourButton();
+                      },
+                      tooltip: 'Start Tour',
+                    ),
+                  if (phase == SequencePhase.awaitingVisitor)
+                    const SizedBox(width: 4),
                   // Skip button
                   _MiniControlButton(
                     icon: Icons.skip_next,
