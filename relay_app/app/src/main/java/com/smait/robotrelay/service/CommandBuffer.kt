@@ -613,35 +613,34 @@ class CommandBuffer(
             }
 
             "motion_standby" -> {
-                // Motion detection mode: wait for person → greet → show button
+                // Motion detection: wait for person → greet → AUTO-START (no button!)
                 val greeting = cmd.data["greeting"] as? String ?: "Hello! Would you like a tour?"
                 val sequenceId = cmd.data["sequence_id"] as? String ?: ""
-                val buttonText = cmd.data["button_text"] as? String ?: "Start Tour"
                 val pin = cmd.data["pin"] as? String
                 val displayUrl = cmd.data["display_url"] as? String
 
                 Log.i(TAG, "Entering motion standby for sequence: $sequenceId - waiting for person...")
 
-                // Show standby display if provided (e.g., welcome screen)
+                // Show standby display if provided
                 if (displayUrl != null && displayUrl.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
                         taskExecutor?.showDisplay(displayUrl, 0)
                     }
                 }
 
-                // STEP 1: Wait for person to be detected from /people_detected topic
+                // Wait for person detected from /people_detected
                 while (currentCommand != null && !robotClient.peopleDetected.value) {
-                    delay(200)  // Poll every 200ms
+                    delay(200)
                 }
 
                 if (currentCommand == null) {
-                    Log.i(TAG, "Motion standby cancelled before person detected")
+                    Log.i(TAG, "Motion standby cancelled")
                     return@launch
                 }
 
                 Log.i(TAG, "Person detected! Speaking greeting...")
 
-                // STEP 2: Person detected - speak the greeting
+                // Speak greeting
                 val ttsComplete = CompletableDeferred<Unit>()
                 withContext(Dispatchers.Main) {
                     taskExecutor?.speakText(greeting) {
@@ -650,18 +649,13 @@ class CommandBuffer(
                 }
                 ttsComplete.await()
 
-                // STEP 3: Activate tour mode and show button
+                // Lock screen and auto-start tour
                 withContext(Dispatchers.Main) {
                     taskExecutor?.startTourMode(pin)
-                    taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }
 
-                // STEP 4: Wait for button press to start tour
-                while (currentCommand != null) {
-                    delay(500)
-                }
-
-                Log.i(TAG, "Exiting motion standby for sequence: $sequenceId")
+                Log.i(TAG, "Motion detected - auto-starting tour: $sequenceId")
+                completeCommand(cmd.id, "success")
             }
 
             "button_standby" -> {
