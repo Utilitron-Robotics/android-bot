@@ -12,6 +12,7 @@ import android.view.View
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebViewClient
 import android.widget.EditText
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -35,8 +36,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        // Robot base IP via USB wired connection (NOT the WiFi hotspot IP!)
-        // WiFi hotspot: 10.42.0.1 | Wired/USB: 192.168.20.22
+        // Robot IP via WIRED USB connection (tablet is physically connected to robot)
+        // See NETWORKING.md for architecture details
         private const val ROBOT_WIRED_IP = "192.168.20.22"
     }
 
@@ -60,20 +61,293 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Tour mode state
+    private var isTourModeActive = false
+    private var tourUnlockPin = "1234"  // Default PIN, can be configured
+    private var standbySequenceId: String? = null
+    private var standbyButtonText: String? = "Start Tour"
+
+
+    // Multi-tap unlock sequence
+    private val requiredTaps = 6
+    private var tapCount = 0
+    private var lastTapTime = 0L
+    private val tapResetTimeMs = 2000L  // Reset tap count if no tap within 2 seconds
+    private var warningSaid = false  // Prevent repeated warnings
+
+    // Motion standby state
+    private var currentMotionSequenceId: String? = null
+
     private val displayReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val url = intent?.getStringExtra(RelayService.EXTRA_URL)
             Log.i(TAG, ">>> displayReceiver.onReceive: url='${url?.take(100) ?: "null"}...'")
             if (url.isNullOrEmpty()) {
-                Log.i(TAG, "Hiding WebView, showing main layout")
+                Log.i(TAG, "Hiding WebView and motion overlay, showing main layout")
                 binding.webView.visibility = View.GONE
+                binding.motionOverlay.visibility = View.GONE
                 binding.mainLayout.visibility = View.VISIBLE
+            } else if (url.startsWith("motion://")) {
+                // Handle motion standby URLs
+                handleMotionUrl(url)
+            } else if (url.startsWith("default://")) {
+                // Handle default POI display (could be custom branding)
+                handleDefaultDisplay(url)
             } else {
                 Log.i(TAG, "Showing WebView, loading URL")
                 binding.mainLayout.visibility = View.GONE
+                binding.motionOverlay.visibility = View.GONE
                 binding.webView.visibility = View.VISIBLE
                 binding.webView.loadUrl(url)
             }
+        }
+    }
+
+    private fun handleMotionUrl(url: String) {
+        Log.i(TAG, "Handling motion URL: $url")
+        binding.mainLayout.visibility = View.GONE
+        binding.webView.visibility = View.GONE
+        binding.motionOverlay.visibility = View.VISIBLE
+
+        when {
+            url.startsWith("motion://standby") -> {
+                // Extract sequence ID from URL
+                val sequenceId = url.substringAfter("sequence=", "")
+                currentMotionSequenceId = sequenceId
+                Log.i(TAG, "Motion standby mode for sequence: $sequenceId")
+
+                // Show waiting state
+                binding.motionWaitingLayout.visibility = View.VISIBLE
+                binding.motionStartLayout.visibility = View.GONE
+            }
+            url.startsWith("motion://start_tour") -> {
+                // Extract sequence ID and button text from URL
+                // Format: motion://start_tour?sequence=xxx&button=Start%20Tour
+                val params = url.substringAfter("?").split("&").associate {
+                    val parts = it.split("=", limit = 2)
+                    if (parts.size == 2) parts[0] to parts[1] else parts[0] to ""
+                }
+                val sequenceId = params["sequence"] ?: ""
+                val buttonText = try {
+                    java.net.URLDecoder.decode(params["button"] ?: "Start Tour", "UTF-8")
+                } catch (e: Exception) {
+                    "Start Tour"
+                }
+                currentMotionSequenceId = sequenceId
+                Log.i(TAG, "Motion start_tour mode for sequence: $sequenceId, button: $buttonText")
+
+                // Show start tour button with custom text
+                binding.motionWaitingLayout.visibility = View.GONE
+                binding.motionStartLayout.visibility = View.VISIBLE
+                binding.btnStartTour.text = buttonText
+            }
+        }
+    }
+
+    private fun handleDefaultDisplay(url: String) {
+        // default://waypoint/KitchenArea -> show POI name with branding
+        val waypoint = url.substringAfter("default://waypoint/", "Unknown")
+        Log.i(TAG, "Default display for waypoint: $waypoint")
+
+        // For now, use WebView with a simple data URL showing the waypoint name
+        // In production, this could load a company branding page
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <style>
+                    body {
+                        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                        color: white;
+                        font-family: Arial, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                        text-align: center;
+                    }
+                    .container {
+                        padding: 48px;
+                    }
+                    .icon { font-size: 128px; }
+                    .waypoint {
+                        font-size: 64px;
+                        font-weight: bold;
+                        margin-top: 32px;
+                    }
+                    .subtitle {
+                        font-size: 24px;
+                        color: #888;
+                        margin-top: 16px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">📍</div>
+                    <div class="waypoint">$waypoint</div>
+                    <div class="subtitle">Welcome to this location</div>
+                </div>
+            </body>
+            </html>
+        """.trimIndent()
+
+        binding.mainLayout.visibility = View.GONE
+        binding.motionOverlay.visibility = View.GONE
+        binding.webView.visibility = View.VISIBLE
+        binding.webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+    }
+
+    private val countdownReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val seconds = intent?.getIntExtra(RelayService.EXTRA_COUNTDOWN_SECONDS, 0) ?: 0
+            val label = intent?.getStringExtra(RelayService.EXTRA_COUNTDOWN_LABEL) ?: "Next stop in"
+
+            Log.i(TAG, ">>> countdownReceiver: seconds=$seconds, label=$label")
+
+            if (seconds > 0) {
+                binding.countdownOverlay.visibility = View.VISIBLE
+                binding.tvCountdownLabel.text = label
+                binding.tvCountdownTimer.text = formatTime(seconds)
+            } else {
+                binding.countdownOverlay.visibility = View.GONE
+            }
+        }
+    }
+
+    private val tourModeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.getStringExtra(RelayService.EXTRA_TOUR_ACTION)
+            val pin = intent?.getStringExtra(RelayService.EXTRA_TOUR_PIN)
+
+            Log.i(TAG, ">>> tourModeReceiver: action=$action")
+
+            when (action) {
+                "start" -> {
+                    isTourModeActive = true
+                    if (!pin.isNullOrEmpty()) {
+                        tourUnlockPin = pin
+                    }
+                    showLockScreen()
+                }
+                "stop" -> {
+                    isTourModeActive = false
+                    hideLockScreen()
+                }
+            }
+        }
+    }
+
+    private val tourStandbyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            standbySequenceId = intent?.getStringExtra(RelayService.EXTRA_TOUR_SEQUENCE_ID)
+            standbyButtonText = intent?.getStringExtra(RelayService.EXTRA_TOUR_BUTTON_TEXT) ?: "Start Tour"
+            Log.i(TAG, ">>> tourStandbyReceiver: sequenceId=$standbySequenceId, buttonText=$standbyButtonText")
+
+            // If tour mode is already active, update the lock screen UI
+            if (isTourModeActive) {
+                showLockScreen()
+            }
+        }
+    }
+
+
+    private fun formatTime(seconds: Int): String {
+        val mins = seconds / 60
+        val secs = seconds % 60
+        return if (mins > 0) {
+            String.format("%d:%02d", mins, secs)
+        } else {
+            String.format("0:%02d", secs)
+        }
+    }
+
+    private fun handleLockScreenTap() {
+        val now = System.currentTimeMillis()
+
+        // Reset tap count if too much time passed
+        if (now - lastTapTime > tapResetTimeMs) {
+            tapCount = 0
+            warningSaid = false
+            // Hide lock content if it was showing progress
+            binding.lockContentLayout.visibility = View.GONE
+        }
+
+        lastTapTime = now
+        tapCount++
+
+        Log.d(TAG, "Lock screen tap: $tapCount / $requiredTaps")
+
+        when {
+            tapCount >= requiredTaps -> {
+                // Enough taps - show PIN entry
+                Log.i(TAG, "Multi-tap sequence complete, showing PIN entry")
+                tapCount = 0
+                warningSaid = false
+                showPinEntry()
+            }
+            tapCount == 1 && !warningSaid -> {
+                // First tap - speak warning
+                warningSaid = true
+                service?.speak("Please do not touch the screen until asked to do so. Thank you!")
+            }
+            tapCount >= 3 -> {
+                // Show lock content and give feedback they're getting close
+                binding.lockContentLayout.visibility = View.VISIBLE
+                binding.tvLockMessage.text = "Tap ${requiredTaps - tapCount} more times..."
+            }
+        }
+    }
+
+    private fun showLockScreen() {
+        binding.lockOverlay.visibility = View.VISIBLE
+        binding.lockContentLayout.visibility = View.GONE  // Start invisible - only show after 3+ taps
+        binding.pinEntryLayout.visibility = View.GONE
+        binding.etPinCode.text?.clear()
+        binding.tvLockMessage.text = "Tour Mode Active"
+        tapCount = 0
+        warningSaid = false
+
+        // Show START TOUR button for visitors if a sequence is in standby
+        if (standbySequenceId != null) {
+            binding.lockStartTourLayout.visibility = View.VISIBLE
+            binding.btnLockStartTour.text = standbyButtonText
+        } else {
+            binding.lockStartTourLayout.visibility = View.GONE
+        }
+    }
+
+    private fun hideLockScreen() {
+        binding.lockOverlay.visibility = View.GONE
+        binding.lockContentLayout.visibility = View.GONE
+        binding.pinEntryLayout.visibility = View.GONE
+        binding.lockStartTourLayout.visibility = View.GONE
+        // Clear standby state when screen is unlocked/hidden
+        standbySequenceId = null
+        standbyButtonText = "Start Tour"
+    }
+
+
+    private fun showPinEntry() {
+        binding.lockContentLayout.visibility = View.VISIBLE
+        binding.pinEntryLayout.visibility = View.VISIBLE
+        binding.tvLockMessage.text = "Enter Unlock PIN"
+        binding.etPinCode.requestFocus()
+    }
+
+    private fun attemptUnlock() {
+        val enteredPin = binding.etPinCode.text?.toString() ?: ""
+        if (enteredPin == tourUnlockPin) {
+            Log.i(TAG, "Tour mode unlocked with correct PIN")
+            hideLockScreen()
+            isTourModeActive = false
+            // Notify Flutter that tour mode was unlocked
+            service?.notifyTourUnlocked()
+        } else {
+            Log.w(TAG, "Incorrect PIN entered")
+            Toast.makeText(this, "Incorrect PIN", Toast.LENGTH_SHORT).show()
+            binding.etPinCode.text?.clear()
         }
     }
 
@@ -91,8 +365,11 @@ class MainActivity : AppCompatActivity() {
         Intent(this, RelayService::class.java).also { intent ->
             bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
-        LocalBroadcastManager.getInstance(this)
-            .registerReceiver(displayReceiver, IntentFilter(RelayService.ACTION_DISPLAY))
+        val localBroadcastManager = LocalBroadcastManager.getInstance(this)
+        localBroadcastManager.registerReceiver(displayReceiver, IntentFilter(RelayService.ACTION_DISPLAY))
+        localBroadcastManager.registerReceiver(countdownReceiver, IntentFilter(RelayService.ACTION_COUNTDOWN))
+        localBroadcastManager.registerReceiver(tourModeReceiver, IntentFilter(RelayService.ACTION_TOUR_MODE))
+        localBroadcastManager.registerReceiver(tourStandbyReceiver, IntentFilter(RelayService.ACTION_TOUR_STANDBY))
     }
 
     override fun onStop() {
@@ -101,8 +378,13 @@ class MainActivity : AppCompatActivity() {
             unbindService(connection)
             bound = false
         }
-        LocalBroadcastManager.getInstance(this).unregisterReceiver(displayReceiver)
+        val localBroadcastManager = LocalBroadcastManager.getInstance(this)
+        localBroadcastManager.unregisterReceiver(displayReceiver)
+        localBroadcastManager.unregisterReceiver(countdownReceiver)
+        localBroadcastManager.unregisterReceiver(tourModeReceiver)
+        localBroadcastManager.unregisterReceiver(tourStandbyReceiver)
     }
+
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         if (ev?.action == MotionEvent.ACTION_DOWN) {
@@ -131,7 +413,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun getRobotIp(): String {
         val prefs = getSharedPreferences("relay_prefs", Context.MODE_PRIVATE)
-        // Default to wired connection IP (robot base via USB/ethernet)
+        // Default to wired connection (tablet is USB connected to robot)
         return prefs.getString("robot_ip", ROBOT_WIRED_IP) ?: ROBOT_WIRED_IP
     }
 
@@ -146,7 +428,7 @@ class MainActivity : AppCompatActivity() {
         updateIpAddress()
         binding.etRobotIp.setText(getRobotIp())
 
-        binding.btnStop.setOnClickListener { service?.stop() }
+        // btnStop removed - joystick auto-stops when released
         binding.btnEstop.setOnClickListener { service?.emergencyStop(true) }
         binding.btnReleaseEstop.setOnClickListener { service?.emergencyStop(false) }
 
@@ -182,18 +464,83 @@ class MainActivity : AppCompatActivity() {
             binding.ivSlamIcon.visibility = View.GONE
         }
 
-        setupJoystickButton(binding.btnForward, 0.3, 0.0)
-        setupJoystickButton(binding.btnBackward, -0.3, 0.0)
-        setupJoystickButton(binding.btnLeft, 0.0, 0.5)
-        setupJoystickButton(binding.btnRight, 0.0, -0.5)
-        setupJoystickButton(binding.btnForwardLeft, 0.2, 0.3)
-        setupJoystickButton(binding.btnForwardRight, 0.2, -0.3)
+        // Setup circular joystick
+        binding.joystickView.onMoveListener = { x, y ->
+            // x and y are -1.0 to 1.0
+            // Y-axis: negative = up (reverse away from operator), positive = down (forward toward operator)
+            // X-axis: negative = left, positive = right
+            // When moving FORWARD (toward operator), left/right are inverted (you're facing the robot)
+            // When moving BACKWARD (away from operator), left/right are normal
+
+            val maxLinearSpeed = 0.4 * speedMultiplier
+            val maxAngularSpeed = 0.8 * speedMultiplier
+
+            // Convert joystick position to robot velocities
+            val linearVel = y * maxLinearSpeed  // y positive = down = forward toward operator
+
+            // Invert angular when moving forward (linearVel > 0), normal when reversing
+            val angularVel = if (linearVel > 0) {
+                x * maxAngularSpeed  // Forward: joystick left = robot turns right (from your perspective)
+            } else {
+                -x * maxAngularSpeed  // Reverse: joystick left = robot turns left (normal)
+            }
+
+            if (x == 0f && y == 0f) {
+                // Joystick centered - stop robot
+                service?.stop()
+            } else {
+                // Send velocity command
+                service?.sendVelocity(linearVel.toDouble(), angularVel.toDouble())
+            }
+        }
 
         binding.btnGoPoi.setOnClickListener {
             val poi = binding.etPoi.text.toString()
             if (poi.isNotBlank()) {
                 service?.navigateTo(poi)
             }
+        }
+
+        // Lock screen handlers - multi-tap sequence to unlock
+        binding.lockOverlay.setOnClickListener {
+            handleLockScreenTap()
+        }
+
+        binding.btnPinCancel.setOnClickListener {
+            binding.pinEntryLayout.visibility = View.GONE
+            binding.lockContentLayout.visibility = View.GONE
+            tapCount = 0
+            warningSaid = false
+        }
+
+        binding.btnPinSubmit.setOnClickListener {
+            attemptUnlock()
+        }
+
+        // Motion standby "Start Tour" button handler
+        binding.btnStartTour.setOnClickListener {
+            Log.i(TAG, "Start Tour button pressed for sequence: $currentMotionSequenceId")
+            // Notify the service that the tour was started by button press
+            service?.notifyTourStarted(currentMotionSequenceId ?: "")
+            // Hide motion overlay
+            binding.motionOverlay.visibility = View.GONE
+            // Engage tour mode lock screen to prevent tampering during tour
+            service?.startTourMode(null)
+        }
+
+        // Lock screen START TOUR button - for visitors to manually start tour
+        binding.btnLockStartTour.setOnClickListener {
+            Log.i(TAG, "Lock screen START TOUR pressed - starting sequence: $standbySequenceId")
+            standbySequenceId?.let { seqId ->
+                // Greet the visitor
+                speak("Follow me!")
+                // Start the currently saved/loaded sequence
+                service?.notifyTourStarted(seqId)
+            }
+            // Hide the start button after pressing, tour is now active
+            binding.lockStartTourLayout.visibility = View.GONE
+            // Also clear the standby state
+            standbySequenceId = null
         }
     }
 
@@ -264,14 +611,48 @@ class MainActivity : AppCompatActivity() {
             }
 
             lifecycleScope.launch {
-                svc.getRobotStatus().map { it?.safetyZone }.distinctUntilChanged().collect { zone ->
-                    when (zone) {
-                        SafetyZone.STOP -> speak("Stop. Obstacle too close.")
-                        SafetyZone.CREEP -> speak("Obstacle ahead. Creeping.")
-                        SafetyZone.WARN -> speak("Warning. Obstacle detected.")
-                        else -> {}
+                var announcedThisNav = SafetyZone.CLEAR  // Track highest announced this nav session
+                var lastNavStatus = 0
+
+                svc.getRobotStatus()
+                    .collect { status ->
+                        val zone = status?.safetyZone ?: SafetyZone.CLEAR
+                        val navStatus = status?.navStatus ?: 0
+
+                        // Reset when nav starts fresh
+                        if (navStatus == SmaitProtocol.NAV_RUNNING && lastNavStatus != SmaitProtocol.NAV_RUNNING) {
+                            announcedThisNav = SafetyZone.CLEAR
+                        }
+                        lastNavStatus = navStatus
+
+                        // Only announce during active navigation
+                        if (navStatus != SmaitProtocol.NAV_RUNNING) return@collect
+
+                        // Only announce if MORE severe than already announced this session
+                        // Severity: CLEAR(0) < WARN(1) < CREEP(2) < STOP(3)
+                        val zoneSeverity = when (zone) {
+                            SafetyZone.STOP -> 3
+                            SafetyZone.CREEP -> 2
+                            SafetyZone.WARN -> 1
+                            else -> 0
+                        }
+                        val announcedSeverity = when (announcedThisNav) {
+                            SafetyZone.STOP -> 3
+                            SafetyZone.CREEP -> 2
+                            SafetyZone.WARN -> 1
+                            else -> 0
+                        }
+
+                        if (zoneSeverity > announcedSeverity) {
+                            announcedThisNav = zone
+                            when (zone) {
+                                SafetyZone.STOP -> speak("Stop. Obstacle too close.")
+                                SafetyZone.CREEP -> speak("Robot coming through. Make way!")
+                                SafetyZone.WARN -> speak("Warning. Obstacle detected.")
+                                else -> {}
+                            }
+                        }
                     }
-                }
             }
 
             lifecycleScope.launch {

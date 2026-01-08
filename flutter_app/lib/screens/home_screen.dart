@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/robot_connection.dart';
+import '../services/robot_introspection.dart';
 import '../widgets/widget_factory.dart';
 import '../widgets/fleet_picker.dart';
 import '../widgets/message_log.dart';
@@ -29,16 +31,57 @@ class _HomeScreenState extends State<HomeScreen> {
   final _urlController = TextEditingController();
   ConnectionMode _connectionMode = ConnectionMode.direct;
 
+  // Cache generated widgets to prevent recreation on every robot status update
+  List<Widget>? _cachedWidgets;
+  RobotCapabilities? _cachedCapabilities;
+  String? _cachedRelayUrl;
+
   @override
   void initState() {
     super.initState();
-    // Load saved URL
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // Load saved URL and connection mode
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final robot = context.read<RobotConnection>();
-      _urlController.text = robot.robotUrl;
-      // Detect mode from saved URL
-      _detectModeFromUrl(robot.robotUrl);
+      final savedUrl = robot.robotUrl;
+
+      debugPrint('=== HOME PAGE INIT ===');
+      debugPrint('Loaded URL from robot: $savedUrl');
+
+      // Always display the last used URL, regardless of mode
+      _urlController.text = savedUrl;
+      debugPrint('Set URL controller to: ${_urlController.text}');
+
+      // Load saved connection mode
+      final hadSavedMode = await _loadConnectionMode();
+      debugPrint('Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
+
+      // ONLY detect mode from URL if there was NO saved mode
+      if (!hadSavedMode) {
+        debugPrint('HomeScreen: No saved mode found, detecting from URL: $savedUrl');
+        _detectModeFromUrl(savedUrl);
+      } else {
+        debugPrint('HomeScreen: Using saved mode: ${_connectionMode.name}, NOT detecting from URL');
+      }
+      debugPrint('Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
+      debugPrint('=== END INIT ===');
     });
+  }
+
+  /// Get cached widgets, regenerating only when capabilities or relay URL changes
+  List<Widget> _getWidgets(RobotCapabilities capabilities, String? relayUrl) {
+    // Only regenerate if capabilities or relay URL changed
+    if (_cachedWidgets == null ||
+        _cachedCapabilities != capabilities ||
+        _cachedRelayUrl != relayUrl) {
+      debugPrint('HomeScreen: Regenerating widgets (capabilities changed)');
+      _cachedCapabilities = capabilities;
+      _cachedRelayUrl = relayUrl;
+      _cachedWidgets = WidgetFactory(
+        capabilities,
+        relayHttpUrl: relayUrl,
+      ).generateWidgets(context);
+    }
+    return _cachedWidgets!;
   }
 
   void _detectModeFromUrl(String url) {
@@ -54,23 +97,60 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onModeChanged(ConnectionMode? mode) {
     if (mode == null) return;
     setState(() => _connectionMode = mode);
-    // Update URL based on mode, preserving IP if it looks like a relay URL
-    final currentUrl = _urlController.text;
+
+    // Save the connection mode immediately
+    _saveConnectionMode(mode);
+
+    // Preserve the current URL - only update protocol/port if necessary
+    final currentUrl = _urlController.text.trim();
+    if (currentUrl.isEmpty) {
+      // Empty URL - use default for this mode
+      _urlController.text = mode.defaultUrl;
+      return;
+    }
+
     final uri = Uri.tryParse(currentUrl);
     final host = uri?.host ?? '';
 
-    if (mode == ConnectionMode.direct) {
+    if (host.isEmpty) {
+      // Invalid URL - use default
       _urlController.text = mode.defaultUrl;
-    } else if (host.isNotEmpty && host != '10.42.0.1') {
-      // Preserve the relay IP, just change port/protocol
-      if (mode == ConnectionMode.relayWs) {
-        _urlController.text = 'ws://$host:8766';
-      } else {
-        _urlController.text = 'http://$host:8765';
-      }
-    } else {
-      _urlController.text = mode.defaultUrl;
+      return;
     }
+
+    // Preserve the IP, just update protocol/port to match mode
+    if (mode == ConnectionMode.direct) {
+      _urlController.text = 'ws://$host:9090';
+    } else if (mode == ConnectionMode.relayWs) {
+      _urlController.text = 'ws://$host:8766';
+    } else {
+      _urlController.text = 'http://$host:8765';
+    }
+  }
+
+  /// Save connection mode to SharedPreferences
+  Future<void> _saveConnectionMode(ConnectionMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('connection_mode', mode.name);
+    debugPrint('HomeScreen: Saved connection mode: ${mode.name}');
+  }
+
+  /// Load connection mode from SharedPreferences
+  /// Returns true if a saved mode was found, false otherwise
+  Future<bool> _loadConnectionMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedMode = prefs.getString('connection_mode');
+    if (savedMode != null) {
+      final mode = ConnectionMode.values.firstWhere(
+        (m) => m.name == savedMode,
+        orElse: () => ConnectionMode.direct,
+      );
+      setState(() => _connectionMode = mode);
+      debugPrint('HomeScreen: Loaded connection mode: ${mode.name}');
+      return true;
+    }
+    debugPrint('HomeScreen: No saved connection mode found');
+    return false;
   }
 
   @override
@@ -138,10 +218,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.all(16),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate(
-                      WidgetFactory(
-                        robot.capabilities!,
-                        relayHttpUrl: _getRelayHttpUrl(),
-                      ).generateWidgets(context),
+                      // Use cached widgets to prevent recreation on every status update
+                      _getWidgets(robot.capabilities!, _getRelayHttpUrl()),
                     ),
                   ),
                 )
@@ -267,10 +345,21 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _connect(RobotConnection robot) {
-    final url = _urlController.text.trim();
-    if (url.isNotEmpty) {
-      robot.connect(url);
+    var url = _urlController.text.trim();
+    if (url.isEmpty) return;
+
+    // Convert HTTP URL to WebSocket URL for rosbridge connection
+    // HTTP is only for REST API calls (tablet tasks), not for rosbridge protocol
+    if (url.startsWith('http://')) {
+      final uri = Uri.tryParse(url);
+      if (uri != null) {
+        // Use WebSocket on port 8766 for rosbridge
+        url = 'ws://${uri.host}:8766';
+        debugPrint('HomeScreen: Converted HTTP URL to WebSocket: $url');
+      }
     }
+
+    robot.connect(url);
   }
 
   /// Get the HTTP relay URL for tablet tasks (if using relay mode)

@@ -79,6 +79,13 @@ object SmaitProtocol {
         type = "yutong_assistance/point_array"
     ))
 
+    fun subscribeGlobalPath(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_global_path",
+        topic = TOPIC_GLOBAL_PATH,
+        type = "yutong_assistance/point_array"
+    ))
+
     fun subscribeNaviStatus(): String = toJson(SubscribeMsg(
         op = OP_SUBSCRIBE,
         id = "get_navi_status",
@@ -100,6 +107,19 @@ object SmaitProtocol {
         type = "nav_msgs/OccupancyGrid",
         fragmentSize = 6000,
         compression = "png"
+    ))
+
+    /**
+     * Subscribe to map WITHOUT fragmentation/compression.
+     * Returns raw OccupancyGrid that Flutter can parse directly.
+     * Uses throttle_rate to limit map updates to every 5 seconds.
+     */
+    fun subscribeMapSimple(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_map_simple",
+        topic = TOPIC_MAP,
+        type = "nav_msgs/OccupancyGrid",
+        throttleRate = 5000
     ))
 
     fun unsubscribe(topic: String, id: String): String = toJson(UnsubscribeMsg(

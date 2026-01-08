@@ -1,26 +1,52 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
+import '../core/rosbridge_client.dart';
 
 /// Real-time map visualization from /map topic
 class MapView extends StatefulWidget {
-  const MapView({super.key});
+  /// When true, renders map fullscreen with no chrome (for HUD background)
+  final bool fullscreen;
+
+  /// Callback when map info changes (for external overlay display)
+  final void Function(MapInfo? info, double robotX, double robotY)? onMapUpdate;
+
+  const MapView({
+    super.key,
+    this.fullscreen = false,
+    this.onMapUpdate,
+  });
 
   @override
   State<MapView> createState() => _MapViewState();
 }
 
+// Static cache for map data - survives widget recreation
+class _MapCache {
+  static ui.Image? image;
+  static MapInfo? info;
+  static double robotX = 0;
+  static double robotY = 0;
+  static double robotTheta = 0;
+}
+
 class _MapViewState extends State<MapView> {
-  StreamSubscription? _mapSubscription;
+  StreamSubscription? _poseSubscription;
+  StreamSubscription? _wsStateSubscription;
   ui.Image? _mapImage;
   MapInfo? _mapInfo;
-  bool _isLoading = true;
-  bool _subscribed = false;
+  bool _isLoading = false;
   String? _error;
-  Timer? _timeoutTimer;
+  Timer? _pollTimer;
+  RobotConnection? _robot;
+  bool _lastKnownConnected = false;
+  WsConnectionState? _lastWsState;
+  String? _httpBaseUrl;  // HTTP endpoint for map (e.g., http://192.168.1.100:8765)
 
   // Robot pose on map
   double _robotX = 0;
@@ -30,52 +56,177 @@ class _MapViewState extends State<MapView> {
   @override
   void initState() {
     super.initState();
+    debugPrint('MapView: initState - using WebSocket for map');
+
+    // Restore from static cache IMMEDIATELY to prevent "loading" flash
+    if (_MapCache.image != null) {
+      debugPrint('MapView: Restoring map from static cache!');
+      _mapImage = _MapCache.image;
+      _mapInfo = _MapCache.info;
+      _robotX = _MapCache.robotX;
+      _robotY = _MapCache.robotY;
+      _robotTheta = _MapCache.robotTheta;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _subscribeToMap();
+      _robot = context.read<RobotConnection>();
+      _lastKnownConnected = _robot?.isConnected ?? false;
+      _lastWsState = _robot?.client.state;
+
+      // Extract HTTP base URL from WebSocket URL
+      _updateHttpBaseUrl();
+
+      // Start HTTP polling for map
+      _startMapPolling();
+
+      // Subscribe to robot pose via WebSocket (small messages, WS is fine)
+      _subscribeToPose();
+
+      _robot?.addListener(_onConnectionChanged);
+      _wsStateSubscription = _robot?.client.connectionState.listen(_onWsStateChanged);
     });
+  }
+
+  void _updateHttpBaseUrl() {
+    // Convert ws://host:port to http://host:(port-1) for HTTP API
+    // WS is on 8766, HTTP is on 8765
+    final robot = _robot;
+    if (robot == null) return;
+
+    // Get the URL from the connection
+    final wsUrl = robot.robotUrl;
+    if (wsUrl.isNotEmpty) {
+      try {
+        final uri = Uri.parse(wsUrl);
+        // If connecting to relay WS (8766), HTTP is on 8765
+        // If connecting direct to robot (9090), no HTTP map endpoint available
+        if (uri.port == 8766) {
+          _httpBaseUrl = 'http://${uri.host}:8765';
+          debugPrint('MapView: HTTP base URL: $_httpBaseUrl');
+        } else {
+          debugPrint('MapView: Direct robot connection, HTTP map not available');
+          _httpBaseUrl = null;
+        }
+      } catch (e) {
+        debugPrint('MapView: Failed to parse WS URL: $e');
+      }
+    }
+  }
+
+  void _onWsStateChanged(WsConnectionState newState) {
+    debugPrint('MapView: WS state changed: $_lastWsState -> $newState');
+
+    final wasConnected = _lastWsState == WsConnectionState.connected;
+    final isNowConnected = newState == WsConnectionState.connected;
+
+    if (isNowConnected && !wasConnected) {
+      debugPrint('MapView: Connection restored, resubscribing to map');
+      _startMapPolling();
+      _subscribeToPose();
+    }
+
+    _lastWsState = newState;
+  }
+
+  void _onConnectionChanged() {
+    final robot = _robot;
+    if (robot == null) return;
+
+    final isConnected = robot.isConnected;
+    if (isConnected == _lastKnownConnected) return;
+
+    if (isConnected && !_lastKnownConnected) {
+      debugPrint('MapView: Connection restored');
+      _startMapPolling();
+      _subscribeToPose();
+    } else if (!isConnected && _lastKnownConnected) {
+      debugPrint('MapView: Connection lost');
+      _pollTimer?.cancel();
+    }
+    _lastKnownConnected = isConnected;
   }
 
   @override
   void dispose() {
-    _mapSubscription?.cancel();
-    _timeoutTimer?.cancel();
-    _mapImage?.dispose();
+    debugPrint('MapView: DISPOSE called');
+    _robot?.removeListener(_onConnectionChanged);
+    _wsStateSubscription?.cancel();
+    _poseSubscription?.cancel();
+    _pollTimer?.cancel();
+    if (_mapImage != null && _mapImage != _MapCache.image) {
+      _mapImage?.dispose();
+    }
     super.dispose();
   }
 
-  void _subscribeToMap() {
-    final robot = context.read<RobotConnection>();
-    if (!robot.isConnected) {
-      setState(() {
-        _error = 'Not connected';
-        _isLoading = false;
-      });
+  /// Start HTTP polling for map data - much more reliable than WebSocket for large payloads
+  void _startMapPolling() {
+    _pollTimer?.cancel();
+
+    if (_httpBaseUrl == null) {
+      debugPrint('MapView: No HTTP base URL, falling back to WebSocket subscription');
+      _subscribeToMapViaWebSocket();
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _subscribed = false;
-      _error = null;
+    // Fetch map immediately
+    _fetchMapViaHttp();
+
+    // Then poll every 5 seconds (matches the robot's /map throttle rate)
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _fetchMapViaHttp();
     });
 
-    // Subscribe to map topic with throttle to avoid flooding
+    debugPrint('MapView: Started HTTP map polling');
+  }
+
+  /// Fetch map via HTTP - single request/response, no subscription issues
+  Future<void> _fetchMapViaHttp() async {
+    if (_httpBaseUrl == null) return;
+
+    final robot = _robot;
+    if (robot == null || !robot.isConnected) return;
+
+    try {
+      final response = await http.get(
+        Uri.parse('$_httpBaseUrl/map'),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        // The response is the raw rosbridge message: {topic: "/map", msg: {...}}
+        final msg = data['msg'];
+        if (msg != null) {
+          _handleMapMessage(msg);
+        }
+      } else if (response.statusCode == 404) {
+        // No map cached yet - this is normal on startup
+        debugPrint('MapView: No map cached on relay yet');
+      } else {
+        debugPrint('MapView: HTTP map fetch failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      // Don't spam errors - just log once
+      debugPrint('MapView: HTTP map fetch error: $e');
+    }
+  }
+
+  /// Fallback: Subscribe to map via WebSocket (for direct robot connections)
+  void _subscribeToMapViaWebSocket() {
+    final robot = _robot;
+    if (robot == null || !robot.isConnected) return;
+
     robot.client.send({
       'op': 'subscribe',
       'topic': '/map',
       'type': 'nav_msgs/OccupancyGrid',
-      'throttle_rate': 5000, // Only get map updates every 5 seconds
+      'throttle_rate': 5000,
       'queue_length': 1,
     });
 
-    // Subscribe to robot pose for showing position on map
-    robot.client.subscribe(
-      topic: '/robot_pose',
-      type: 'geometry_msgs/Pose2D',
-    );
-
-    _mapSubscription?.cancel();
-    _mapSubscription = robot.client.messages.listen((msg) {
+    // Listen for map messages (also handles pose if already subscribed)
+    _poseSubscription?.cancel();
+    _poseSubscription = robot.client.messages.listen((msg) {
       final topic = msg['topic'] as String?;
       if (topic == '/map') {
         _handleMapMessage(msg['msg']);
@@ -84,13 +235,61 @@ class _MapViewState extends State<MapView> {
       }
     });
 
-    setState(() => _subscribed = true);
+    debugPrint('MapView: Subscribed to /map via WebSocket');
+  }
 
-    // Set timeout - stop spinner after 8 seconds if no data
-    _timeoutTimer?.cancel();
-    _timeoutTimer = Timer(const Duration(seconds: 8), () {
-      if (mounted && _isLoading && _mapImage == null) {
-        setState(() => _isLoading = false);
+  /// Subscribe to robot pose via WebSocket
+  void _subscribeToPose() {
+    final robot = _robot;
+    if (robot == null || !robot.isConnected) return;
+
+    _poseSubscription?.cancel();
+
+    robot.client.subscribe(
+      topic: '/robot_pose',
+      type: 'geometry_msgs/Pose2D',
+    );
+
+    _poseSubscription = robot.client.messages.listen((msg) {
+      final topic = msg['topic'] as String?;
+      if (topic == '/robot_pose') {
+        _handlePoseMessage(msg['msg']);
+      }
+    });
+
+    debugPrint('MapView: Subscribed to robot pose');
+  }
+
+  /// Force a map refresh via HTTP
+  void _forceMapRefresh() {
+    if (_httpBaseUrl == null) {
+      debugPrint('MapView: Cannot refresh - no HTTP URL, trying WebSocket');
+      _subscribeToMapViaWebSocket();
+      return;
+    }
+
+    debugPrint('MapView: Force refresh triggered');
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    // Tell relay to refresh its map subscription
+    http.post(Uri.parse('$_httpBaseUrl/map/refresh')).then((_) {
+      // Wait a bit for the relay to get fresh map, then fetch
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _fetchMapViaHttp();
+        }
+      });
+    }).catchError((e) {
+      debugPrint('MapView: Refresh request failed: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = 'Refresh failed';
+        });
       }
     });
   }
@@ -129,10 +328,19 @@ class _MapViewState extends State<MapView> {
 
       if (mounted) {
         setState(() {
-          _mapImage?.dispose();
+          // Don't dispose old image if it's the cached one
+          if (_mapImage != _MapCache.image) {
+            _mapImage?.dispose();
+          }
           _mapImage = image;
+          _mapInfo = _mapInfo;  // Already set above
           _isLoading = false;
           _error = null;
+
+          // CRITICAL: Update static cache so map survives widget recreation
+          _MapCache.image = image;
+          _MapCache.info = _mapInfo;
+          debugPrint('MapView: Updated static cache with new map');
         });
       }
     } catch (e) {
@@ -147,11 +355,23 @@ class _MapViewState extends State<MapView> {
 
   void _handlePoseMessage(dynamic data) {
     if (data == null) return;
+    final x = (data['x'] as num?)?.toDouble() ?? 0;
+    final y = (data['y'] as num?)?.toDouble() ?? 0;
+    final theta = (data['theta'] as num?)?.toDouble() ?? 0;
+
     setState(() {
-      _robotX = (data['x'] as num?)?.toDouble() ?? 0;
-      _robotY = (data['y'] as num?)?.toDouble() ?? 0;
-      _robotTheta = (data['theta'] as num?)?.toDouble() ?? 0;
+      _robotX = x;
+      _robotY = y;
+      _robotTheta = theta;
     });
+
+    // Update static cache for robot position too
+    _MapCache.robotX = x;
+    _MapCache.robotY = y;
+    _MapCache.robotTheta = theta;
+
+    // Notify external listeners (for HUD overlay)
+    widget.onMapUpdate?.call(_mapInfo, _robotX, _robotY);
   }
 
   Future<ui.Image> _occupancyGridToImage(List<int> data, int width, int height) async {
@@ -193,61 +413,75 @@ class _MapViewState extends State<MapView> {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.map),
-                const SizedBox(width: 8),
+    // Fullscreen mode - just the map, no chrome (for HUD background)
+    if (widget.fullscreen) {
+      return _buildFullscreenMap();
+    }
+
+    // Regular mode with header and border (for widget_factory/home_screen)
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          // Compact header with info and refresh
+          Row(
+            children: [
+              if (_mapInfo != null)
                 Text(
-                  'Map',
-                  style: Theme.of(context).textTheme.titleLarge,
+                  '${_mapInfo!.width}x${_mapInfo!.height} • ${_mapInfo!.resolution.toStringAsFixed(3)}m/px',
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
-                const Spacer(),
-                if (_mapInfo != null)
-                  Text(
-                    '${_mapInfo!.width}x${_mapInfo!.height}',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  onPressed: _subscribeToMap,
-                  tooltip: 'Refresh map',
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            AspectRatio(
-              aspectRatio: 1.0,
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade700),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _buildMapContent(),
-                ),
-              ),
-            ),
-            if (_mapInfo != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  'Resolution: ${_mapInfo!.resolution.toStringAsFixed(3)}m/px • '
+              const Spacer(),
+              if (_mapInfo != null)
+                Text(
                   'Robot: (${_robotX.toStringAsFixed(1)}, ${_robotY.toStringAsFixed(1)})',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
                 ),
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 20),
+                onPressed: _forceMapRefresh,
+                tooltip: 'Refresh map',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
               ),
-          ],
-        ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          // Map fills remaining space
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade700),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: _buildMapContent(),
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+
+  /// Fullscreen map rendering - fills entire space, dark background
+  Widget _buildFullscreenMap() {
+    return Container(
+      color: const Color(0xFF0A0E14), // Match HUD background
+      child: _mapImage == null
+          ? const SizedBox.expand() // Empty dark background while loading
+          : CustomPaint(
+              painter: _MapPainter(
+                mapImage: _mapImage!,
+                mapInfo: _mapInfo!,
+                robotX: _robotX,
+                robotY: _robotY,
+                robotTheta: _robotTheta,
+                fillMode: true, // Center and fill the space
+              ),
+              size: Size.infinite,
+            ),
     );
   }
 
@@ -287,12 +521,12 @@ class _MapViewState extends State<MapView> {
             const SizedBox(height: 8),
             const Text('No map data'),
             Text(
-              _subscribed ? 'Subscribed to /map - waiting for data...' : 'Not subscribed',
+              _httpBaseUrl != null ? 'Polling via HTTP...' : 'Not connected',
               style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 4),
             const Text(
-              'Robot may not be publishing map',
+              'Tap refresh or wait for map data',
               style: TextStyle(color: Colors.grey, fontSize: 11),
             ),
           ],
@@ -335,6 +569,7 @@ class _MapPainter extends CustomPainter {
   final double robotX;
   final double robotY;
   final double robotTheta;
+  final bool fillMode; // When true, centers map and fills available space
 
   _MapPainter({
     required this.mapImage,
@@ -342,15 +577,41 @@ class _MapPainter extends CustomPainter {
     required this.robotX,
     required this.robotY,
     required this.robotTheta,
+    this.fillMode = false,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Draw the map image, flipped vertically (ROS convention)
-    final scale = size.width / mapImage.width;
+    double scale;
+    double centerX = 0;
+    double centerY = 0;
+    double scaledWidth;
+    double scaledHeight;
 
+    if (fillMode) {
+      // Contain mode: scale to fit entirely and center the map (no clipping)
+      final scaleX = size.width / mapImage.width;
+      final scaleY = size.height / mapImage.height;
+      scale = scaleX < scaleY ? scaleX : scaleY; // Use SMALLER scale to contain
+
+      // Calculate centered position
+      scaledWidth = mapImage.width * scale;
+      scaledHeight = mapImage.height * scale;
+      centerX = (size.width - scaledWidth) / 2;
+      centerY = (size.height - scaledHeight) / 2;
+    } else {
+      // Fit mode: scale to fit width
+      scale = size.width / mapImage.width;
+      scaledWidth = size.width;
+      scaledHeight = mapImage.height * scale;
+      centerX = 0;
+      centerY = 0;
+    }
+
+    // Draw the map image, flipped vertically (ROS convention)
+    // Translate to bottom of centered rect, then negative Y scale flips it upward
     canvas.save();
-    canvas.translate(0, size.height);
+    canvas.translate(centerX, centerY + scaledHeight);
     canvas.scale(scale, -scale);
     canvas.drawImage(mapImage, Offset.zero, Paint());
     canvas.restore();
@@ -359,24 +620,25 @@ class _MapPainter extends CustomPainter {
     final robotPixelX = (robotX - mapInfo.originX) / mapInfo.resolution;
     final robotPixelY = (robotY - mapInfo.originY) / mapInfo.resolution;
 
-    // Convert to screen coordinates
-    final screenX = robotPixelX * scale;
-    final screenY = size.height - (robotPixelY * scale);
+    // Convert to screen coordinates (same transform as map)
+    final screenX = centerX + (robotPixelX * scale);
+    final screenY = (centerY + scaledHeight) - (robotPixelY * scale);
 
     // Draw robot as arrow
     canvas.save();
     canvas.translate(screenX, screenY);
     canvas.rotate(-robotTheta);
 
-    // Robot body
+    // Robot body - slightly larger in fill mode
+    final robotRadius = fillMode ? 10.0 : 8.0;
     canvas.drawCircle(
       Offset.zero,
-      8,
+      robotRadius,
       Paint()..color = Colors.blue,
     );
     canvas.drawCircle(
       Offset.zero,
-      8,
+      robotRadius,
       Paint()
         ..color = Colors.white
         ..style = PaintingStyle.stroke
@@ -384,10 +646,11 @@ class _MapPainter extends CustomPainter {
     );
 
     // Direction arrow
+    final arrowScale = fillMode ? 1.2 : 1.0;
     final arrowPath = Path()
-      ..moveTo(10, 0)
-      ..lineTo(-5, 6)
-      ..lineTo(-5, -6)
+      ..moveTo(12 * arrowScale, 0)
+      ..lineTo(-6 * arrowScale, 7 * arrowScale)
+      ..lineTo(-6 * arrowScale, -7 * arrowScale)
       ..close();
     canvas.drawPath(
       arrowPath,
@@ -402,6 +665,7 @@ class _MapPainter extends CustomPainter {
     return oldDelegate.mapImage != mapImage ||
         oldDelegate.robotX != robotX ||
         oldDelegate.robotY != robotY ||
-        oldDelegate.robotTheta != robotTheta;
+        oldDelegate.robotTheta != robotTheta ||
+        oldDelegate.fillMode != fillMode;
   }
 }

@@ -55,15 +55,25 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         private const val CONFIG_KEY = "waypoint_modes"
         private const val TTS_API_KEY = "google_tts_api_key"
 
-        // Robot base IP via USB wired connection (NOT the WiFi hotspot IP!)
-        // WiFi hotspot: 10.42.0.1 | Wired/USB: 192.168.20.22
+        // Robot IP via WIRED USB connection (tablet is physically connected to robot)
+        // See NETWORKING.md for architecture details
         private const val ROBOT_WIRED_IP = "192.168.20.22"
 
         // Broadcast actions for UI updates
         const val ACTION_DISPLAY = "com.smait.robotrelay.DISPLAY"
         const val ACTION_TASK_STATUS = "com.smait.robotrelay.TASK_STATUS"
+        const val ACTION_COUNTDOWN = "com.smait.robotrelay.COUNTDOWN"
+        const val ACTION_TOUR_MODE = "com.smait.robotrelay.TOUR_MODE"
+        const val ACTION_TOUR_STANDBY = "com.smait.robotrelay.TOUR_STANDBY"
         const val EXTRA_URL = "url"
         const val EXTRA_STATUS = "status"
+        const val EXTRA_COUNTDOWN_SECONDS = "countdown_seconds"
+        const val EXTRA_COUNTDOWN_LABEL = "countdown_label"
+        const val EXTRA_TOUR_ACTION = "tour_action"
+        const val EXTRA_TOUR_PIN = "tour_pin"
+        const val EXTRA_TOUR_SEQUENCE_ID = "tour_sequence_id"
+        const val EXTRA_TOUR_BUTTON_TEXT = "tour_button_text"
+
 
         // Common phrases to precache for instant playback
         private val PRECACHE_PHRASES = listOf(
@@ -93,10 +103,22 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private lateinit var fleetClient: FleetApiClient
     private var fleetSyncJob: Job? = null
 
+    // Obstacle intelligence - DISABLED by default to avoid constant LIDAR processing
+    // Only enable explicitly for motion-triggered tours (greeting visitors)
+    private var obstacleIntelligenceEnabled = false  // OFF by default
+    private var obstacleAnnouncementsEnabled = false  // TTS announcements OFF
+    private var lastObstacleAnnouncement: Long = 0
+    private var lastObstacleType: ObstacleType? = null
+    private val OBSTACLE_ANNOUNCE_COOLDOWN = 5000L  // 5 seconds between same-type announcements
+
     lateinit var robotClient: RobotWebSocketClient
         private set
     lateinit var relayServer: RelayServer
         private set
+    private var discoveryService: DiscoveryService? = null
+
+    // gRPC server for WAN-ready communication (OPUS LEVEL!)
+    private var grpcServer: com.smait.robotrelay.grpc.GrpcServer? = null
 
     // Current task execution state
     private val _currentTask = MutableStateFlow<WaypointTask?>(null)
@@ -105,7 +127,11 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private val _taskStatus = MutableStateFlow("")
     val taskStatus: StateFlow<String> = _taskStatus
 
-    // Robot connection settings - defaults to wired (USB) connection
+    // Alert sound tracking - prevent stacking
+    private var alertSoundPlayer: android.media.MediaPlayer? = null
+    private var pendingSoundRunnables = mutableListOf<Runnable>()
+
+    // Robot connection settings - tablet is WIRED to robot base
     private var robotIp = ROBOT_WIRED_IP
     private var robotPort = 9090
     private var relayPort = 8765
@@ -259,8 +285,33 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         // Connect to robot
         robotClient.connect()
 
-        // Start relay server
+        // Enable obstacle intelligence for smart crowd handling
+        if (obstacleIntelligenceEnabled) {
+            robotClient.enableObstacleIntelligence { classification ->
+                handleObstacleClassification(classification)
+            }
+        }
+
+        // Start relay server (WebSocket - port 8766) - LEGACY, keeping for backward compatibility
         relayServer.start()
+
+        // Start gRPC server (port 50051) - THIS IS THE REAL WAN-READY PROTOCOL!
+        try {
+            grpcServer = com.smait.robotrelay.grpc.GrpcServer(
+                port = 50051,
+                robotClient = robotClient,
+                taskExecutor = this
+            )
+            grpcServer?.start()
+            Log.i(TAG, "✅ gRPC server started on port 50051 - WAN-READY!")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start gRPC server: ${e.message}")
+            // Continue without gRPC - legacy WebSocket still works
+        }
+
+        // Start UDP discovery service for auto-discovery
+        discoveryService = DiscoveryService(relayPort, robotClient)
+        discoveryService?.start()
 
         // Update notification with status
         scope.launch {
@@ -276,6 +327,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         Log.i(TAG, "Service destroying")
         fleetSyncJob?.cancel()
         fleetClient.destroy()
+        discoveryService?.destroy()
         cloudTts?.destroy()
         tts?.stop()
         tts?.shutdown()
@@ -501,6 +553,194 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         }
     }
 
+    /**
+     * Update countdown timer overlay on tablet screen
+     * @param seconds Countdown seconds (0 = hide countdown)
+     * @param label Label text (e.g., "Next stop in", "Waiting...")
+     */
+    override fun updateCountdown(seconds: Int, label: String) {
+        mainHandler.post {
+            val intent = Intent(ACTION_COUNTDOWN).apply {
+                putExtra(EXTRA_COUNTDOWN_SECONDS, seconds)
+                putExtra(EXTRA_COUNTDOWN_LABEL, label)
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+            if (seconds > 0) {
+                Log.d(TAG, "Countdown update: $seconds sec - $label")
+            }
+        }
+    }
+
+    /**
+     * Start tour mode - locks tablet screen to prevent access to controls
+     * @param pin Optional PIN code to unlock (default is 1234)
+     */
+    override fun startTourMode(pin: String?) {
+        Log.i(TAG, "Starting tour mode (pin=${if (pin.isNullOrEmpty()) "default" else "custom"})")
+        mainHandler.post {
+            val intent = Intent(ACTION_TOUR_MODE).apply {
+                putExtra(EXTRA_TOUR_ACTION, "start")
+                if (!pin.isNullOrEmpty()) {
+                    putExtra(EXTRA_TOUR_PIN, pin)
+                }
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        }
+    }
+
+    /**
+     * Stop tour mode - unlocks tablet screen
+     */
+    override fun stopTourMode() {
+        Log.i(TAG, "Stopping tour mode")
+        mainHandler.post {
+            val intent = Intent(ACTION_TOUR_MODE).apply {
+                putExtra(EXTRA_TOUR_ACTION, "stop")
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        }
+        // Also hide countdown
+        updateCountdown(0, "")
+    }
+
+    /**
+     * Notifies the UI that a tour is in standby, ready to be started by a visitor.
+     * This allows the lock screen to show a "Start Tour" button.
+     */
+    override fun notifyTourStandby(sequenceId: String, buttonText: String) {
+        Log.i(TAG, "Notifying UI of tour standby: sequenceId=$sequenceId, buttonText=$buttonText")
+        mainHandler.post {
+            val intent = Intent(ACTION_TOUR_STANDBY).apply {
+                putExtra(EXTRA_TOUR_SEQUENCE_ID, sequenceId)
+                putExtra(EXTRA_TOUR_BUTTON_TEXT, buttonText)
+            }
+            LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        }
+    }
+
+
+    /**
+     * Called when tour mode is unlocked via PIN entry on tablet
+     * Notifies Flutter that user manually exited tour mode
+     */
+    fun notifyTourUnlocked() {
+        Log.i(TAG, "Tour mode unlocked by user")
+        // Send event to Flutter via WebSocket
+        relayServer.commandBuffer.let { buffer ->
+            // This will be picked up by Flutter via buffer_heartbeat
+        }
+        // TODO: Send explicit event to Flutter when tour is unlocked
+    }
+
+    /**
+     * Called when "Start Tour" button is pressed on motion standby screen.
+     * Completes the motion_standby command in CommandBuffer.
+     */
+    fun notifyTourStarted(sequenceId: String) {
+        Log.i(TAG, "Tour started via button press for sequence: $sequenceId")
+        relayServer.commandBuffer.notifyTourStarted()
+    }
+
+    // === Obstacle Intelligence ===
+
+    /**
+     * Handle obstacle classification from LIDAR intelligence.
+     *
+     * KEY INSIGHT: Only announce for:
+     * - MOVING objects (person, other robot, falling item) - they might move
+     * - UNEXPECTED STATIC objects in path that SHOULD be open
+     *
+     * NEVER announce for:
+     * - Walls, corners, map obstacles (robot should just navigate around)
+     * - Reflections, self-detection
+     * - Anything the path planner should handle quietly
+     *
+     * CRITICAL: Only announce obstacles when ACTIVELY NAVIGATING (navStatus == 601)
+     * When idle, we should be looking for people to greet, not yelling at walls!
+     */
+    private fun handleObstacleClassification(classification: ObstacleClassification) {
+        if (!obstacleAnnouncementsEnabled) return
+        if (classification.type == ObstacleType.CLEAR) return
+
+        // THE SIMPLE CHECK: Only announce during ACTIVE NAVIGATION (601)
+        val navStatus = robotClient.robotStatus.value?.navStatus ?: 0
+        if (navStatus != 601) return  // Not navigating = no announcements
+
+        // Must be in the robot's path
+        if (!classification.inPath) return
+
+        // Only announce for MOVING obstacles (walls don't move)
+        if (!classification.isMoving) return
+
+        // Check cooldown to avoid spamming announcements
+        // Use TWO cooldowns:
+        // 1. Short cooldown for ANY announcement (prevents rapid fire)
+        // 2. Longer cooldown for same-type (avoids repeating the same thing)
+        val now = System.currentTimeMillis()
+        val timeSinceLastAnnouncement = now - lastObstacleAnnouncement
+
+        // Always wait at least 3 seconds between ANY announcements
+        if (timeSinceLastAnnouncement < 3000L) {
+            return
+        }
+
+        // Wait 5 seconds before repeating same type
+        if (classification.type == lastObstacleType && timeSinceLastAnnouncement < OBSTACLE_ANNOUNCE_COOLDOWN) {
+            return
+        }
+
+        // Determine announcement based on type
+        val announcement = when (classification.suggestedAction) {
+            SuggestedAction.WAIT_PATIENTLY -> {
+                // Moving person - they'll likely move on their own
+                Log.i(TAG, "Obstacle: Moving person detected, waiting patiently")
+                null  // Don't announce yet, just wait
+            }
+            SuggestedAction.WAIT_AND_OBSERVE -> {
+                // Unknown moving thing - could be another robot
+                Log.i(TAG, "Obstacle: Unknown moving object, observing")
+                null  // Don't announce, just observe
+            }
+            SuggestedAction.POLITE_REQUEST -> {
+                // Person standing still - ask nicely
+                Log.i(TAG, "Obstacle: Static person in path, polite request")
+                "Excuse me, you're in my path. Please step aside."
+            }
+            SuggestedAction.ANNOUNCE_CROWD -> {
+                // Multiple people blocking - louder announcement
+                Log.i(TAG, "Obstacle: Crowd detected, announcing")
+                "Attention please. The path is blocked. Please make way."
+            }
+            SuggestedAction.REQUEST_HELP -> {
+                // Unexpected static obstacle - need human help
+                Log.i(TAG, "Obstacle: Unexpected static obstacle, requesting help")
+                "There's an obstacle blocking my path. I need assistance."
+            }
+            SuggestedAction.ESCALATE_NORMALLY -> {
+                // Can't classify - let time-based system handle it
+                Log.i(TAG, "Obstacle: Unknown, falling back to normal escalation")
+                null
+            }
+            SuggestedAction.NONE -> null
+        }
+
+        // Make announcement if we have one
+        if (announcement != null) {
+            lastObstacleAnnouncement = now
+            lastObstacleType = classification.type
+            speak(announcement)
+        }
+    }
+
+    /**
+     * Enable/disable obstacle intelligence
+     */
+    fun setObstacleIntelligenceEnabled(enabled: Boolean) {
+        obstacleIntelligenceEnabled = enabled
+        robotClient.setObstacleIntelligenceEnabled(enabled)
+        Log.i(TAG, "Obstacle intelligence ${if (enabled) "enabled" else "disabled"}")
+    }
+
     fun executeTask(task: WaypointTask, onComplete: (() -> Unit)? = null) {
         Log.i(TAG, "Executing task: ${task.type} - ${task.data}")
         _currentTask.value = task
@@ -596,7 +836,16 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
     override fun speakText(text: String) {
         Log.i(TAG, ">>> speakText() called from TaskExecutor: '$text'")
+        // Stop any current speech to prevent queuing (for blocked path warnings)
+        cloudTts?.stop()
+        tts?.stop()
         speak(text, null)
+    }
+
+    override fun stopSpeak() {
+        Log.i(TAG, ">>> stopSpeak() called - clearing TTS queue")
+        cloudTts?.stop()
+        tts?.stop()
     }
 
     override fun displayUrl(url: String) {
@@ -612,6 +861,143 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             return
         }
         executeTask(WaypointTask(taskType, data, waitSeconds))
+    }
+
+    override fun playAlertSound(soundType: String) {
+        Log.i(TAG, ">>> playAlertSound() called: '$soundType'")
+        // Run sound generation on background thread to avoid blocking
+        scope.launch(Dispatchers.Default) {
+            try {
+                // Cancel any pending sounds first to prevent stacking
+                withContext(Dispatchers.Main) { cancelPendingSounds() }
+
+                when (soundType.lowercase()) {
+                    "horn", "alarm" -> {
+                        // Generate loud horn sound: 3 descending tones
+                        Log.i(TAG, "Generating horn sound...")
+                        generateTone(440.0, 300)  // A4
+                        delay(100)
+                        generateTone(349.23, 300) // F4
+                        delay(100)
+                        generateTone(293.66, 400) // D4
+                        Log.i(TAG, "Horn sound complete")
+                    }
+                    "beep" -> {
+                        // Single attention beep
+                        Log.i(TAG, "Generating beep sound...")
+                        generateTone(880.0, 200)  // A5 - high pitched beep
+                        Log.i(TAG, "Beep sound complete")
+                    }
+                    "arrival", "arrival_beep" -> {
+                        // Loud beep-boop for POI/Delivery arrival
+                        Log.i(TAG, "Generating arrival beep-boop sound...")
+                        generateTone(880.0, 150)  // A5 - high beep
+                        delay(50)
+                        generateTone(1047.0, 150) // C6 - higher beep
+                        delay(50)
+                        generateTone(880.0, 200)  // A5 - back down
+                        Log.i(TAG, "Arrival sound complete")
+                    }
+                    "delivery" -> {
+                        // Extra loud celebratory sound for delivery arrival
+                        Log.i(TAG, "Generating delivery arrival sound...")
+                        generateTone(523.25, 100) // C5
+                        delay(30)
+                        generateTone(659.25, 100) // E5
+                        delay(30)
+                        generateTone(783.99, 100) // G5
+                        delay(30)
+                        generateTone(1047.0, 200) // C6 - triumphant high note
+                        Log.i(TAG, "Delivery sound complete")
+                    }
+                    else -> {
+                        Log.i(TAG, "Generating default beep...")
+                        generateTone(660.0, 150)  // E5
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to play alert sound: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Generate a pure tone using AudioTrack - works on all devices
+     */
+    private fun generateTone(frequencyHz: Double, durationMs: Int) {
+        val sampleRate = 44100
+        val numSamples = (sampleRate * durationMs / 1000.0).toInt()
+        val samples = ShortArray(numSamples)
+
+        // Generate sine wave with fade in/out to avoid clicks
+        val fadeLength = (numSamples * 0.1).toInt() // 10% fade
+        for (i in 0 until numSamples) {
+            val angle = 2.0 * Math.PI * i / (sampleRate / frequencyHz)
+            var amplitude = 32767.0 * 0.8 // 80% volume to avoid clipping
+
+            // Fade in
+            if (i < fadeLength) {
+                amplitude *= i.toDouble() / fadeLength
+            }
+            // Fade out
+            if (i > numSamples - fadeLength) {
+                amplitude *= (numSamples - i).toDouble() / fadeLength
+            }
+
+            samples[i] = (Math.sin(angle) * amplitude).toInt().toShort()
+        }
+
+        // Create and play AudioTrack
+        val bufferSize = android.media.AudioTrack.getMinBufferSize(
+            sampleRate,
+            android.media.AudioFormat.CHANNEL_OUT_MONO,
+            android.media.AudioFormat.ENCODING_PCM_16BIT
+        )
+
+        val audioTrack = android.media.AudioTrack.Builder()
+            .setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .setAudioFormat(
+                android.media.AudioFormat.Builder()
+                    .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(maxOf(bufferSize, samples.size * 2))
+            .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+            .build()
+
+        audioTrack.write(samples, 0, samples.size)
+        audioTrack.play()
+
+        // Wait for playback to complete
+        Thread.sleep(durationMs.toLong() + 50)
+        audioTrack.stop()
+        audioTrack.release()
+    }
+
+    private fun cancelPendingSounds() {
+        // Cancel any pending sound handlers
+        pendingSoundRunnables.forEach { mainHandler.removeCallbacks(it) }
+        pendingSoundRunnables.clear()
+
+        // Stop and release current player
+        alertSoundPlayer?.let { player ->
+            try {
+                if (player.isPlaying) {
+                    player.stop()
+                }
+                player.release()
+            } catch (e: Exception) {
+                Log.w(TAG, "Error releasing alert player: ${e.message}")
+            }
+        }
+        alertSoundPlayer = null
     }
 
     // === ConfigStore Interface Methods ===

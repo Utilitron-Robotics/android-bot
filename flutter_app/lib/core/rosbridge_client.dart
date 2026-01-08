@@ -44,6 +44,10 @@ class RosbridgeClient {
   int _callId = 0;
   bool _isConnected = false;
 
+  // Subscription tracking to prevent duplicate subscribes
+  final Set<String> _subscribedTopics = {};
+  final Set<String> _advertisedTopics = {};
+
   // Keepalive and reconnect
   Timer? _pingTimer;
   Timer? _reconnectTimer;
@@ -142,6 +146,10 @@ class RosbridgeClient {
     _isConnected = false;
     _stopTimers();
     _closeConnection();
+
+    // Clear subscription tracking (server forgets on disconnect)
+    _subscribedTopics.clear();
+    _advertisedTopics.clear();
 
     // Attempt to reconnect if we have a URL
     if (_lastUrl != null && _reconnectAttempts < _maxReconnectAttempts) {
@@ -270,6 +278,10 @@ class RosbridgeClient {
     _lastUrl = null; // Clear URL to prevent auto-reconnect
     _reconnectAttempts = 0;
 
+    // Clear subscription tracking (server forgets on disconnect)
+    _subscribedTopics.clear();
+    _advertisedTopics.clear();
+
     // Cancel any pending service calls
     for (final completer in _pendingCalls.values) {
       if (!completer.isCompleted) {
@@ -313,12 +325,19 @@ class RosbridgeClient {
     }
   }
 
-  /// Subscribe to a topic
+  /// Subscribe to a topic (skips if already subscribed)
   void subscribe({
     required String topic,
     required String type,
     String? id,
+    bool force = false,
   }) {
+    // Skip if already subscribed (unless forced)
+    if (!force && _subscribedTopics.contains(topic)) {
+      debugPrint('RosbridgeClient: Already subscribed to $topic, skipping');
+      return;
+    }
+    _subscribedTopics.add(topic);
     send({
       'op': 'subscribe',
       'topic': topic,
@@ -329,6 +348,7 @@ class RosbridgeClient {
 
   /// Unsubscribe from a topic
   void unsubscribe({required String topic, String? id}) {
+    _subscribedTopics.remove(topic);
     send({
       'op': 'unsubscribe',
       'topic': topic,
@@ -371,11 +391,16 @@ class RosbridgeClient {
     });
   }
 
-  /// Advertise a topic for publishing
+  /// Advertise a topic for publishing (skips if already advertised)
   void advertise({
     required String topic,
     required String type,
   }) {
+    // Skip if already advertised
+    if (_advertisedTopics.contains(topic)) {
+      return;
+    }
+    _advertisedTopics.add(topic);
     send({
       'op': 'advertise',
       'topic': topic,
@@ -385,6 +410,7 @@ class RosbridgeClient {
 
   /// Unadvertise a topic
   void unadvertise({required String topic}) {
+    _advertisedTopics.remove(topic);
     send({
       'op': 'unadvertise',
       'topic': topic,
@@ -401,8 +427,14 @@ class RosbridgeClient {
 
   // === Tablet Commands (intercepted by relay, not forwarded to robot) ===
 
-  /// Speak text on the tablet via TTS
+  /// Stop any current TTS on the tablet
+  void tabletStopSpeak() {
+    send({'op': 'tablet_stop_speak'});
+  }
+
+  /// Speak text on the tablet via TTS (stops current speech first)
   void tabletSpeak(String text) {
+    send({'op': 'tablet_stop_speak'}); // Stop current speech to prevent queue buildup
     send({'op': 'tablet_speak', 'text': text});
   }
 
@@ -414,6 +446,11 @@ class RosbridgeClient {
   /// Close tablet display
   void tabletCloseDisplay() {
     send({'op': 'tablet_close_display'});
+  }
+
+  /// Play an alert sound on the tablet (beep, horn, alarm)
+  void tabletPlaySound(String soundType) {
+    send({'op': 'tablet_play_sound', 'sound': soundType});
   }
 
   /// Run a task on the tablet (SPEAK, DISPLAY, DELIVER)
@@ -429,5 +466,12 @@ class RosbridgeClient {
   /// Cancel current tablet task
   void tabletCancelTask() {
     send({'op': 'tablet_cancel'});
+  }
+
+  /// Request map refresh from tablet
+  /// This triggers the relay to re-subscribe to /map and get fresh data
+  void tabletRefreshMap() {
+    debugPrint('RosbridgeClient: Requesting map refresh');
+    send({'op': 'tablet_refresh_map'});
   }
 }

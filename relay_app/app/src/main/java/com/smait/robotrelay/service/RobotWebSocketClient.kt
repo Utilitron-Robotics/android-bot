@@ -26,13 +26,13 @@ enum class SafetyZone {
  * allowing WiFi to remain connected for internet access.
  */
 class RobotWebSocketClient(
-    private val robotIp: String = "192.168.20.22",  // Wired IP, not WiFi hotspot
+    val robotIp: String = "192.168.20.22",  // Wired USB connection to robot
     private val robotPort: Int = 9090,
     private val socketFactory: SocketFactory? = null
 ) {
     companion object {
         private const val TAG = "RobotWSClient"
-        private const val RECONNECT_DELAY_MS = 3000L
+        private const val RECONNECT_DELAY_MS = 1000L  // Reduced from 3000ms for faster recovery
 
         // Zone constants from Flutter app
         private const val STOP_DISTANCE = 0.20f
@@ -49,13 +49,27 @@ class RobotWebSocketClient(
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState
 
-    private val _incomingMessages = MutableSharedFlow<String>(extraBufferCapacity = 100)
+    // Large buffer for message bursts - map messages are huge and frequent during nav
+    private val _incomingMessages = MutableSharedFlow<String>(extraBufferCapacity = 500)
     val incomingMessages: SharedFlow<String> = _incomingMessages
+
+    // Cache the latest map message for HTTP transport (more reliable than WS for big payloads)
+    @Volatile
+    private var _cachedMapMessage: String? = null
+    val cachedMapMessage: String? get() = _cachedMapMessage
+
+    @Volatile
+    private var _mapLastUpdated: Long = 0
+    val mapLastUpdated: Long get() = _mapLastUpdated
 
     private val _robotStatus = MutableStateFlow<RobotStatusData?>(null)
     val robotStatus: StateFlow<RobotStatusData?> = _robotStatus
 
     private val safetyZone = AtomicReference(SafetyZone.CLEAR)
+
+    // Obstacle classifier for intelligent crowd handling
+    private var obstacleClassifier: ObstacleClassifier? = null
+    private var onObstacleClassification: ((ObstacleClassification) -> Unit)? = null
 
     // Build OkHttpClient with optional SocketFactory for network binding
     private val client = OkHttpClient.Builder()
@@ -84,9 +98,27 @@ class RobotWebSocketClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            Log.d(TAG, text) // Log all raw messages
+            // Log map messages specially - they're huge and might be the issue
+            val isMapMsg = text.contains("\"/map\"") || text.contains("\"topic\":\"/map\"")
+            if (isMapMsg) {
+                Log.i(TAG, ">>> RECEIVED /map message (${text.length} bytes)")
+                // Cache the map for HTTP transport - more reliable than WS for big payloads
+                _cachedMapMessage = text
+                _mapLastUpdated = System.currentTimeMillis()
+                Log.i(TAG, ">>> Map cached for HTTP transport")
+            } else {
+                Log.d(TAG, text.take(200)) // Truncate other messages
+            }
+
+            // Use tryEmit (non-blocking) instead of emit (suspending)
+            val emitted = _incomingMessages.tryEmit(text)
+            if (!emitted) {
+                Log.w(TAG, "Message buffer full, dropped: ${if (isMapMsg) "/map" else text.take(50)}")
+            } else if (isMapMsg) {
+                Log.i(TAG, ">>> /map message emitted to SharedFlow")
+            }
+
             scope.launch {
-                _incomingMessages.emit(text)
                 parseStatusUpdate(text)
             }
         }
@@ -143,6 +175,83 @@ class RobotWebSocketClient(
         send(SmaitProtocol.subscribeNaviStatus())
         send(SmaitProtocol.subscribeSensorsCore())
         send(SmaitProtocol.subscribeLaserData())
+        send(SmaitProtocol.subscribeGlobalPath())  // For obstacle path intersection
+        // Subscribe to /map so it's always flowing to Flutter clients
+        // This ensures map works after Flutter hot restart
+        val mapSubMsg = SmaitProtocol.subscribeMapSimple()
+        val mapSent = send(mapSubMsg)
+        Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
+        Log.i(TAG, ">>> /map subscription sent: $mapSent")
+    }
+
+    /**
+     * Enable obstacle intelligence for smart crowd announcements.
+     * Only announces for moving obstacles or unexpected static obstacles.
+     * Never yells at walls, corners, or reflections.
+     */
+    fun enableObstacleIntelligence(callback: (ObstacleClassification) -> Unit) {
+        onObstacleClassification = callback
+        obstacleClassifier = ObstacleClassifier { classification ->
+            // Update robot status with obstacle info for CommandBuffer motion detection
+            _robotStatus.value?.let { current ->
+                _robotStatus.value = current.copy(
+                    obstacleInPath = classification.inPath && classification.type != ObstacleType.CLEAR,
+                    obstacleMoving = classification.isMoving,
+                    obstacleType = classification.type.name
+                )
+            }
+            callback(classification)
+        }
+        Log.i(TAG, "Obstacle intelligence enabled")
+    }
+
+    fun disableObstacleIntelligence() {
+        obstacleClassifier?.destroy()
+        obstacleClassifier = null
+        onObstacleClassification = null
+        Log.i(TAG, "Obstacle intelligence disabled")
+    }
+
+    fun setObstacleIntelligenceEnabled(enabled: Boolean) {
+        obstacleClassifier?.enabled = enabled
+    }
+
+    /**
+     * Force a map refresh by unsubscribing and resubscribing.
+     * This triggers the robot to resend the current map data.
+     * Uses a more aggressive retry pattern to ensure we get the map.
+     */
+    fun refreshMap() {
+        if (_connectionState.value != ConnectionState.CONNECTED) {
+            Log.w(TAG, "Cannot refresh map - not connected to robot")
+            return
+        }
+
+        scope.launch {
+            Log.i(TAG, ">>> MAP REFRESH: Starting aggressive refresh sequence")
+
+            // Step 1: Unsubscribe first to clear any stale state
+            val unsubMsg = SmaitProtocol.unsubscribe(SmaitProtocol.TOPIC_MAP, "get_map_simple")
+            send(unsubMsg)
+            Log.i(TAG, ">>> MAP REFRESH: Sent unsubscribe")
+
+            // Wait for unsubscribe to process
+            delay(300)
+
+            // Step 2: Subscribe again
+            val subMsg = SmaitProtocol.subscribeMapSimple()
+            val sent = send(subMsg)
+            Log.i(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
+
+            // Step 3: If first subscribe didn't work, try again after a delay
+            delay(2000)
+            if (_connectionState.value == ConnectionState.CONNECTED) {
+                Log.i(TAG, ">>> MAP REFRESH: Retry subscribe just in case")
+                send(subMsg)
+            }
+
+            Log.i(TAG, ">>> MAP REFRESH: Sequence complete")
+        }
     }
 
     private fun parseStatusUpdate(json: String) {
@@ -154,6 +263,7 @@ class RobotWebSocketClient(
 
             when (topic) {
                 SmaitProtocol.TOPIC_ROBOT_STATUS -> {
+                    val velocity = msg.get("velocity")?.asJsonArray?.map { it.asDouble } ?: current.velocity
                     _robotStatus.value = current.copy(
                         battery = msg.get("battery")?.asInt ?: current.battery,
                         charger = msg.get("charger")?.asInt ?: current.charger,
@@ -161,22 +271,43 @@ class RobotWebSocketClient(
                         controlState = msg.get("control_state")?.asInt ?: current.controlState,
                         softEstop = msg.get("soft_estop")?.asBoolean ?: current.softEstop,
                         hardEstop = msg.get("hard_estop")?.asBoolean ?: current.hardEstop,
-                        velocity = msg.get("velocity")?.asJsonArray?.map { it.asDouble } ?: current.velocity,
+                        velocity = velocity,
                         buildingName = msg.get("current_building_name")?.asString,
                         floorName = msg.get("current_floor_name")?.asString,
                         currentGoalName = msg.get("current_goal_name")?.asString
                     )
+                    // Feed velocity to obstacle classifier
+                    if (velocity.size >= 2) {
+                        obstacleClassifier?.updateRobotVelocity(velocity[0], velocity[1])
+                    }
                 }
                 SmaitProtocol.TOPIC_ROBOT_POSE -> {
-                    _robotStatus.value = current.copy(
-                        x = msg.get("x")?.asDouble ?: current.x,
-                        y = msg.get("y")?.asDouble ?: current.y,
-                        theta = msg.get("theta")?.asDouble ?: current.theta
-                    )
+                    val x = msg.get("x")?.asDouble ?: current.x
+                    val y = msg.get("y")?.asDouble ?: current.y
+                    val theta = msg.get("theta")?.asDouble ?: current.theta
+                    _robotStatus.value = current.copy(x = x, y = y, theta = theta)
+                    // Feed to obstacle classifier
+                    obstacleClassifier?.updateRobotPose(x, y, theta)
                 }
                 SmaitProtocol.TOPIC_SENSORS_CORE -> {
                     val bumper = msg.get("bumper")?.asInt ?: 0
                     val cliff = msg.get("cliff")?.asInt ?: 0
+
+                    // Parse ultrasonic sensor data (analog_input array)
+                    // Per smAiT protocol: only analog_input[1] is valid (central ultrasonic sensor)
+                    val analogInput = msg.get("analog_input")?.asJsonArray
+                    val ultrasonicMm = if (analogInput != null && analogInput.size() >= 2) {
+                        analogInput.get(1).asInt  // Central ultrasonic in millimeters
+                    } else {
+                        9999  // No data or out of range
+                    }
+                    val ultrasonicMeters = ultrasonicMm / 1000.0
+
+                    // Log ultrasonic data periodically for debugging
+                    if (System.currentTimeMillis() % 2000 < 100) {  // ~Every 2 seconds
+                        Log.d(TAG, "Ultrasonic: ${ultrasonicMm}mm (${String.format("%.2f", ultrasonicMeters)}m)")
+                    }
+
                     if (bumper > 0 || cliff > 0) {
                         safetyZone.set(SafetyZone.STOP)
                         Log.w(TAG, "SAFETY STOP: Bumper or Cliff detected!")
@@ -192,10 +323,38 @@ class RobotWebSocketClient(
                             cliffRight = cliff and 1 != 0
                         )
                     )
+                    // TODO: Add ultrasonic distance to RobotStatusData for motion detection
                 }
                 SmaitProtocol.TOPIC_LASER_DATA -> {
-                    val points = msg.get("points")?.asJsonArray?.mapNotNull { it.asFloat.takeIf { f -> f > 0.01 } } ?: emptyList()
-                    checkLaserData(points)
+                    // Try px/py format first (coordinate arrays)
+                    val px = msg.get("px")?.asJsonArray?.map { it.asDouble }
+                    val py = msg.get("py")?.asJsonArray?.map { it.asDouble }
+
+                    if (px != null && py != null && px.size == py.size) {
+                        // Feed coordinate data to obstacle classifier
+                        obstacleClassifier?.processLidarScan(px, py)
+
+                        // Convert to distances for safety zone check
+                        val distances = px.zip(py).map { (x, y) ->
+                            kotlin.math.sqrt(x * x + y * y).toFloat()
+                        }.filter { it > 0.01f }
+                        checkLaserData(distances)
+                    } else {
+                        // Fallback to points array (distance format)
+                        val points = msg.get("points")?.asJsonArray?.mapNotNull {
+                            it.asFloat.takeIf { f -> f > 0.01 }
+                        } ?: emptyList()
+                        checkLaserData(points)
+                    }
+                }
+                SmaitProtocol.TOPIC_GLOBAL_PATH -> {
+                    // Navigation path for obstacle-in-path detection
+                    val px = msg.get("px")?.asJsonArray?.map { it.asDouble }
+                    val py = msg.get("py")?.asJsonArray?.map { it.asDouble }
+                    if (px != null && py != null && px.size == py.size) {
+                        val pathPoints = px.zip(py).map { (x, y) -> Point2D(x, y) }
+                        obstacleClassifier?.updateGlobalPath(pathPoints)
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -240,6 +399,7 @@ class RobotWebSocketClient(
     }
 
     fun destroy() {
+        obstacleClassifier?.destroy()
         disconnect()
         scope.cancel()
     }
@@ -329,5 +489,9 @@ data class RobotStatusData(
     val floorName: String? = null,
     val currentGoalName: String? = null,
     val sensors: SensorStatus = SensorStatus(),
-    val safetyZone: SafetyZone = SafetyZone.CLEAR
+    val safetyZone: SafetyZone = SafetyZone.CLEAR,
+    // Obstacle intelligence fields (from ObstacleClassifier)
+    val obstacleInPath: Boolean = false,
+    val obstacleMoving: Boolean = false,
+    val obstacleType: String = "CLEAR"
 )

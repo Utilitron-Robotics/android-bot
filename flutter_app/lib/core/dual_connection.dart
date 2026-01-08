@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -347,21 +348,168 @@ class DualConnectionManager extends ChangeNotifier {
   }
 }
 
+/// Discovered relay info
+class DiscoveredRelay {
+  final String ip;
+  final int httpPort;
+  final int wsPort;
+  final bool robotConnected;
+  final String? robotIp;
+  final String? deviceName;
+  final int battery;
+  final int navStatus;
+
+  DiscoveredRelay({
+    required this.ip,
+    this.httpPort = 8765,
+    this.wsPort = 8766,
+    this.robotConnected = false,
+    this.robotIp,
+    this.deviceName,
+    this.battery = 0,
+    this.navStatus = 0,
+  });
+
+  String get httpUrl => 'http://$ip:$httpPort';
+  String get wsUrl => 'ws://$ip:$wsPort';
+  String get displayName => deviceName ?? 'Relay @ $ip';
+}
+
 /// Auto-discovery for relay tablets on the network
 class RelayDiscovery {
   static const int defaultPort = 8765;
+  static const int discoveryPort = 9999;
+  static const String discoveryRequest = 'SMAIT_RELAY_DISCOVER';
 
-  /// Scan local network for relay servers
+  /// Scan for relays using UDP broadcast (fast) + HTTP fallback
   static Future<List<String>> scanForRelays({
     String subnet = '192.168.1',
     int startHost = 1,
     int endHost = 254,
     Duration timeout = const Duration(milliseconds: 500),
   }) async {
-    final relays = <String>[];
+    // Try UDP discovery first (fast)
+    final udpRelays = await discoverViaUdp(timeout: const Duration(seconds: 2));
+    if (udpRelays.isNotEmpty) {
+      return udpRelays.map((r) => r.ip).toList();
+    }
 
-    // Scan in parallel batches
+    // Fall back to HTTP scan
+    return await _scanViaHttp(subnet, startHost, endHost, timeout);
+  }
+
+  /// Discover relays via UDP broadcast (returns detailed info)
+  static Future<List<DiscoveredRelay>> discoverViaUdp({
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    final relays = <DiscoveredRelay>[];
+
+    if (kIsWeb) {
+      debugPrint('RelayDiscovery: UDP not available on web');
+      return relays;
+    }
+
+    try {
+      // Create UDP socket
+      final socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket.broadcastEnabled = true;
+
+      debugPrint('RelayDiscovery: Sending UDP broadcast to port $discoveryPort');
+
+      // Send broadcast
+      final request = utf8.encode(discoveryRequest);
+      socket.send(request, InternetAddress('255.255.255.255'), discoveryPort);
+
+      // Also try common subnets
+      for (final subnet in ['192.168.1', '192.168.0', '10.0.0', '172.16.0']) {
+        socket.send(request, InternetAddress('$subnet.255'), discoveryPort);
+      }
+
+      // Listen for responses
+      final completer = Completer<void>();
+      Timer(timeout, () {
+        if (!completer.isCompleted) completer.complete();
+      });
+
+      socket.listen((event) {
+        if (event == RawSocketEvent.read) {
+          final packet = socket.receive();
+          if (packet != null) {
+            try {
+              final response = utf8.decode(packet.data);
+              final data = jsonDecode(response) as Map<String, dynamic>;
+
+              if (data['type'] == 'SMAIT_RELAY_RESPONSE' || data['type'] == 'SMAIT_RELAY') {
+                final relay = DiscoveredRelay(
+                  ip: packet.address.address,
+                  httpPort: data['relayHttpPort'] as int? ?? defaultPort,
+                  wsPort: data['relayWsPort'] as int? ?? (defaultPort + 1),
+                  robotConnected: data['robotConnected'] as bool? ?? false,
+                  robotIp: data['robotIp'] as String?,
+                  deviceName: data['deviceName'] as String?,
+                  battery: data['battery'] as int? ?? 0,
+                  navStatus: data['navStatus'] as int? ?? 0,
+                );
+                // Avoid duplicates
+                if (!relays.any((r) => r.ip == relay.ip)) {
+                  relays.add(relay);
+                  debugPrint('RelayDiscovery: Found relay at ${relay.ip} (${relay.deviceName})');
+                }
+              }
+            } catch (e) {
+              debugPrint('RelayDiscovery: Error parsing response: $e');
+            }
+          }
+        }
+      });
+
+      await completer.future;
+      socket.close();
+    } catch (e) {
+      debugPrint('RelayDiscovery: UDP error: $e');
+    }
+
+    return relays;
+  }
+
+  /// Discover relays via HTTP (detailed info)
+  static Future<List<DiscoveredRelay>> discoverViaHttp({
+    String? subnet,
+    int startHost = 1,
+    int endHost = 254,
+    Duration timeout = const Duration(milliseconds: 500),
+  }) async {
+    // Auto-detect subnet if not provided
+    final scanSubnet = subnet ?? await _detectSubnet() ?? '192.168.1';
+
+    final relays = <DiscoveredRelay>[];
+    final futures = <Future<DiscoveredRelay?>>[];
+
+    for (var i = startHost; i <= endHost; i++) {
+      final ip = '$scanSubnet.$i';
+      futures.add(_checkRelayDetailed(ip, timeout));
+    }
+
+    final results = await Future.wait(futures);
+    for (final result in results) {
+      if (result != null) {
+        relays.add(result);
+      }
+    }
+
+    return relays;
+  }
+
+  /// HTTP scan returning just IPs (for backwards compatibility)
+  static Future<List<String>> _scanViaHttp(
+    String subnet,
+    int startHost,
+    int endHost,
+    Duration timeout,
+  ) async {
+    final relays = <String>[];
     final futures = <Future<String?>>[];
+
     for (var i = startHost; i <= endHost; i++) {
       final ip = '$subnet.$i';
       futures.add(_checkRelay(ip, timeout));
@@ -379,16 +527,75 @@ class RelayDiscovery {
 
   static Future<String?> _checkRelay(String ip, Duration timeout) async {
     try {
-      final url = 'http://$ip:$defaultPort/status';
+      final url = 'http://$ip:$defaultPort/discovery';
       final response = await http.get(Uri.parse(url)).timeout(timeout);
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        if (data is Map && data.containsKey('connected')) {
+        if (data is Map && data['type'] == 'SMAIT_RELAY') {
           return ip;
         }
       }
     } catch (_) {
+      // Try fallback to /status
+      try {
+        final url = 'http://$ip:$defaultPort/status';
+        final response = await http.get(Uri.parse(url)).timeout(timeout);
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data is Map && data.containsKey('connected')) {
+            return ip;
+          }
+        }
+      } catch (_) {
+        // Not a relay
+      }
+    }
+    return null;
+  }
+
+  static Future<DiscoveredRelay?> _checkRelayDetailed(String ip, Duration timeout) async {
+    try {
+      final url = 'http://$ip:$defaultPort/discovery';
+      final response = await http.get(Uri.parse(url)).timeout(timeout);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['type'] == 'SMAIT_RELAY') {
+          return DiscoveredRelay(
+            ip: ip,
+            httpPort: data['relayHttpPort'] as int? ?? defaultPort,
+            wsPort: data['relayWsPort'] as int? ?? (defaultPort + 1),
+            robotConnected: data['robotConnected'] as bool? ?? false,
+            robotIp: data['robotIp'] as String?,
+            deviceName: data['deviceName'] as String?,
+            battery: data['battery'] as int? ?? 0,
+            navStatus: data['navStatus'] as int? ?? 0,
+          );
+        }
+      }
+    } catch (_) {
       // Not a relay
+    }
+    return null;
+  }
+
+  /// Auto-detect local subnet
+  static Future<String?> _detectSubnet() async {
+    if (kIsWeb) return null;
+
+    try {
+      final interfaces = await NetworkInterface.list();
+      for (final interface in interfaces) {
+        for (final addr in interface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            final parts = addr.address.split('.');
+            if (parts.length == 4) {
+              return '${parts[0]}.${parts[1]}.${parts[2]}';
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('RelayDiscovery: Error detecting subnet: $e');
     }
     return null;
   }
