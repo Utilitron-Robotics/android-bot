@@ -1151,6 +1151,8 @@ class SequenceManager extends ChangeNotifier {
         'SequenceManager.startSequence: CALLED with sequence="${sequence.name}" (${sequence.stops.length} stops)');
     debugPrint(
         'SequenceManager.startSequence: Current status=$_status, useBuffer=$_useBufferExecutor');
+    // DEBUG: Print stack trace to find what's calling startSequence unexpectedly
+    debugPrint('SequenceManager.startSequence: CALL STACK:\n${StackTrace.current.toString().split('\n').take(10).join('\n')}');
 
     if (_status == SequenceStatus.running) {
       debugPrint(
