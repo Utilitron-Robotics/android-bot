@@ -172,12 +172,24 @@ class CommandBuffer(
 
         when (status) {
             603 -> { // Arrived
-                if (goalName == pendingNavWaypoint || pendingNavWaypoint != null) {
+                // Log EVERYTHING to debug false arrivals
+                val currentPos = robotClient.robotStatus.value?.let { "(${it.x}, ${it.y})" } ?: "unknown"
+                Log.i(TAG, ">>> 603 ARRIVAL: robot says arrived at '$goalName', we wanted '$pendingNavWaypoint', pos=$currentPos")
+
+                // BUG FIX: Only accept arrival if goalName matches what we're waiting for
+                // Old logic was broken: `goalName == pendingNavWaypoint || pendingNavWaypoint != null`
+                // That would ALWAYS accept 603 if we were navigating to anything!
+                val isOurArrival = pendingNavWaypoint != null &&
+                                   (goalName == pendingNavWaypoint || goalName.isNullOrEmpty())
+
+                if (isOurArrival) {
                     Log.i(TAG, "Nav reported arrival at $goalName, verifying robot has stopped...")
                     // Don't complete immediately - the robot may still be maneuvering
                     // The executeCommand loop will verify robot has actually stopped
                     // by checking velocity before completing the navigation
                     navArrivalPending = true
+                } else {
+                    Log.w(TAG, ">>> IGNORING 603: goalName='$goalName' doesn't match pendingNavWaypoint='$pendingNavWaypoint'")
                 }
             }
             604 -> { // Failed - path blocked, find another way
@@ -473,21 +485,28 @@ class CommandBuffer(
                         delay(200)
 
                         // STEP 2: Spin to find clear direction
+                        // CRITICAL: Spin at least 90 degrees BEFORE checking for clear!
+                        // Otherwise we might just find "clear" looking back the way we came
                         val spinDuration = (2 * Math.PI / recoveryConfig.spinSpeed * 1000).toLong()
+                        val minSpinBeforeCheck = (Math.PI / 2 / recoveryConfig.spinSpeed * 1000).toLong()  // 90 degrees
                         var foundClear = false
-                        Log.i(TAG, "Spinning to find clear path...")
+                        Log.i(TAG, "Spinning to find clear path (min ${minSpinBeforeCheck}ms before checking)...")
 
                         val spinStart = System.currentTimeMillis()
                         while (System.currentTimeMillis() - spinStart < spinDuration && !foundClear) {
                             val moved = smartVelocity(0.0, recoveryConfig.spinSpeed, 400)
                             if (!moved) break  // Can't spin, give up on this attempt
 
-                            val currentStatus = robotClient.robotStatus.value
-                            val currentZone = currentStatus?.safetyZone
-                            // Check if LIDAR shows clear path (CLEAR or WARN zone)
-                            if (currentZone == SafetyZone.CLEAR || currentZone == SafetyZone.WARN) {
-                                foundClear = true
-                                Log.i(TAG, "Found clear direction (LIDAR clear)!")
+                            // Only start checking for clear AFTER minimum spin
+                            val spinElapsed = System.currentTimeMillis() - spinStart
+                            if (spinElapsed >= minSpinBeforeCheck) {
+                                val currentStatus = robotClient.robotStatus.value
+                                val currentZone = currentStatus?.safetyZone
+                                // Check if LIDAR shows clear path (CLEAR or WARN zone)
+                                if (currentZone == SafetyZone.CLEAR || currentZone == SafetyZone.WARN) {
+                                    foundClear = true
+                                    Log.i(TAG, "Found clear direction after ${spinElapsed}ms spin (zone=$currentZone)")
+                                }
                             }
                         }
                         robotClient.sendVelocity(0.0, 0.0)
