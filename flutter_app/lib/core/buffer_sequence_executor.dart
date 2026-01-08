@@ -149,6 +149,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
           debugPrint(
               'BufferSequenceExecutor: Motion standby active - awaiting visitor');
           break;
+        case 'button_standby':
+          // Waiting for button press (no motion detection) - same phase
+          _currentPhase = SequencePhase.awaitingVisitor;
+          _countdownSeconds = 0;
+          debugPrint(
+              'BufferSequenceExecutor: Button standby active - awaiting visitor');
+          break;
         default:
           debugPrint(
               'BufferSequenceExecutor: Unknown command type: ${state.current!.type}');
@@ -287,6 +294,11 @@ class BufferSequenceExecutor extends ChangeNotifier {
       // Sound command - just acknowledge it
       debugPrint('BufferSequenceExecutor: Playing sound');
       _currentPhase = SequencePhase.speaking; // Treat as speaking phase
+      _currentWaitDurationMs = 0;
+    } else if (type == 'motion_standby' || type == 'button_standby') {
+      // Standby commands - waiting for visitor/button press
+      debugPrint('BufferSequenceExecutor: Entering standby mode ($type)');
+      _currentPhase = SequencePhase.awaitingVisitor;
       _currentWaitDurationMs = 0;
     } else {
       _currentWaitDurationMs = 0;
