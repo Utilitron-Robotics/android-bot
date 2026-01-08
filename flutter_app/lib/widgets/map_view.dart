@@ -140,8 +140,9 @@ class _MapViewState extends State<MapView> {
       _startMapPolling();
       _subscribeToPose();
     } else if (!isConnected && _lastKnownConnected) {
-      debugPrint('MapView: Connection lost');
-      _pollTimer?.cancel();
+      debugPrint('MapView: Connection lost (HTTP map polling continues independently)');
+      // DON'T cancel _pollTimer! HTTP polling is independent of WebSocket
+      // The map can keep updating via HTTP even when WS drops
     }
     _lastKnownConnected = isConnected;
   }
