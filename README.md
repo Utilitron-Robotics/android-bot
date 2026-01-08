@@ -1,210 +1,280 @@
-# Frontier Tower Fleet Management
+# RoboTour Pro
 
-A cross-platform robot control system for Pudu/smAiT service robots. Deployed at **Frontier Tower** for multi-floor tour guide and service operations.
+**Enterprise-grade autonomous tour and service robot management platform**
 
-## Architecture
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)]()
+[![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20Web%20%7C%20macOS-lightgrey.svg)]()
+[![Protocol](https://img.shields.io/badge/protocol-gRPC%20%7C%20WebSocket-green.svg)]()
+[![License](https://img.shields.io/badge/license-MIT-orange.svg)]()
+
+## Overview
+
+RoboTour Pro is a comprehensive fleet management system for autonomous service robots. Built for Pudu, smAiT, and compatible platforms using the rosbridge protocol, it enables sophisticated tour operations, delivery services, and remote robot control across multiple venues.
+
+### Key Features
+
+- 🤖 **Universal Compatibility** - Works with any rosbridge-compatible robot
+- 🌐 **WAN-Ready Architecture** - gRPC protocol for reliable internet-scale operation
+- 🎯 **Smart Navigation** - Automatic path recovery with obstacle avoidance
+- 🗣️ **Dynamic Tours** - Multi-stop tours with TTS narration and media display
+- ☁️ **Cloud Fleet Management** - AWS-powered multi-robot coordination
+- 📱 **Cross-Platform Control** - Flutter apps for iOS, Android, Web, and Desktop
+
+## System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    House WiFi Network                       │
+│                    INTERNET / WAN                           │
 │                                                             │
-│   ┌─────────────┐           ┌───────────────────┐          │
-│   │ Flutter App │ ←───────→ │  Android Tablet   │          │
-│   │ (Controller)│ WebSocket │  (Relay Server)   │          │
-│   └─────────────┘  :8766    │  HTTP :8765       │          │
-│                              └─────────┬─────────┘          │
-└──────────────────────────────────────────────────────────────┘
-                                         │
-                              ┌──────────┴──────────┐
-                              │   Robot WiFi        │
-                              │   10.42.0.1:9090    │
-                              └──────────┬──────────┘
-                                         │
-                              ┌──────────┴──────────┐
-                              │   Pudu/smAiT Robot  │
-                              └─────────────────────┘
+│   Flutter Apps          Cloud               Android Relay   │
+│   ┌──────────┐         ┌──────┐            ┌──────────┐   │
+│   │Controller│ ←gRPC→  │ AWS  │  ←gRPC→    │  Tablet  │   │
+│   └──────────┘ :443    │ IoT  │   :50051   │  Bridge  │   │
+│                        └──────┘             └────┬─────┘   │
+└─────────────────────────────────────────────────│──────────┘
+                                                   │
+                                        WebSocket  │ :9090
+                                                   ▼
+                                          ┌──────────────┐
+                                          │ Robot Base   │
+                                          │ Controller   │
+                                          └──────────────┘
 ```
 
-### Navigation Architecture
-The system uses a strict state machine and centralized command management to ensure reliable navigation:
+## Components
 
-1.  **CommandManager Centralization**: All robot commands are routed through a central `CommandManager`. This handles:
-    *   **Retry Logic**: Automatically retries failed commands (up to 3 times) before declaring failure.
-    *   **State Tracking**: Maintains the source of truth for command execution status (pending, running, completed, failed).
-    *   **Ack Verification**: Ensures commands are received by the robot/relay.
+### 1. Flutter Control App (`flutter_app/`)
+Universal controller with adaptive UI based on robot capabilities.
 
-2.  **Strict State Machine**: Navigation logic enforces strict phase transitions (e.g., `idle` -> `navigating` -> `arrived`). Events are ignored if they don't match the current phase, preventing race conditions from stray messages.
+**Features:**
+- Dynamic UI generation from robot introspection
+- Tour creation and management
+- Real-time status monitoring
+- Voice command support
+- Cloud synchronization
 
-3.  **Relay Buffer**: The Relay App acts as a command buffer. The Flutter app loads a sequence of commands (navigate, speak, wait) into the Relay's buffer. The Relay executes them sequentially and reports status. This decouples the real-time execution from the network connection, allowing the robot to continue a sequence even if the Flutter controller temporarily disconnects.
+**Supported Platforms:**
+- iOS 12.0+
+- Android 7.0+ (API 24)
+- Web (Chrome, Safari, Firefox)
+- macOS 10.14+
+- Windows (coming soon)
+- Linux (coming soon)
 
-## Applications
+### 2. Android Relay Bridge (`relay_app/`)
+Tablet-based bridge providing WAN connectivity and customer interaction.
 
-### Flutter App - `flutter_app/`
-Cross-platform controller with tour management and cloud sync.
+**Features:**
+- gRPC server (port 50051) for WAN communication
+- WebSocket relay to robot base
+- Customer-facing tour display
+- Command buffering for reliability
+- TTS announcements
+- Recovery logic for navigation failures
 
-- **Tour Mode**: Multi-stop guided tours with TTS narration
-- **Cloud Sync**: Push/Pull tours & waypoints between robots
-- **Crowd Logic**: Smart blocked-path announcements with venue presets
-- **Voice Control**: Speech-to-waypoint navigation
-- **Dynamic UI**: Auto-generated from robot capabilities
+**Requirements:**
+- Android 7.0+ (API 24)
+- Tablet with 10"+ screen recommended
 
+### 3. Cloud Infrastructure (`infrastructure/`)
+AWS-based fleet management and tour synchronization.
+
+**Services:**
+- API Gateway for REST endpoints
+- Lambda functions for business logic
+- DynamoDB for tours, maps, and waypoints
+- IoT Core for real-time telemetry (planned)
+
+## Quick Start
+
+### 1. Deploy Cloud Infrastructure (Optional)
 ```bash
-cd flutter_app
-flutter pub get
-flutter run -d macos  # or ios, android, chrome
+cd infrastructure
+aws cloudformation deploy \
+  --template-file frontiertower-stack.yaml \
+  --stack-name robotour-stack \
+  --capabilities CAPABILITY_NAMED_IAM
 ```
 
-### Relay App - `relay_app/`
-Android tablet bridge mounted on robot. Provides:
-
-- **Dual Network Bridge**: House WiFi ↔ Robot WiFi
-- **Tour Display**: Customer-facing WebView with countdown timer
-- **Lock Screen**: Prevents customer access during tours (6-tap + PIN unlock)
-- **TTS Announcements**: Blocked path warnings, arrival notices
-- **HTTP API**: REST endpoints for simple integration
-
+### 2. Install Android Relay on Tablet
 ```bash
 cd relay_app
 ./gradlew assembleDebug
-# Install: adb install app/build/outputs/apk/debug/app-debug.apk
+adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
-### Infrastructure - `infrastructure/`
-AWS CloudFormation stack for fleet management.
-
+### 3. Run Flutter Controller
 ```bash
-cd infrastructure
-./deploy.sh dev  # or prod
+cd flutter_app
+flutter pub get
+flutter run -d [platform]  # ios, android, chrome, macos
 ```
 
-## Key Features
+### 4. Connect to Robot
+1. Connect tablet to robot via USB or robot WiFi
+2. Start relay service on tablet
+3. Enter tablet IP in Flutter app
+4. Begin controlling robot!
 
-### Tour Mode
-Automated guided tours with:
-- Start/End waypoints with intro/outro speech
-- Per-stop: navigation, TTS, display URL, wait time
-- Loop mode for continuous operation
-- Motion trigger: greet visitors and show "Start Tour" button
+## Tour Management
 
-### Cloud Sync
-Share configurations across robots on the same floor:
+### Creating Tours
+Tours consist of waypoints with:
+- **Navigation targets** - POI names the robot knows
+- **Narration scripts** - Text-to-speech at each stop
+- **Media display** - URLs for tablet display
+- **Wait timings** - Dwell time at each location
 
-| Button | Function |
-|--------|----------|
-| **WP↑** | Push waypoints to cloud |
-| **WP↓** | Pull waypoints from cloud |
-| **Tours↑** | Push tour sequences to cloud |
-| **Tours↓** | Pull tours (replaces local) |
+### Tour Execution
+1. Load tour from cloud or create locally
+2. Robot navigates to each waypoint sequentially
+3. At each stop:
+   - Display media on tablet
+   - Play arrival sound
+   - Announce narration
+   - Wait specified duration
+4. Return to start or end position
 
-Set **Map ID** to floor name (e.g., "Spaceship", "Mezzanine") for cross-robot sync.
+### Recovery Behavior
+When navigation fails:
+1. Announce "Looking for alternative path"
+2. Backup slowly (5cm/s)
+3. Rotate to find clear direction
+4. Attempt alternate route
+5. After 3 failures: Request human assistance
 
-### Crowd Logic
-Smart blocked-path announcements with escalating urgency:
+## Protocol Support
 
-| Venue | Style | Safe Dist | Ramp Rate | Use Case |
-|-------|-------|-----------|-----------|----------|
-| **Spaceship** | Friendly, audible | 4 ft | Gentle | Event floors, crowds |
-| **Adult Party** | Faster escalation | 2.5 ft | Quick | Bars, clubs |
-| **Restaurant** | Balanced | 3 ft | Moderate | Dining service |
-| **Kids Event** | Patient, gentle | 5 ft | Very Gentle | Family events |
-| **Hospital** | Quiet, minimal | 4 ft | Very Gentle | Healthcare |
+### Primary: gRPC (WAN-Ready)
+- Binary protobuf encoding (15x smaller than JSON)
+- Built-in keepalive (HTTP/2 PING)
+- Automatic reconnection
+- Bidirectional streaming
 
-Features LIDAR intelligence to distinguish moving obstacles (people) from static objects.
-
-#### Speed Ramping
-Configurable velocity reduction as robot approaches obstacles:
-
-- **Safe Distance**: Distance (ft/in) where slowdown begins (1-10 ft range)
-- **Ramp Rate**: How aggressively speed decreases (Gentle → Aggressive)
-  - Gentle (0.1-0.4): Gradual slowdown, smooth deceleration
-  - Aggressive (0.7-1.0): Quick stop, slows early
-
-Settings sync to relay tablet for real-time velocity control in WARN zone.
-
-### Navigation Recovery
-Intelligent recovery when path is blocked or navigation fails (status 604):
-
-1. **Detect** - LIDAR zone (STOP/CREEP), ultrasonic sensors, or nav failure
-2. **Backup** - Reverse slowly (5cm/s tortoise speed) to create space
-3. **Spin Search** - Rotate to find clear direction (LIDAR + ultrasonic must both be clear)
-4. **Nudge Forward** - Move into the clear space
-5. **Retry Nav** - Re-issue navigation command
-6. **Give Up** - After max attempts, play sad R2D2 sounds and ask for help
-
-Ultrasonic sensors detect obstacles LIDAR can't see (glass, cardboard, soft objects).
-
-## Frontier Tower Floors
-
-| Floor | Map ID | Description |
-|-------|--------|-------------|
-| Spaceship | `spaceship` | Event floor (2nd floor) |
-| Lobby | `lobby` | Ground floor |
-| Mezzanine | `mezzanine` | Between floors |
-| Rooftop | `rooftop` | Top floor events |
-
-## Robot Configuration
-
-| Robot | SSID | Password | Direct IP |
-|-------|------|----------|-----------|
-| Tibo 1 | TY126AA003F0-005878 | 123456789 | 10.42.0.1:9090 |
-| Tibo 2 | TY126AA003F0-005993 | 123456789 | 10.42.0.1:9090 |
-
-### Sensors
-
-| Sensor | Topic | Data |
-|--------|-------|------|
-| LIDAR | `/laser_data` | Point cloud for SafetyZone (STOP/CREEP/WARN/CLEAR) |
-| Ultrasonic | `/mobile_base/sensors/core` → `analog_input` | Distance (mm) - sees glass, cardboard |
-| Battery | `/robot_status` → `battery` | Charge percentage |
-
-### Speed Modes (Native Base)
-
-| Mode | Name | Description |
-|------|------|-------------|
-| 0-2 | Safety Low/Med/High | Cautious, large stop distance |
-| 3-5 | Balance Low/Med/High | Balanced speed/safety |
-| 6-8 | Efficiency Low/Med/High | Speed focused |
-| 60 | Smooth | Food delivery (no sudden stops) |
-
-## Project Structure
-
-```
-.
-├── flutter_app/                 # Cross-platform controller
-│   ├── lib/
-│   │   ├── core/               # Connection, sequences, cloud client
-│   │   ├── services/           # Audio announcer, introspection
-│   │   ├── screens/            # HUD, home screen
-│   │   └── widgets/            # Sequence editor, crowd logic settings
-│   └── pubspec.yaml
-│
-├── relay_app/                   # Android tablet relay
-│   └── app/src/main/java/com/smait/robotrelay/
-│       ├── service/            # Relay server, command buffer, WebSocket
-│       ├── protocol/           # smAiT protocol messages
-│       ├── ui/                 # MainActivity with tour mode
-│       └── cloud/              # AWS IoT client (future)
-│
-├── infrastructure/              # AWS CloudFormation
-│   ├── frontiertower-stack.yaml
-│   └── deploy.sh
-│
-└── CLAUDE.md                    # Development documentation
-```
+### Legacy: WebSocket (LAN)
+- JSON rosbridge protocol
+- Direct robot connection
+- Real-time telemetry
+- Map visualization
 
 ## Development
 
-See [CLAUDE.md](CLAUDE.md) for detailed protocol documentation, navigation status codes, and development notes.
+### Requirements
+- Flutter 3.0+
+- Android Studio 2023.1+ (for relay app)
+- Python 3.8+ (for cloud deployment)
+- protoc 3.20+ (for gRPC generation)
 
-### Quick Test
+### Building from Source
+
+**Flutter App:**
 ```bash
-# Test robot connection
-nc -z -w 3 10.42.0.1 9090 && echo "ROBOT ONLINE"
-
-# Test relay API
-curl http://tablet-ip:8765/status
+cd flutter_app
+flutter pub get
+flutter build [ios|android|web|macos]
 ```
 
-## Security Note
+**Android Relay:**
+```bash
+cd relay_app
+./gradlew build
+```
 
-Uses cleartext WebSocket (`ws://`) for local robot communication. For internet-exposed deployments, implement `wss://` with proper certificates.
+**Generate Protobuf:**
+```bash
+cd flutter_app
+./generate_protos.sh
+
+cd relay_app
+./gradlew generateProto
+```
+
+## Configuration
+
+### Robot Connection
+Default IPs can be modified in:
+- Flutter: `lib/core/robot_connection.dart`
+- Relay: `res/values/strings.xml`
+
+### Tour Scripts
+Place narration scripts in:
+- Cloud: DynamoDB `tours` table
+- Local: `assets/tour_scripts/`
+
+### Recovery Settings
+Adjust in `RecoveryConfig`:
+- Stuck threshold: 15s
+- Max attempts: 3
+- Backup speed: 0.05 m/s
+- Spin speed: 0.3 rad/s
+
+## API Reference
+
+### REST Endpoints
+```
+GET  /tours              - List all tours
+POST /tours              - Create tour
+PUT  /tours/{id}         - Update tour
+GET  /maps/{id}/waypoints - Get waypoints for map
+POST /fleet/commands     - Send command to robot
+```
+
+### gRPC Services
+```protobuf
+service RobotControl {
+  rpc ControlStream(stream ClientMessage) returns (stream ServerMessage);
+  rpc SendCommand(Command) returns (CommandResponse);
+}
+```
+
+## Deployment Scenarios
+
+### Single Robot (Local)
+- Tablet connected via USB to robot
+- Flutter app on same WiFi network
+- No cloud required
+
+### Multi-Robot Facility
+- Each robot has dedicated tablet
+- Central Flutter controller
+- Cloud sync for shared tours
+
+### Remote Management
+- Robots anywhere with internet
+- Control from anywhere
+- Full telemetry and monitoring
+
+## Troubleshooting
+
+### Connection Issues
+- Verify tablet and controller on same network
+- Check firewall allows ports 50051 (gRPC) and 8766 (WebSocket)
+- Ensure robot WiFi credentials are correct
+
+### Navigation Problems
+- Confirm waypoints exist in robot's map
+- Check battery level > 20%
+- Verify no emergency stop active
+
+### Tour Issues
+- Validate all waypoint names match robot POIs
+- Ensure TTS language matches script language
+- Check tablet volume for announcements
+
+## Contributing
+
+Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Support
+
+- Documentation: [docs/](docs/)
+- Issues: [GitHub Issues](https://github.com/yourusername/robotour-pro/issues)
+- Email: support@robotour.pro
+
+---
+
+**RoboTour Pro** - *Making robots work for you, not the other way around*
