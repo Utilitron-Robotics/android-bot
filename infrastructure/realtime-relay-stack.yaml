@@ -1,0 +1,753 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Frontier Tower - Real-time Robot Relay Infrastructure (gRPC, WebRTC, MQTT)'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  VpcCidr:
+    Type: String
+    Default: '10.0.0.0/16'
+
+  ContainerImage:
+    Type: String
+    Default: 'public.ecr.aws/nginx/nginx:latest'
+    Description: Container image for gRPC relay (replace with your built image)
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t3.medium, t3.large]
+    Description: EC2 instance type for MQTT broker
+
+Resources:
+  # ===========================================================
+  # VPC AND NETWORKING
+  # ===========================================================
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'frontiertower-relay-vpc-${Environment}'
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'frontiertower-public-1-${Environment}'
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.2.0/24'
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub 'frontiertower-public-2-${Environment}'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub 'frontiertower-igw-${Environment}'
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub 'frontiertower-public-rt-${Environment}'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # ===========================================================
+  # SECURITY GROUPS
+  # ===========================================================
+
+  GrpcSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'frontiertower-grpc-sg-${Environment}'
+      GroupDescription: Security group for gRPC relay
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # gRPC (HTTP/2)
+        - IpProtocol: tcp
+          FromPort: 50051
+          ToPort: 50051
+          CidrIp: 0.0.0.0/0
+          Description: gRPC
+        # HTTPS for health checks
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+
+  WebRtcSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'frontiertower-webrtc-sg-${Environment}'
+      GroupDescription: Security group for WebRTC signaling and TURN
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # WebSocket signaling
+        - IpProtocol: tcp
+          FromPort: 8443
+          ToPort: 8443
+          CidrIp: 0.0.0.0/0
+          Description: WebRTC Signaling (WSS)
+        # TURN TCP
+        - IpProtocol: tcp
+          FromPort: 3478
+          ToPort: 3478
+          CidrIp: 0.0.0.0/0
+          Description: TURN TCP
+        # TURN UDP
+        - IpProtocol: udp
+          FromPort: 3478
+          ToPort: 3478
+          CidrIp: 0.0.0.0/0
+          Description: TURN UDP
+        # TURN TLS
+        - IpProtocol: tcp
+          FromPort: 5349
+          ToPort: 5349
+          CidrIp: 0.0.0.0/0
+          Description: TURN TLS
+        # TURN UDP relay range
+        - IpProtocol: udp
+          FromPort: 49152
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+          Description: TURN UDP Relay
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+
+  MqttSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub 'frontiertower-mqtt-sg-${Environment}'
+      GroupDescription: Security group for MQTT broker
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # MQTT
+        - IpProtocol: tcp
+          FromPort: 1883
+          ToPort: 1883
+          CidrIp: 0.0.0.0/0
+          Description: MQTT
+        # MQTT over TLS
+        - IpProtocol: tcp
+          FromPort: 8883
+          ToPort: 8883
+          CidrIp: 0.0.0.0/0
+          Description: MQTT TLS
+        # MQTT over WebSocket
+        - IpProtocol: tcp
+          FromPort: 9001
+          ToPort: 9001
+          CidrIp: 0.0.0.0/0
+          Description: MQTT WebSocket
+        # SSH for management
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+
+  # ===========================================================
+  # ECS CLUSTER FOR gRPC RELAY
+  # ===========================================================
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub 'frontiertower-relay-cluster-${Environment}'
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 3
+
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'frontiertower-ecs-execution-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'frontiertower-ecs-task-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Query
+                Resource: '*'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  GrpcRelayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/frontiertower-grpc-relay-${Environment}'
+      RetentionInDays: 14
+
+  GrpcRelayTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub 'frontiertower-grpc-relay-${Environment}'
+      Cpu: '256'
+      Memory: '512'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: grpc-relay
+          Image: !Ref ContainerImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 50051
+              Protocol: tcp
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: GRPC_PORT
+              Value: '50051'
+            - Name: HEALTH_PORT
+              Value: '8080'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref GrpcRelayLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: grpc-relay
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - 'wget -q -O /dev/null http://localhost:8080/health || exit 1'
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+
+  # ===========================================================
+  # NETWORK LOAD BALANCER FOR gRPC
+  # ===========================================================
+
+  GrpcNLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub 'ft-grpc-nlb-${Environment}'
+      Type: network
+      Scheme: internet-facing
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub 'frontiertower-grpc-nlb-${Environment}'
+
+  GrpcTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub 'ft-grpc-tg-${Environment}'
+      Port: 50051
+      Protocol: TCP
+      VpcId: !Ref VPC
+      TargetType: ip
+      HealthCheckProtocol: TCP
+      HealthCheckPort: '8080'
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckIntervalSeconds: 30
+
+  GrpcListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref GrpcNLB
+      Port: 50051
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref GrpcTargetGroup
+
+  GrpcRelayService:
+    Type: AWS::ECS::Service
+    DependsOn: GrpcListener
+    Properties:
+      ServiceName: !Sub 'frontiertower-grpc-relay-${Environment}'
+      Cluster: !Ref EcsCluster
+      TaskDefinition: !Ref GrpcRelayTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+          SecurityGroups:
+            - !Ref GrpcSecurityGroup
+      LoadBalancers:
+        - ContainerName: grpc-relay
+          ContainerPort: 50051
+          TargetGroupArn: !Ref GrpcTargetGroup
+
+  # ===========================================================
+  # WEBRTC SIGNALING SERVER (Lambda + WebSocket API)
+  # ===========================================================
+
+  WebRtcConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'frontiertower-webrtc-connections-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connection_id
+          AttributeType: S
+        - AttributeName: robot_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connection_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: by-robot
+          KeySchema:
+            - AttributeName: robot_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  WebRtcSignalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'frontiertower-webrtc-signaling-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt WebRtcConnectionsTable.Arn
+                  - !Sub '${WebRtcConnectionsTable.Arn}/index/*'
+        - PolicyName: ApiGatewayManagement
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebRtcApi}/*'
+
+  WebRtcSignalingFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'frontiertower-webrtc-signaling-${Environment}'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt WebRtcSignalingRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE: !Ref WebRtcConnectionsTable
+          ENVIRONMENT: !Ref Environment
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          import time
+
+          dynamodb = boto3.resource('dynamodb')
+          connections_table = dynamodb.Table(os.environ['CONNECTIONS_TABLE'])
+
+          def handler(event, context):
+              route_key = event.get('requestContext', {}).get('routeKey')
+              connection_id = event.get('requestContext', {}).get('connectionId')
+              domain = event.get('requestContext', {}).get('domainName')
+              stage = event.get('requestContext', {}).get('stage')
+
+              if route_key == '$connect':
+                  return handle_connect(connection_id, event)
+              elif route_key == '$disconnect':
+                  return handle_disconnect(connection_id)
+              elif route_key == 'offer':
+                  return handle_offer(connection_id, event, domain, stage)
+              elif route_key == 'answer':
+                  return handle_answer(connection_id, event, domain, stage)
+              elif route_key == 'ice-candidate':
+                  return handle_ice_candidate(connection_id, event, domain, stage)
+              elif route_key == 'register':
+                  return handle_register(connection_id, event)
+              else:
+                  return {'statusCode': 400, 'body': 'Unknown route'}
+
+          def handle_connect(connection_id, event):
+              # Store connection with TTL of 1 hour
+              ttl = int(time.time()) + 3600
+              connections_table.put_item(Item={
+                  'connection_id': connection_id,
+                  'connected_at': int(time.time() * 1000),
+                  'ttl': ttl,
+              })
+              return {'statusCode': 200}
+
+          def handle_disconnect(connection_id):
+              connections_table.delete_item(Key={'connection_id': connection_id})
+              return {'statusCode': 200}
+
+          def handle_register(connection_id, event):
+              body = json.loads(event.get('body', '{}'))
+              robot_id = body.get('robot_id')
+
+              if robot_id:
+                  connections_table.update_item(
+                      Key={'connection_id': connection_id},
+                      UpdateExpression='SET robot_id = :r',
+                      ExpressionAttributeValues={':r': robot_id}
+                  )
+              return {'statusCode': 200}
+
+          def handle_offer(connection_id, event, domain, stage):
+              body = json.loads(event.get('body', '{}'))
+              target_robot = body.get('robot_id')
+
+              # Find target robot's connection
+              result = connections_table.query(
+                  IndexName='by-robot',
+                  KeyConditionExpression='robot_id = :r',
+                  ExpressionAttributeValues={':r': target_robot}
+              )
+
+              items = result.get('Items', [])
+              if not items:
+                  return {'statusCode': 404, 'body': 'Robot not connected'}
+
+              # Forward offer to robot
+              target_connection = items[0]['connection_id']
+              send_to_connection(domain, stage, target_connection, {
+                  'type': 'offer',
+                  'sdp': body.get('sdp'),
+                  'from': connection_id,
+              })
+
+              return {'statusCode': 200}
+
+          def handle_answer(connection_id, event, domain, stage):
+              body = json.loads(event.get('body', '{}'))
+              target_connection = body.get('to')
+
+              # Forward answer to caller
+              send_to_connection(domain, stage, target_connection, {
+                  'type': 'answer',
+                  'sdp': body.get('sdp'),
+                  'from': connection_id,
+              })
+
+              return {'statusCode': 200}
+
+          def handle_ice_candidate(connection_id, event, domain, stage):
+              body = json.loads(event.get('body', '{}'))
+              target_connection = body.get('to')
+
+              # Forward ICE candidate
+              send_to_connection(domain, stage, target_connection, {
+                  'type': 'ice-candidate',
+                  'candidate': body.get('candidate'),
+                  'from': connection_id,
+              })
+
+              return {'statusCode': 200}
+
+          def send_to_connection(domain, stage, connection_id, message):
+              client = boto3.client('apigatewaymanagementapi',
+                  endpoint_url=f'https://{domain}/{stage}'
+              )
+              try:
+                  client.post_to_connection(
+                      ConnectionId=connection_id,
+                      Data=json.dumps(message).encode()
+                  )
+              except Exception as e:
+                  print(f'Failed to send to {connection_id}: {e}')
+
+  # WebSocket API for WebRTC signaling
+  WebRtcApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'frontiertower-webrtc-signaling-${Environment}'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: '$request.body.action'
+
+  WebRtcConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebRtcApi
+      RouteKey: '$connect'
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${WebRtcIntegration}'
+
+  WebRtcDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebRtcApi
+      RouteKey: '$disconnect'
+      Target: !Sub 'integrations/${WebRtcIntegration}'
+
+  WebRtcOfferRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebRtcApi
+      RouteKey: 'offer'
+      Target: !Sub 'integrations/${WebRtcIntegration}'
+
+  WebRtcAnswerRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebRtcApi
+      RouteKey: 'answer'
+      Target: !Sub 'integrations/${WebRtcIntegration}'
+
+  WebRtcIceCandidateRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebRtcApi
+      RouteKey: 'ice-candidate'
+      Target: !Sub 'integrations/${WebRtcIntegration}'
+
+  WebRtcRegisterRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebRtcApi
+      RouteKey: 'register'
+      Target: !Sub 'integrations/${WebRtcIntegration}'
+
+  WebRtcIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebRtcApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebRtcSignalingFunction.Arn}/invocations'
+
+  WebRtcStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebRtcApi
+      StageName: !Ref Environment
+      AutoDeploy: true
+
+  WebRtcLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebRtcSignalingFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebRtcApi}/*'
+
+  # ===========================================================
+  # AWS IOT CORE FOR MQTT (Managed Service)
+  # ===========================================================
+
+  IoTPolicy:
+    Type: AWS::IoT::Policy
+    Properties:
+      PolicyName: !Sub 'frontiertower-robot-policy-${Environment}'
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - iot:Connect
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:client/robot-*'
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:client/flutter-*'
+          - Effect: Allow
+            Action:
+              - iot:Publish
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/robot/*'
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/fleet/*'
+          - Effect: Allow
+            Action:
+              - iot:Subscribe
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topicfilter/robot/*'
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topicfilter/fleet/*'
+          - Effect: Allow
+            Action:
+              - iot:Receive
+            Resource:
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/robot/*'
+              - !Sub 'arn:aws:iot:${AWS::Region}:${AWS::AccountId}:topic/fleet/*'
+
+  # IoT Rule to forward robot status to DynamoDB
+  IoTStatusRule:
+    Type: AWS::IoT::TopicRule
+    Properties:
+      RuleName: !Sub 'frontiertower_robot_status_${Environment}'
+      TopicRulePayload:
+        Sql: "SELECT * FROM 'robot/+/status'"
+        Actions:
+          - DynamoDBv2:
+              PutItem:
+                TableName: !Sub 'frontiertower-robots-${Environment}'
+              RoleArn: !GetAtt IoTRuleRole.Arn
+        RuleDisabled: false
+
+  IoTRuleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'frontiertower-iot-rule-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: iot.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBWrite
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource: '*'
+
+Outputs:
+  GrpcEndpoint:
+    Description: gRPC Relay endpoint (NLB DNS)
+    Value: !Sub '${GrpcNLB.DNSName}:50051'
+    Export:
+      Name: !Sub 'FrontierTower-GrpcEndpoint-${Environment}'
+
+  WebRtcSignalingEndpoint:
+    Description: WebRTC Signaling WebSocket endpoint
+    Value: !Sub 'wss://${WebRtcApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub 'FrontierTower-WebRtcEndpoint-${Environment}'
+
+  IotEndpoint:
+    Description: AWS IoT Core endpoint (use `aws iot describe-endpoint` to get the actual endpoint)
+    Value: !Sub 'xxxxxx-ats.iot.${AWS::Region}.amazonaws.com'
+    Export:
+      Name: !Sub 'FrontierTower-IotEndpoint-${Environment}'
+
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+
+  EcsClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt EcsCluster.Arn
+
+  GrpcTargetGroupArn:
+    Description: gRPC Target Group ARN (for scaling)
+    Value: !Ref GrpcTargetGroup
