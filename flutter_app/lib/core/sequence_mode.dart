@@ -908,10 +908,14 @@ class SequenceManager extends ChangeNotifier {
       startWaypoint: cloudData['start_waypoint'] as String?,
       endWaypoint: cloudData['end_waypoint'] as String?,
       modifiedAt: cloudData['modified_at'] as int?,
-      motionTriggerStart: cloudData['motion_trigger_start'] as bool? ?? false,
-      motionGreeting: cloudData['motion_greeting'] as String?,
-      motionButtonText: cloudData['motion_button_text'] as String?,
-      motionDisplayUrl: cloudData['motion_display_url'] as String?,
+      // Migrate from old motion_trigger_start field
+      awaitVisitorAtStart: cloudData['await_visitor_at_start'] as bool? ??
+          cloudData['motion_trigger_start'] as bool? ??
+          false,
+      awaitButtonText: cloudData['await_button_text'] as String? ??
+          cloudData['motion_button_text'] as String?,
+      awaitDisplayUrl: cloudData['await_display_url'] as String? ??
+          cloudData['motion_display_url'] as String?,
     );
   }
 

@@ -1006,13 +1006,11 @@ class _HudScreenState extends State<HudScreen>
                       color: Colors.green,
                       onTap: () {
                         debugPrint('START TOUR - trigger welcome screen');
-                        // Enable motion trigger to show welcome screen
-                        final motionSequence = seq!.copyWith(
-                          motionTriggerStart: true,
-                          motionGreeting: 'Hello! Would you like a tour?',
-                          motionButtonText: 'START TOUR',
+                        // Enable await visitor to show START TOUR button
+                        final awaitSequence = seq!.copyWith(
+                          awaitVisitorAtStart: true,
                         );
-                        tourManager.startSequence(motionSequence);
+                        tourManager.startSequence(awaitSequence);
                       },
                       tooltip: 'Start Tour',
                     ),
@@ -1732,16 +1730,14 @@ class _HudScreenState extends State<HudScreen>
               ),
               onPressed: () {
                 debugPrint(
-                    'START TOUR pressed - setting up motion standby at ${currentSequence.startWaypoint}');
-                // Enable motion trigger to show welcome screen
-                final motionSequence = currentSequence.copyWith(
-                  motionTriggerStart: true,
-                  motionGreeting: 'Hello! Would you like a tour?',
-                  motionButtonText: 'START TOUR',
+                    'START TOUR pressed - setting up await visitor at ${currentSequence.startWaypoint}');
+                // Enable await visitor to show START TOUR button overlay
+                final awaitSequence = currentSequence.copyWith(
+                  awaitVisitorAtStart: true,
                 );
-                SequenceManager.instance.startSequence(motionSequence);
-                // This will navigate to startWaypoint, then show welcome screen
-                // When visitor taps button -> "Follow me!" -> Tour begins!
+                SequenceManager.instance.startSequence(awaitSequence);
+                // This will navigate to startWaypoint, then show START TOUR overlay
+                // When visitor taps button -> intro text -> Tour begins!
               },
             ),
           ),
