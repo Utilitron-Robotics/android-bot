@@ -3,6 +3,9 @@ package com.utilitron.robotrelay.service
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.utilitron.robotrelay.core.HeartbeatData
+import com.utilitron.robotrelay.core.Messenger
+import com.utilitron.robotrelay.core.ProcessingType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +21,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * - Executes them one at a time
  * - Reports status back via callback
  * - Flutter decides what to do on failure
+ *
+ * Bidirectional Heartbeat:
+ * - Drummer: Sends heartbeats TO Flutter (Relay→Flutter) via sendHeartbeat()
+ * - Messenger: Receives heartbeats FROM Flutter (Flutter→Relay)
  */
 class CommandBuffer(
     private val robotClient: RobotWebSocketClient,
@@ -44,6 +51,7 @@ class CommandBuffer(
     private var executionJob: Job? = null
     private var heartbeatJob: Job? = null
     private var currentCommandStartTime: Long = 0
+    private var heartbeatSequence: Int = 0  // For SINC rhythm detection
 
     // Track navigation for completion detection
     private var waitingForNavArrival = false
@@ -61,6 +69,20 @@ class CommandBuffer(
     // Crowd logic configuration for speed ramping
     private var crowdConfig = CrowdLogicConfig()
 
+    // === Bidirectional Heartbeat: Messenger receives heartbeats FROM Flutter ===
+    private val flutterMessenger = Messenger(
+        expectedSource = "flutter",
+        missedBeatsThreshold = 3,
+        onStale = { Log.w(TAG, "Flutter connection STALE - no heartbeat") },
+        onRecovered = { Log.i(TAG, "Flutter connection RECOVERED") }
+    )
+
+    /** Is Flutter connection stale (no heartbeat received recently)? */
+    val isFlutterStale: Boolean get() = flutterMessenger.isStale.value
+
+    /** Is Flutter connected? */
+    val isFlutterConnected: Boolean get() = flutterMessenger.isConnected.value
+
     /**
      * Start the buffer (heartbeat + execution loop)
      */
@@ -68,6 +90,7 @@ class CommandBuffer(
         Log.i(TAG, "CommandBuffer starting")
         startHeartbeat()
         startExecutionLoop()
+        flutterMessenger.start()  // Start monitoring Flutter heartbeats
     }
 
     /**
@@ -77,7 +100,22 @@ class CommandBuffer(
         Log.i(TAG, "CommandBuffer stopping")
         heartbeatJob?.cancel()
         executionJob?.cancel()
+        flutterMessenger.stop()  // Stop monitoring Flutter heartbeats
         scope.cancel()
+    }
+
+    /**
+     * Receive heartbeat from Flutter (Flutter→Relay direction)
+     * Called by RelayWebSocket when it receives a flutter_heartbeat message
+     */
+    fun receiveFlutterHeartbeat(json: JsonObject) {
+        val data = HeartbeatData(
+            timestamp = json.get("timestamp")?.asLong ?: System.currentTimeMillis(),
+            source = json.get("source")?.asString ?: "flutter",
+            sequenceNumber = json.get("sequence")?.asInt ?: 0,
+            payload = null  // We don't need the payload for rhythm detection
+        )
+        flutterMessenger.receiveHeartbeat(data)
     }
 
     /**
@@ -256,6 +294,8 @@ class CommandBuffer(
         val heartbeat = mapOf(
             "op" to "buffer_heartbeat",
             "timestamp" to now,
+            "source" to "relay",  // For Messenger to identify source
+            "sequence" to heartbeatSequence++,  // For SINC rhythm detection
             "buffer" to mapOf(
                 "paused" to _paused.value,
                 "current" to currentCommand?.let { cmd ->
@@ -285,6 +325,13 @@ class CommandBuffer(
             "crowd_config" to mapOf(
                 "safe_distance_meters" to crowdConfig.safeDistanceMeters,
                 "ramp_rate" to crowdConfig.rampRate
+            ),
+            // Bidirectional heartbeat status: is Flutter sending heartbeats to us?
+            "flutter_heartbeat" to mapOf(
+                "connected" to isFlutterConnected,
+                "stale" to isFlutterStale,
+                "learned_interval_ms" to flutterMessenger.learnedIntervalMs(),
+                "last_sequence" to flutterMessenger.lastSequence()
             )
         )
         onStatusUpdate(gson.toJson(heartbeat))
@@ -808,7 +855,8 @@ class CommandBuffer(
             "command" to mapOf(
                 "id" to cmd.id,
                 "type" to cmd.type,
-                "data" to cmd.data
+                "data" to cmd.data,
+                "processing_type" to cmd.processingType.name.lowercase()
             ),
             "timestamp" to System.currentTimeMillis()
         )
@@ -852,18 +900,25 @@ data class BufferCommand(
     val id: String = UUID.randomUUID().toString(),
     val type: String,  // navigate, speak, display, wait, sound, close_display
     val data: Map<String, Any?> = emptyMap(),
-    val timeoutMs: Long? = null
+    val timeoutMs: Long? = null,
+    val processingType: ProcessingType = ProcessingType.SEQUENTIAL  // Sequential by default
 ) {
     companion object {
         fun fromJson(json: JsonObject): BufferCommand {
             val gson = Gson()
+            val processingTypeStr = json.get("processing_type")?.asString
+            val processingType = ProcessingType.values().firstOrNull {
+                it.name.equals(processingTypeStr, ignoreCase = true)
+            } ?: ProcessingType.SEQUENTIAL
+
             return BufferCommand(
                 id = json.get("id")?.asString ?: UUID.randomUUID().toString(),
                 type = json.get("type")?.asString ?: "unknown",
                 data = json.get("data")?.let {
                     gson.fromJson(it, Map::class.java) as Map<String, Any?>
                 } ?: extractDataFromFlat(json),
-                timeoutMs = json.get("timeout_ms")?.asLong
+                timeoutMs = json.get("timeout_ms")?.asLong,
+                processingType = processingType
             )
         }
 
@@ -871,7 +926,7 @@ data class BufferCommand(
         private fun extractDataFromFlat(json: JsonObject): Map<String, Any?> {
             val data = mutableMapOf<String, Any?>()
             json.entrySet().forEach { (key, value) ->
-                if (key !in listOf("id", "type", "timeout_ms", "data")) {
+                if (key !in listOf("id", "type", "timeout_ms", "data", "processing_type")) {
                     data[key] = when {
                         value.isJsonPrimitive -> {
                             val prim = value.asJsonPrimitive

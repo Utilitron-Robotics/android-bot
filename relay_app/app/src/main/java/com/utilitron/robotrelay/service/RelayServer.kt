@@ -745,6 +745,13 @@ class RelayWebSocketServer(
                         return
                     }
 
+                    // === FLUTTER HEARTBEAT (bidirectional health monitoring) ===
+                    "flutter_heartbeat" -> {
+                        // Receive heartbeat from Flutter - feeds into Messenger for SINC-style rhythm tracking
+                        commandBuffer?.receiveFlutterHeartbeat(json)
+                        return
+                    }
+
                     // === LEGACY TABLET COMMANDS (still supported) ===
                     "tablet_stop_speak" -> {
                         Log.i(TAG, "Tablet stop speak")
