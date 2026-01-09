@@ -370,6 +370,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
     if (result.isSuccess || result.result == 'cancelled') {
       _navRetryCount = 0; // Reset retry count on success/cancel
 
+      // DEBUG: Log state before visitor check
+      debugPrint('BufferSequenceExecutor: Command success - awaitingVisitor=$_awaitingVisitorAtStart, phase=$_currentPhase, hasSequence=${_currentSequence != null}');
+
       // Special handling: nav to start completed while awaiting visitor
       // Now send button_standby to show START TOUR overlay on tablet
       if (_awaitingVisitorAtStart &&
@@ -385,9 +388,18 @@ class BufferSequenceExecutor extends ChangeNotifier {
           displayUrl: _currentSequence!.effectiveAwaitDisplayUrl,
         );
         _totalCommandCount = 2; // nav + button_standby
-        _bufferClient.loadCommands([buttonCmd], clearExisting: false);
 
-        debugPrint('BufferSequenceExecutor: ✓ button_standby sent - waiting for visitor to press START TOUR');
+        // Load async but handle result
+        _bufferClient.loadCommands([buttonCmd], clearExisting: false).then((loaded) {
+          if (loaded) {
+            debugPrint('BufferSequenceExecutor: ✓ button_standby confirmed - waiting for visitor to press START TOUR');
+          } else {
+            debugPrint('BufferSequenceExecutor: ✗ button_standby load FAILED - tour may be stuck');
+            // Try to recover by loading full tour anyway
+            resumeFromVisitor();
+          }
+        });
+
         notifyListeners();
         return; // Don't check completion - wait for button press
       }
@@ -441,7 +453,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
     final state = _bufferClient.state;
 
     debugPrint(
-        'BufferSequenceExecutor: Checking completion - pending=${state.pendingCount}, current=${state.current?.type}, paused=${state.paused}, status=$_status, completed=$_completedCommandCount/$_totalCommandCount');
+        'BufferSequenceExecutor: Checking completion - pending=${state.pendingCount}, current=${state.current?.type}, paused=${state.paused}, status=$_status, completed=$_completedCommandCount/$_totalCommandCount, awaitingVisitor=$_awaitingVisitorAtStart');
+
+    // GUARD: Never complete while awaiting visitor at start
+    if (_awaitingVisitorAtStart) {
+      debugPrint('BufferSequenceExecutor: Skipping completion check - awaiting visitor');
+      return;
+    }
 
     // Method 1: Check heartbeat state (may be stale)
     if (state.pendingCount == 0 && state.current == null && !state.paused) {
@@ -479,6 +497,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     debugPrint('BufferSequenceExecutor: Starting sequence "${sequence.name}"');
+    debugPrint('BufferSequenceExecutor: awaitVisitorAtStart=${sequence.awaitVisitorAtStart}, startWaypoint=${sequence.startWaypoint}');
 
     _currentSequence = sequence;
     _currentStopIndex = -1;

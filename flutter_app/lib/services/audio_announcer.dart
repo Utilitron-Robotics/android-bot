@@ -5,6 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/robot_connection.dart';
 import '../core/sequence_mode.dart';
+import '../core/task_engine.dart';
 
 /// Preset announcement categories
 enum AnnouncementCategory {
@@ -608,11 +609,15 @@ class AudioAnnouncer {
         // 2. Sequence failed (robot arrived but sequence died - still tell user!)
         // 3. Sequence completed (edge case)
         // Do NOT announce if sequence is actively running - it handles its own announcements
+        // Do NOT announce if TaskEngine has a mode assigned - it handles its own announcements
         final seqStatus = SequenceManager.instance.status;
+        final taskEngineHandling = TaskEngine.instance.hasMode(goalName);
         if (!tourRunning || seqStatus == SequenceStatus.failed || seqStatus == SequenceStatus.completed) {
-          if (goalName.isNotEmpty) {
+          if (goalName.isNotEmpty && !taskEngineHandling) {
             debugPrint('AudioAnnouncer: Announcing arrival at $goalName (seqStatus=$seqStatus)');
             announceArrival(goalName);
+          } else if (taskEngineHandling) {
+            debugPrint('AudioAnnouncer: Skipping arrival announcement - TaskEngine handling $goalName');
           }
         }
         break;
