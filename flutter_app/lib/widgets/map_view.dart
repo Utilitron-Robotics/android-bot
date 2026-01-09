@@ -342,21 +342,19 @@ class _MapViewState extends State<MapView> {
       );
 
       if (mounted) {
+        final oldImage = _mapImage;
         setState(() {
-          // Don't dispose old image if it's the cached one
-          if (_mapImage != _MapCache.image) {
-            _mapImage?.dispose();
-          }
           _mapImage = image;
-          _mapInfo = _mapInfo;  // Already set above
           _isLoading = false;
           _error = null;
-
-          // CRITICAL: Update static cache so map survives widget recreation
           _MapCache.image = image;
           _MapCache.info = _mapInfo;
-          debugPrint('MapView: Updated static cache with new map');
         });
+        // Dispose old image AFTER setState, outside the callback
+        if (oldImage != null && oldImage != image) {
+          oldImage.dispose();
+        }
+        debugPrint('MapView: Updated map (disposed old: ${oldImage != null && oldImage != image})');
       }
     } catch (e) {
       if (mounted) {
