@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package smait.teleop.v1;
+package utilitron.teleop.v1;
 
-option java_package = "com.smait.teleop.v1";
+option java_package = "com.utilitron.teleop.v1";
 option java_multiple_files = true;
 
 // Robot Teleop Service - gRPC wrapper for robot control
