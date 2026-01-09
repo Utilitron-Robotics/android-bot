@@ -142,18 +142,6 @@ class BufferSequenceExecutor extends ChangeNotifier {
             }
           }
           break;
-        case 'motion_standby':
-          // Waiting for visitor to approach - show special phase
-          // NOTE: Don't log here - this runs on EVERY heartbeat! Log in _onCommandStarted instead
-          _currentPhase = SequencePhase.awaitingVisitor;
-          _countdownSeconds = 0;
-          break;
-        case 'button_standby':
-          // Waiting for button press (no motion detection) - same phase
-          // NOTE: Don't log here - this runs on EVERY heartbeat! Log in _onCommandStarted instead
-          _currentPhase = SequencePhase.awaitingVisitor;
-          _countdownSeconds = 0;
-          break;
         default:
           debugPrint(
               'BufferSequenceExecutor: Unknown command type: ${state.current!.type}');
@@ -294,11 +282,6 @@ class BufferSequenceExecutor extends ChangeNotifier {
       debugPrint('BufferSequenceExecutor: Playing sound');
       _currentPhase = SequencePhase.speaking; // Treat as speaking phase
       _currentWaitDurationMs = 0;
-    } else if (type == 'motion_standby' || type == 'button_standby') {
-      // Standby commands - waiting for visitor/button press
-      debugPrint('BufferSequenceExecutor: Entering standby mode ($type)');
-      _currentPhase = SequencePhase.awaitingVisitor;
-      _currentWaitDurationMs = 0;
     } else {
       _currentWaitDurationMs = 0;
       debugPrint('BufferSequenceExecutor: Unknown command type: $type');
@@ -339,28 +322,14 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Special handling for loop command
     if (result.commandId.contains('loop')) {
       if (result.isSuccess && _currentSequence != null && _currentSequence!.loop) {
-        debugPrint('BufferSequenceExecutor: Loop command completed - restarting tour');
+        debugPrint('BufferSequenceExecutor: Loop command completed - restarting tour immediately');
 
-        if (_currentSequence!.motionTriggerStart) {
-          // Motion trigger enabled - enter standby mode to wait for visitor
-          debugPrint('BufferSequenceExecutor: Entering motion standby for next tour iteration');
-          _bufferClient.loadCommands([
-            BufferCommand.motionStandby(
-              sequenceId: _currentSequence!.id,
-              greeting: _currentSequence!.motionGreeting ?? 'Hello! Would you like a tour?',
-              buttonText: _currentSequence!.motionButtonText ?? 'START TOUR',
-              displayUrl: _currentSequence!.motionDisplayUrl,
-            ),
-          ], clearExisting: true);
-        } else {
-          // No motion trigger - restart tour immediately
-          debugPrint('BufferSequenceExecutor: Restarting tour immediately (no motion trigger)');
-          final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0);
-          _totalCommandCount = commands.length;
-          _completedCommandCount = 0;
-          _currentStopIndex = -1;
-          _bufferClient.loadCommands(commands, clearExisting: true);
-        }
+        // Restart tour immediately - no waiting for visitors
+        final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0);
+        _totalCommandCount = commands.length;
+        _completedCommandCount = 0;
+        _currentStopIndex = -1;
+        _bufferClient.loadCommands(commands, clearExisting: true);
 
         _status = SequenceExecutorStatus.running;
         notifyListeners();
@@ -368,27 +337,6 @@ class BufferSequenceExecutor extends ChangeNotifier {
       } else {
         debugPrint('BufferSequenceExecutor: Loop command failed or loop disabled, ending tour');
         // Fall through to normal completion handling
-      }
-    }
-
-    // Special handling for standby completion (button pressed - either motion or button standby)
-    // This means start/restart the tour!
-    if (result.commandId.contains('_standby')) {
-      if (result.isSuccess && _currentSequence != null) {
-        debugPrint('BufferSequenceExecutor: Standby completed - button pressed, starting tour!');
-
-        // Rebuild and load tour commands (skip the standby command, start from intro/stops)
-        final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0, skipStandby: true);
-        _totalCommandCount = commands.length;
-        _completedCommandCount = 0;
-        _currentStopIndex = -1;
-
-        debugPrint('BufferSequenceExecutor: Loading $_totalCommandCount commands');
-        _bufferClient.loadCommands(commands, clearExisting: true);
-
-        _status = SequenceExecutorStatus.running;
-        notifyListeners();
-        return;
       }
     }
 
@@ -543,22 +491,27 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
   /// Build buffer commands for a sequence
   ///
-  /// Command execution order for each stop:
-  /// 1. Navigate to waypoint
-  /// 2. Display content (custom URL or default POI name) - stays up entire visit
-  /// 3. Arrival sound + announcement (if enabled)
-  /// 4. Custom speak text (if any)
-  /// 5. Wait timer AFTER speech completes (additional dwell time)
+  /// Command execution order:
+  /// 1. Navigate to start waypoint (if set)
+  /// 2. Speak intro text (if set)
+  /// 3. For each stop:
+  ///    a. Navigate to waypoint
+  ///    b. Display content (custom URL or default POI name) - stays up entire visit
+  ///    c. Arrival sound + announcement (if enabled)
+  ///    d. Custom speak text (if any)
+  ///    e. Wait timer AFTER speech completes (additional dwell time)
+  /// 4. Speak outro text (if set)
+  /// 5. Navigate to end waypoint (if set)
   ///
   /// The display stays up from arrival until next navigation starts.
   /// Wait timer does NOT cut off speech - it waits AFTER speech completes.
   List<BufferCommand> _buildSequenceCommands(Sequence sequence,
-      {int startIndex = 0, bool skipStandby = false}) {
+      {int startIndex = 0}) {
     final commands = <BufferCommand>[];
 
     // DEBUG: Log all stops and their config
     debugPrint(
-        'BufferSequenceExecutor: Building commands for ${sequence.stops.length} stops (starting from index $startIndex, skipStandby=$skipStandby):');
+        'BufferSequenceExecutor: Building commands for ${sequence.stops.length} stops (starting from index $startIndex):');
     for (int i = startIndex; i < sequence.stops.length; i++) {
       final s = sequence.stops[i];
       debugPrint(
@@ -567,9 +520,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // START waypoint - navigate here before starting tour
     // (Robot will navigate to start even if human moved it)
-    // Skip if we're resuming after standby (already at start)
-    if (!skipStandby &&
-        startIndex == 0 &&
+    if (startIndex == 0 &&
         sequence.startWaypoint != null &&
         sequence.startWaypoint!.isNotEmpty) {
       debugPrint(
@@ -577,43 +528,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
       commands.add(BufferCommand.navigate(sequence.startWaypoint!));
     }
 
-    // BUTTON GATE - always show Start button when startWaypoint exists
-    // Motion trigger controls WHETHER to wait for motion detection, but
-    // the button gate is SEPARATE - we always wait for button press at start
-    // Skip if resuming after standby completion (button already pressed)
-    if (!skipStandby &&
-        startIndex == 0 &&
-        sequence.startWaypoint != null &&
-        sequence.startWaypoint!.isNotEmpty) {
-      final buttonText = sequence.motionButtonText ?? 'Start Tour';
-
-      if (sequence.motionTriggerStart) {
-        // Motion detection enabled - wait for motion, then show greeting + button
-        final customGreeting = sequence.motionGreeting;
-        final greeting = customGreeting != null && customGreeting.isNotEmpty
-            ? 'Human detected. $customGreeting'
-            : 'Human detected. Hello! Would you like a tour?';
-        debugPrint(
-            'BufferSequenceExecutor: Adding motion standby with greeting: $greeting, button: $buttonText');
-        commands.add(BufferCommand.motionStandby(
-          greeting: greeting,
-          sequenceId: sequence.id,
-          buttonText: buttonText,
-          displayUrl: sequence.motionDisplayUrl,
-        ));
-      } else {
-        // No motion detection - just show button immediately, no greeting
-        debugPrint(
-            'BufferSequenceExecutor: Adding button standby (no motion) with button: $buttonText');
-        commands.add(BufferCommand.buttonStandby(
-          sequenceId: sequence.id,
-          buttonText: buttonText,
-          displayUrl: sequence.motionDisplayUrl,
-        ));
-      }
-    }
-
-    // Intro text (spoken at start position)
+    // Intro text (spoken at start position after arriving)
+    // This is a regular stop - no waiting for visitors, just speak and go!
     // Relay awaits TTS completion via callback - no more guessing duration!
     if (startIndex == 0 &&
         sequence.introText != null &&
