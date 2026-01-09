@@ -701,9 +701,9 @@ class CommandBuffer(
 
                 Log.i(TAG, "Entering button standby for sequence: $sequenceId, button: $buttonText")
 
-                // Activate tour mode and show button immediately (no greeting)
+                // Show button immediately (no greeting) - tour mode lock disabled
                 withContext(Dispatchers.Main) {
-                    taskExecutor?.startTourMode(pin)
+                    // taskExecutor?.startTourMode(pin)  // DISABLED - was killing data feed
                     taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }
 
