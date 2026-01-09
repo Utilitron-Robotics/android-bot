@@ -539,14 +539,53 @@ class BufferClient extends ChangeNotifier {
 
   // === Buffer Control Methods ===
 
-  /// Load commands into the relay buffer
-  void loadCommands(List<BufferCommand> commands, {bool clearExisting = true}) {
-    debugPrint('BufferClient: Loading ${commands.length} commands');
+  /// Load commands into the relay buffer and wait for confirmation
+  /// Returns true if commands were loaded and confirmed, false on timeout
+  Future<bool> loadCommands(List<BufferCommand> commands, {bool clearExisting = true}) async {
+    debugPrint('BufferClient: Loading ${commands.length} commands (waiting for confirmation)');
+
+    final expectedCount = commands.length;
+    final completer = Completer<bool>();
+
+    // Listen for heartbeat that confirms commands are loaded
+    void Function(String, BufferState)? originalCallback = onHeartbeat;
+    int attempts = 0;
+    const maxAttempts = 10; // 10 heartbeats = ~5 seconds at 500ms rate
+
+    onHeartbeat = (op, state) {
+      // Call original callback too
+      originalCallback?.call(op, state);
+
+      attempts++;
+      debugPrint('BufferClient: Confirmation check $attempts/$maxAttempts - pending=${state.pending}');
+
+      if (state.pending >= expectedCount) {
+        debugPrint('BufferClient: ✓ Commands confirmed loaded (${state.pending} pending)');
+        onHeartbeat = originalCallback;
+        if (!completer.isCompleted) completer.complete(true);
+      } else if (attempts >= maxAttempts) {
+        debugPrint('BufferClient: ✗ Timeout waiting for command confirmation');
+        onHeartbeat = originalCallback;
+        if (!completer.isCompleted) completer.complete(false);
+      }
+    };
+
+    // Send the commands
     _client.send({
       'op': 'buffer_load',
       'commands': commands.map((c) => c.toJson()).toList(),
       'clear_existing': clearExisting,
     });
+
+    // Wait for confirmation with timeout
+    return completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        debugPrint('BufferClient: ✗ Hard timeout waiting for command confirmation');
+        onHeartbeat = originalCallback;
+        return false;
+      },
+    );
   }
 
   /// Clear all pending commands
