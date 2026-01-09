@@ -28,6 +28,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
   final TextEditingController _tourNameController = TextEditingController();
   final TextEditingController _introTextController = TextEditingController();
   final TextEditingController _outroTextController = TextEditingController();
+  final TextEditingController _awaitButtonTextController = TextEditingController();
+  final TextEditingController _awaitDisplayUrlController = TextEditingController();
   final Map<String, TextEditingController> _stopControllers = {};
 
   // Cache to reduce unnecessary rebuilds - only rebuild when these actually change
@@ -85,6 +87,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.dispose();
     _introTextController.dispose();
     _outroTextController.dispose();
+    _awaitButtonTextController.dispose();
+    _awaitDisplayUrlController.dispose();
     for (final c in _stopControllers.values) {
       c.dispose();
     }
@@ -123,6 +127,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.text = newTour.name;
     _introTextController.text = '';
     _outroTextController.text = '';
+    _awaitButtonTextController.text = '';
+    _awaitDisplayUrlController.text = '';
     setState(() {
       _selectedSequence = newTour;
       _isEditing = true;
@@ -140,6 +146,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.text = seq.name;
     _introTextController.text = seq.introText ?? '';
     _outroTextController.text = seq.outroText ?? '';
+    _awaitButtonTextController.text = seq.awaitButtonText ?? '';
+    _awaitDisplayUrlController.text = seq.awaitDisplayUrl ?? '';
 
     setState(() {
       _selectedSequence = seq;
@@ -219,6 +227,13 @@ class _SequenceEditorState extends State<SequenceEditor> {
           _outroTextController.text.isEmpty ? null : _outroTextController.text,
       startWaypoint: _selectedSequence!.startWaypoint,
       endWaypoint: _selectedSequence!.endWaypoint,
+      awaitVisitorAtStart: _selectedSequence!.awaitVisitorAtStart,
+      awaitButtonText: _awaitButtonTextController.text.isEmpty
+          ? null
+          : _awaitButtonTextController.text,
+      awaitDisplayUrl: _awaitDisplayUrlController.text.isEmpty
+          ? null
+          : _awaitDisplayUrlController.text,
     );
 
     _selectedSequence = updatedTour;
@@ -227,13 +242,14 @@ class _SequenceEditorState extends State<SequenceEditor> {
         'SequenceEditor._saveSequence: Save completed for "${updatedTour.name}"');
   }
 
-  void _updateTourOptions({bool? loop, bool? announceArrival}) {
-    // Only for checkboxes - these need immediate state update AND save
+  void _updateTourOptions({bool? loop, bool? announceArrival, bool? awaitVisitorAtStart}) {
+    // Only for checkboxes/switches - these need immediate state update AND save
     if (_selectedSequence == null) return;
     setState(() {
       _selectedSequence = _selectedSequence!.copyWith(
         loop: loop ?? _selectedSequence!.loop,
         announceArrival: announceArrival ?? _selectedSequence!.announceArrival,
+        awaitVisitorAtStart: awaitVisitorAtStart ?? _selectedSequence!.awaitVisitorAtStart,
       );
     });
     // Auto-save checkbox changes
@@ -1274,6 +1290,83 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   onChanged: (v) => _updateTourOptions(announceArrival: v),
                 ),
               ),
+            ],
+          ),
+        ),
+
+        // Await Visitor at Start - shows START TOUR overlay
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: seq.awaitVisitorAtStart
+                ? Colors.purple.withValues(alpha: 0.1)
+                : Colors.grey.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color:
+                  seq.awaitVisitorAtStart ? Colors.purple : Colors.grey.shade700,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    seq.awaitVisitorAtStart ? Icons.touch_app : Icons.touch_app_outlined,
+                    color: seq.awaitVisitorAtStart ? Colors.purple : Colors.grey,
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Await Visitor at Start',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Switch(
+                    value: seq.awaitVisitorAtStart,
+                    activeColor: Colors.purple,
+                    onChanged: (v) => _updateTourOptions(awaitVisitorAtStart: v),
+                  ),
+                ],
+              ),
+              if (seq.awaitVisitorAtStart) ...[
+                Text(
+                  'Shows START TOUR button at start location until tapped or sensor triggered',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _awaitButtonTextController,
+                        decoration: InputDecoration(
+                          labelText: 'Button Text',
+                          hintText: seq.effectiveAwaitButtonText,
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                          prefixIcon: const Icon(Icons.touch_app, size: 18),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: _awaitDisplayUrlController,
+                        decoration: InputDecoration(
+                          labelText: 'Display URL',
+                          hintText: 'frontiertower.io',
+                          border: const OutlineInputBorder(),
+                          isDense: true,
+                          prefixIcon: const Icon(Icons.web, size: 18),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
