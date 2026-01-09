@@ -605,6 +605,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
       // If await visitor is enabled, add button_standby AFTER nav to start
       // Relay executes this autonomously - no Flutter involvement needed
       if (sequence.awaitVisitorAtStart) {
+        // Wait for arrival functions and obstacle messages to complete
+        // before showing the button (prevents accidental trigger)
+        commands.add(BufferCommand.wait(2000));  // 2 second settle time
         debugPrint(
             'BufferSequenceExecutor: Adding button_standby for visitor await');
         commands.add(BufferCommand.buttonStandby(
