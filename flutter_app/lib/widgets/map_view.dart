@@ -480,20 +480,20 @@ class _MapViewState extends State<MapView> {
     );
   }
 
-  /// Fullscreen map rendering - fills entire space, dark background
   Widget _buildFullscreenMap() {
     return Container(
-      color: const Color(0xFF0A0E14), // Match HUD background
+      color: const Color(0xFF0A0E14),
       child: _mapImage == null
-          ? const SizedBox.expand() // Empty dark background while loading
+          ? const SizedBox.expand()
           : CustomPaint(
+              key: ValueKey(_mapImage.hashCode),
               painter: _MapPainter(
                 mapImage: _mapImage!,
                 mapInfo: _mapInfo!,
                 robotX: _robotX,
                 robotY: _robotY,
                 robotTheta: _robotTheta,
-                fillMode: true, // Center and fill the space
+                fillMode: true,
               ),
               size: Size.infinite,
             ),
@@ -550,6 +550,7 @@ class _MapViewState extends State<MapView> {
     }
 
     return CustomPaint(
+      key: ValueKey(_mapImage.hashCode),
       painter: _MapPainter(
         mapImage: _mapImage!,
         mapInfo: _mapInfo!,
