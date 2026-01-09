@@ -516,10 +516,10 @@ class BufferSequenceExecutor extends ChangeNotifier {
       return;
     }
 
-    debugPrint('BufferSequenceExecutor: ✓ All commands confirmed - starting sequence mode');
+    debugPrint('BufferSequenceExecutor: ✓ All commands confirmed - starting sequence');
 
-    // Start sequence mode on tablet - locks screen for customer-facing display
-    _bufferClient.startSequenceMode();
+    // DISABLED: Screen lock removed - was showing "Do not touch the screen"
+    // _bufferClient.startSequenceMode();
 
     notifyListeners();
   }
