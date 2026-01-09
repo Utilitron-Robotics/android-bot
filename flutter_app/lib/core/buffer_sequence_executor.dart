@@ -341,11 +341,44 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     // Special handling: arrived at start, now await visitor
-    if (_awaitingVisitorAtStart && result.isSuccess) {
+    // Only trigger once (when nav to start completes), not when button_standby completes
+    if (_awaitingVisitorAtStart &&
+        result.isSuccess &&
+        _currentPhase != SequencePhase.awaitingVisitor) {
       debugPrint('BufferSequenceExecutor: Arrived at start - entering awaitingVisitor phase');
       _currentPhase = SequencePhase.awaitingVisitor;
-      // Stay in running state but don't load more commands
-      // UI will show START TOUR overlay, call resumeFromVisitor() when pressed
+
+      // Send button_standby command to relay - this shows START TOUR button on tablet
+      final seq = _currentSequence!;
+      _bufferClient.loadCommands([
+        BufferCommand.buttonStandby(
+          sequenceId: seq.id,
+          buttonText: seq.effectiveAwaitButtonText,
+          displayUrl: seq.effectiveAwaitDisplayUrl,
+        ),
+      ], clearExisting: false);  // Don't clear - we'll load tour commands after button press
+
+      debugPrint('BufferSequenceExecutor: Sent button_standby to relay - tablet will show START TOUR');
+      notifyListeners();
+      return;
+    }
+
+    // Special handling: button_standby completed (visitor pressed START TOUR on tablet)
+    if (_awaitingVisitorAtStart &&
+        result.isSuccess &&
+        _currentPhase == SequencePhase.awaitingVisitor &&
+        result.commandId.contains('button_standby')) {
+      debugPrint('BufferSequenceExecutor: Tablet START TOUR pressed! Loading tour commands...');
+      _awaitingVisitorAtStart = false;
+      _currentPhase = SequencePhase.navigating;
+
+      // Load the rest of the sequence (skip nav to start since we're already there)
+      final commands = _buildSequenceCommands(_currentSequence!, skipNavToStart: true);
+      _totalCommandCount = commands.length;
+      _completedCommandCount = 0;
+
+      _bufferClient.loadCommands(commands, clearExisting: true);
+      debugPrint('BufferSequenceExecutor: ✓ Tour commands loaded from tablet button press');
       notifyListeners();
       return;
     }

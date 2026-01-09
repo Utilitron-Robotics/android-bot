@@ -245,9 +245,12 @@ class MainActivity : AppCompatActivity() {
             standbyButtonText = intent?.getStringExtra(RelayService.EXTRA_TOUR_BUTTON_TEXT) ?: "Start Tour"
             Log.i(TAG, ">>> tourStandbyReceiver: sequenceId=$standbySequenceId, buttonText=$standbyButtonText")
 
-            // If tour mode is already active, update the lock screen UI
-            if (isTourModeActive) {
+            // Show the START TOUR button overlay for visitors
+            // This works whether or not tour mode lock is active
+            if (standbySequenceId != null) {
+                isTourModeActive = true  // Enable tour mode to show lock screen with button
                 showLockScreen()
+                Log.i(TAG, "Showing START TOUR button for visitor")
             }
         }
     }

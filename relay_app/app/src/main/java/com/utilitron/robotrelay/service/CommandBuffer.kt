@@ -698,12 +698,19 @@ class CommandBuffer(
                 val sequenceId = cmd.data["sequence_id"] as? String ?: ""
                 val buttonText = cmd.data["button_text"] as? String ?: "Start Tour"
                 val pin = cmd.data["pin"] as? String
+                val displayUrl = cmd.data["display_url"] as? String
 
                 Log.i(TAG, "Entering button standby for sequence: $sequenceId, button: $buttonText")
 
-                // Show button immediately (no greeting) - tour mode lock disabled
+                // Show standby display URL if provided (e.g., frontiertower.io)
+                if (displayUrl != null && displayUrl.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        taskExecutor?.displayUrl(displayUrl)
+                    }
+                }
+
+                // Show button immediately (no greeting) - tour mode lock enabled for button visibility
                 withContext(Dispatchers.Main) {
-                    // taskExecutor?.startTourMode(pin)  // DISABLED - was killing data feed
                     taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }
 
