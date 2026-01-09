@@ -4,7 +4,7 @@
 -keepattributes Signature
 -keepattributes *Annotation*
 -keep class com.google.gson.** { *; }
--keep class com.smait.robotrelay.protocol.** { *; }
+-keep class com.utilitron.robotrelay.protocol.** { *; }
 
 # OkHttp
 -dontwarn okhttp3.**
