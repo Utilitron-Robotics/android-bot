@@ -255,7 +255,9 @@ class SequenceTaskMode extends TaskMode {
       return;
     }
 
-    if (stop.waypoint == waypoint || _pendingWaypoint == waypoint) {
+    final waypointNorm = waypoint.toLowerCase().trim();
+    if (stop.waypoint.toLowerCase().trim() == waypointNorm ||
+        _pendingWaypoint?.toLowerCase().trim() == waypointNorm) {
       debugPrint(
           'SequenceTaskMode: Processing arrival at ${stop.waypoint} (even if failed - still execute actions)');
       _waitingForArrival = false;
