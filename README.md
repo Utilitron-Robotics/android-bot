@@ -224,6 +224,18 @@ flutter run -d [platform]  # ios, android, chrome, macos
 - 🔧 **Greeter Mode** - In development (Q1 2026)
 - 🔧 **Comic Mode** - In development (Q1 2026)
 
+## Recent Updates (January 2026)
+
+### Reliability Improvements
+- **Sequential Command Loading** - Commands sent to relay with confirmation before tour starts
+- **SINC-Style Health Checks** - Heartbeat staleness detection on app resume and tour start
+- **Case-Insensitive Waypoints** - Waypoint matching normalized to prevent missed stops
+- **REST AT END Fix** - Timer now starts after arrival, not before
+
+### UX Changes
+- **Screen Lock Disabled** - Full HUD visible during tours (no "Do not touch" overlay)
+- **Wakelock Active** - Screen stays on during tours to prevent connection drops
+
 ## Tour Mode (Fully Operational)
 
 ### Creating Tours
@@ -531,9 +543,11 @@ service RobotControl {
 - Verify no emergency stop active
 
 ### Tour Issues
-- Validate all waypoint names match robot POIs
+- Validate all waypoint names match robot POIs (case-insensitive)
 - Ensure TTS language matches script language
 - Check tablet volume for announcements
+- If tour freezes: Check relay heartbeat connection
+- Map not updating: Verify HTTP polling to relay :8765/map
 
 ## Contributing
 
