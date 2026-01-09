@@ -963,6 +963,9 @@ class SequenceManager extends ChangeNotifier {
         'outro_text': sequence.outroText,
         'start_waypoint': sequence.startWaypoint,
         'end_waypoint': sequence.endWaypoint,
+        'await_visitor_at_start': sequence.awaitVisitorAtStart,
+        'await_button_text': sequence.awaitButtonText,
+        'await_display_url': sequence.awaitDisplayUrl,
         'modified_at': sequence.modifiedAt,
       };
 
