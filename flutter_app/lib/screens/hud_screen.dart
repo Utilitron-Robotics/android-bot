@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
+// import 'package:wakelock_plus/wakelock_plus.dart'; // DISABLED - investigating freeze
 import '../core/robot_connection.dart';
 import '../core/sequence_mode.dart'
     show SequenceManager, SequenceStatus, SequencePhase, Sequence;
@@ -81,8 +81,6 @@ class _HudScreenState extends State<HudScreen>
   late AnimationController _rightPanelController;
   late AnimationController _bottomPanelController;
 
-  // Wake lock state - keeps screen on during tours
-  bool _wakelockEnabled = false;
 
   // Cyberpunk accent color
   static const _accentColor = Color(0xFF00D4FF); // Cyan glow
@@ -259,12 +257,6 @@ class _HudScreenState extends State<HudScreen>
     // Unregister lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
 
-    // Release wake lock if active
-    if (_wakelockEnabled) {
-      WakelockPlus.disable();
-      _wakelockEnabled = false;
-    }
-
     _urlController.dispose();
     _customSoundController.dispose();
     _leftPanelController.dispose();
@@ -306,30 +298,6 @@ class _HudScreenState extends State<HudScreen>
       }
     }
 
-    // Re-enable wake lock if tour is still running
-    final tourManager = context.read<SequenceManager>();
-    if (tourManager.status == SequenceStatus.running && !_wakelockEnabled) {
-      debugPrint('HUD: Tour still running, re-enabling wake lock');
-      _enableWakelock();
-    }
-  }
-
-  /// Enable wake lock to keep screen on during tours
-  void _enableWakelock() {
-    if (!_wakelockEnabled) {
-      WakelockPlus.enable();
-      _wakelockEnabled = true;
-      debugPrint('HUD: Wake lock ENABLED - screen will stay on');
-    }
-  }
-
-  /// Disable wake lock when tour stops
-  void _disableWakelock() {
-    if (_wakelockEnabled) {
-      WakelockPlus.disable();
-      _wakelockEnabled = false;
-      debugPrint('HUD: Wake lock DISABLED - screen can turn off');
-    }
   }
 
   /// Check connection health and reconnect if stale
@@ -407,13 +375,6 @@ class _HudScreenState extends State<HudScreen>
           // Check if tour is running to adjust layout
           final tourManager = context.watch<SequenceManager>();
           final tourRunning = tourManager.status == SequenceStatus.running;
-
-          // WAKE LOCK: Keep screen on during tours to prevent connection drops
-          if (tourRunning && !_wakelockEnabled) {
-            _enableWakelock();
-          } else if (!tourRunning && _wakelockEnabled) {
-            _disableWakelock();
-          }
 
           // TOUR START HEALTH CHECK: When leaving standby (awaitingVisitor),
           // seed the SINC rhythm detection by checking connection health
