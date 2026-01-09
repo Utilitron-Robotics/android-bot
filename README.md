@@ -265,6 +265,143 @@ When navigation fails:
 - Real-time telemetry
 - Map visualization
 
+## Map Data & Base Integration
+
+### Available Data from Robot Base
+
+The robot base provides rich mapping and navigation data via ROS topics and services:
+
+#### Currently Implemented (Read-Only)
+
+| Data | Topic/Service | Type | Update Rate | Purpose |
+|------|---------------|------|-------------|---------|
+| **Occupancy Grid** | `/map` | `nav_msgs/OccupancyGrid` | 5s polling | SLAM map visualization |
+| **Robot Pose** | `/robot_pose` | `geometry_msgs/Pose2D` | Real-time | Position overlay on map |
+| **Robot Status** | `/robot_status` | Custom | Real-time | Battery, nav_status, velocity |
+| **Waypoints** | `/poi` service | String array | On-demand | Available navigation targets |
+| **Laser Scan** | `/laser_data` | Point array | Available | LIDAR visualization |
+
+#### Available but Not Yet Implemented
+
+| Data | Topic/Service | Type | Purpose |
+|------|---------------|------|---------|
+| **Global Costmap** | `/move_base/global_costmap` | `nav_msgs/OccupancyGrid` | Path planning costs |
+| **Local Costmap** | `/move_base/local_costmap` | `nav_msgs/OccupancyGrid` | Obstacle avoidance |
+| **Global Path** | `/global_path` | Path | Current planned route |
+| **Map Metadata** | `/get_map_info` service | Custom | Resolution, origin, bounds |
+| **Robot Info** | `/robot_info` service | Custom | Hardware capabilities |
+
+#### Not Available (Requires Custom Implementation)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Virtual Walls** | Not in base firmware | Would need custom SLAM node |
+| **Restricted Zones** | Not in base firmware | Could implement in relay |
+| **Corridors/Paths** | Not in base firmware | Path overlays possible in app |
+| **Zone-based Speed** | Logic exists, no zones | Uses lidar distance instead |
+
+### Map Data Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ROBOT SLAM SYSTEM                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │   /map      │  │ /robot_pose │  │   /poi      │              │
+│  │ OccupancyGrid│  │   Pose2D    │  │  Service    │              │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
+└─────────┼────────────────┼────────────────┼─────────────────────┘
+          │                │                │
+          ▼                ▼                ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                    RELAY SERVER (:8765)                       │
+   │  • Caches /map as PNG (HTTP GET /map)                        │
+   │  • Forwards /robot_pose via WebSocket                        │
+   │  • Proxies /poi service calls                                │
+   └───────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │                    FLUTTER APP                                │
+   │  • Polls /map every 5s → renders to Canvas                   │
+   │  • Subscribes /robot_pose → overlays position                │
+   │  • Calls /poi → populates waypoint picker                    │
+   │  • Syncs waypoints/tours ↔ Cloud DynamoDB                    │
+   └──────────────────────────────────────────────────────────────┘
+```
+
+### Current Capabilities Discovery
+
+On connection, the app performs parallel discovery:
+
+```dart
+// Discovers what the robot can do
+RobotCapabilities caps = await RobotIntrospection(client).discover();
+
+caps.topics;      // All ROS topics (via /rosapi/topics)
+caps.services;    // All ROS services (via /rosapi/services)
+caps.parameters;  // All ROS params (via /rosapi/get_param_names)
+caps.waypoints;   // Navigation targets (via /poi service)
+
+// Helper methods
+caps.hasMap;           // Can display SLAM map
+caps.hasNavigation;    // Can navigate to waypoints
+caps.hasVelocityControl; // Can be manually driven
+caps.hasStatus;        // Has telemetry stream
+```
+
+### Waypoint Management
+
+**From Robot:**
+```dart
+// Get available waypoints from robot's map
+List<String> waypoints = await robot.discoverWaypoints();
+// Calls: /poi service with {'poi': ''} → returns {'avaliable_list': [...]}
+```
+
+**From Cloud:**
+```dart
+// Sync waypoints to/from cloud storage
+FleetCloudClient cloud = FleetCloudClient();
+List<String> waypoints = await cloud.getWaypoints(mapId: 'building_floor_4');
+await cloud.pushWaypoints(waypoints, mapId: 'building_floor_4');
+```
+
+### Future: Map Modification (Roadmap)
+
+#### Phase 1: Position Correction (Q1 2026)
+- Manually adjust robot position when SLAM drifts
+- Use `/initialpose` topic to reset localization
+- Critical for multi-floor operations
+
+#### Phase 2: Waypoint Management (Q2 2026)
+- Add/rename/delete waypoints from app
+- Requires custom service on relay or base
+- Cloud sync for fleet-wide updates
+
+#### Phase 3: Zone Definition (Q3 2026)
+- Define no-go zones in app
+- Restricted areas for safety
+- Speed limit zones
+- Relay-enforced (intercept navigation commands)
+
+#### Phase 4: Dynamic Mapping (Future)
+- Auto-adjust to venue changes
+- Crowd-pushed position recovery
+- Real-time obstacle integration
+- "The caterer moved the drink table" scenario
+
+### Services Reference
+
+| Service | Arguments | Returns | Purpose |
+|---------|-----------|---------|---------|
+| `/poi` | `{'poi': ''}` | `{'avaliable_list': [...]}` | List waypoints |
+| `/poi` | `{'poi': 'name'}` | Navigation result | Go to waypoint |
+| `/get_map_info` | `{'cmd': 0}` | Map metadata | Get map details |
+| `/robot_info` | `{'cmd': 0}` | Robot metadata | Get robot info |
+| `/velocity_control` | `{speed: 0.5}` | OK | Set max speed |
+| `/rosapi/topics` | none | Topic list | Introspection |
+| `/rosapi/services` | none | Service list | Introspection |
+
 ## Development
 
 ### Requirements
