@@ -62,6 +62,7 @@ class CommandBuffer(
     private var recoveryAttempts = 0
     private var triggerRecovery = false  // Set by 604 handler to trigger recovery in while loop
     private var inRecovery = false       // True during recovery maneuvers, prevents 602 from cancelling
+    private var stuckAnnouncementPending = false  // Set when stuck, nav loop handles TTS+sound
 
     // Recovery configuration (sent from Flutter, stored in DynamoDB)
     private var recoveryConfig = RecoveryConfig()
@@ -235,18 +236,11 @@ class CommandBuffer(
                     Log.i(TAG, "Path blocked to $pendingNavWaypoint - searching for escape route...")
                     triggerRecovery = true
                 } else {
-                    // All attempts exhausted - cry for help like a sad R2D2
+                    // All attempts exhausted - set flag for nav loop to handle properly
+                    // Nav loop will await TTS+sound before completing command
                     Log.w(TAG, "Trapped! No escape route found after $recoveryAttempts attempts")
-                    scope.launch(Dispatchers.Main) {
-                        taskExecutor?.speakText("I'm stuck. I need help please.") {
-                            // Play sad sound after TTS completes (no more guessing!)
-                            taskExecutor?.playAlertSound("sad")
-                        }
-                    }
-                    waitingForNavArrival = false
-                    navArrivalPending = false
-                    pendingNavWaypoint = null
-                    completeCommand(cmd.id, "robot_failed")
+                    stuckAnnouncementPending = true
+                    // Don't complete command here - let nav loop do it after TTS+sound finish
                 }
             }
             602 -> { // Cancelled
@@ -390,6 +384,7 @@ class CommandBuffer(
                 // Reset recovery state for this navigation
                 recoveryAttempts = 0
                 triggerRecovery = false
+                stuckAnnouncementPending = false
 
                 // Check if navigating to/from charger - be less paranoid about obstacles
                 val isChargingRelated = waypoint.contains("Pile", ignoreCase = true) ||
@@ -417,6 +412,37 @@ class CommandBuffer(
 
                 while (waitingForNavArrival && System.currentTimeMillis() < deadline) {
                     delay(100)
+
+                    // Check if stuck announcement is pending (604 exhausted all recovery attempts)
+                    if (stuckAnnouncementPending) {
+                        stuckAnnouncementPending = false
+                        Log.i(TAG, "Playing stuck announcement with TTS+sound...")
+
+                        // Speak the stuck message and wait for completion
+                        val ttsComplete = CompletableDeferred<Unit>()
+                        withContext(Dispatchers.Main) {
+                            taskExecutor?.speakText("I'm stuck. I need help please.") {
+                                ttsComplete.complete(Unit)
+                            }
+                        }
+                        ttsComplete.await()
+
+                        // Play sad sound and wait for completion
+                        val soundComplete = CompletableDeferred<Unit>()
+                        withContext(Dispatchers.Main) {
+                            taskExecutor?.playAlertSound("sad") {
+                                soundComplete.complete(Unit)
+                            }
+                        }
+                        soundComplete.await()
+
+                        Log.i(TAG, "Stuck announcement complete, marking nav as failed")
+                        waitingForNavArrival = false
+                        navArrivalPending = false
+                        pendingNavWaypoint = null
+                        completeCommand(cmd.id, "robot_failed")
+                        break
+                    }
 
                     // Check if we're making progress
                     val status = robotClient.robotStatus.value
