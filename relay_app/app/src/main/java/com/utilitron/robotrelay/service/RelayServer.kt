@@ -33,6 +33,7 @@ class RelayServer(
     interface TaskExecutor {
         fun speakText(text: String, onComplete: (() -> Unit)? = null)
         fun stopSpeak()  // Stop current TTS to prevent queue buildup
+        fun isTtsSpeaking(): Boolean  // Check if TTS is currently speaking
         fun displayUrl(url: String)
         fun closeDisplay()
         fun runTask(type: String, data: String, waitSeconds: Int)

@@ -848,6 +848,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         tts?.stop()
     }
 
+    override fun isTtsSpeaking(): Boolean {
+        return cloudTts?.isSpeaking ?: false
+    }
+
     override fun displayUrl(url: String) {
         Log.i(TAG, ">>> displayUrl() called from TaskExecutor: '${url.take(100)}...'")
         display(url)

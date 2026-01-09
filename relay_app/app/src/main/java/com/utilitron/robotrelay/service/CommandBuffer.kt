@@ -702,6 +702,18 @@ class CommandBuffer(
 
                 Log.i(TAG, "Entering button standby for sequence: $sequenceId, button: $buttonText")
 
+                // Wait for any obstacle avoidance messages to finish speaking
+                // This prevents the button from appearing while TTS is still active
+                var waitCount = 0
+                while (taskExecutor?.isTtsSpeaking() == true && waitCount < 20) {
+                    Log.i(TAG, "Waiting for TTS to finish before showing button...")
+                    delay(250)
+                    waitCount++
+                }
+                if (waitCount > 0) {
+                    Log.i(TAG, "TTS finished after ${waitCount * 250}ms, showing button")
+                }
+
                 // Show standby display URL if provided (e.g., frontiertower.io)
                 if (displayUrl != null && displayUrl.isNotEmpty()) {
                     withContext(Dispatchers.Main) {
@@ -709,7 +721,7 @@ class CommandBuffer(
                     }
                 }
 
-                // Show button immediately (no greeting) - tour mode lock enabled for button visibility
+                // Show button now that TTS is idle
                 withContext(Dispatchers.Main) {
                     taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }

@@ -51,6 +51,10 @@ class CloudTtsService(
     private var fallbackReady = false
     private var currentCallback: (() -> Unit)? = null
 
+    /** True when TTS is currently speaking */
+    val isSpeaking: Boolean
+        get() = currentCallback != null
+
     private val cacheDir: File by lazy {
         File(context.cacheDir, CACHE_DIR).apply { mkdirs() }
     }
