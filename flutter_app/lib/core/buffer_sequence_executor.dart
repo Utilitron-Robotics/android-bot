@@ -370,6 +370,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
     if (result.isSuccess || result.result == 'cancelled') {
       _navRetryCount = 0; // Reset retry count on success/cancel
 
+      // DEBUG: Log state before visitor check
+      debugPrint('BufferSequenceExecutor: Command success - awaitingVisitor=$_awaitingVisitorAtStart, phase=$_currentPhase, hasSequence=${_currentSequence != null}');
+
       // Special handling: nav to start completed while awaiting visitor
       // Now send button_standby to show START TOUR overlay on tablet
       if (_awaitingVisitorAtStart &&
@@ -441,7 +444,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
     final state = _bufferClient.state;
 
     debugPrint(
-        'BufferSequenceExecutor: Checking completion - pending=${state.pendingCount}, current=${state.current?.type}, paused=${state.paused}, status=$_status, completed=$_completedCommandCount/$_totalCommandCount');
+        'BufferSequenceExecutor: Checking completion - pending=${state.pendingCount}, current=${state.current?.type}, paused=${state.paused}, status=$_status, completed=$_completedCommandCount/$_totalCommandCount, awaitingVisitor=$_awaitingVisitorAtStart');
+
+    // GUARD: Never complete while awaiting visitor at start
+    if (_awaitingVisitorAtStart) {
+      debugPrint('BufferSequenceExecutor: Skipping completion check - awaiting visitor');
+      return;
+    }
 
     // Method 1: Check heartbeat state (may be stale)
     if (state.pendingCount == 0 && state.current == null && !state.paused) {
