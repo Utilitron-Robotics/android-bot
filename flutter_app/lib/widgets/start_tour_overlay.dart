@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 /// Full-screen overlay with a big purple START TOUR button
 /// Shows when awaiting visitor at start location
-/// Optional webpage background (defaults to frontiertower.io)
+/// Background shows gradient (URL display would need platform-specific webview)
 class StartTourOverlay extends StatefulWidget {
   final String buttonText;
   final String? displayUrl;
@@ -24,7 +23,6 @@ class _StartTourOverlayState extends State<StartTourOverlay>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
-  WebViewController? _webController;
 
   @override
   void initState() {
@@ -37,12 +35,6 @@ class _StartTourOverlayState extends State<StartTourOverlay>
     _pulseAnimation = Tween<double>(begin: 1.0, end: 1.08).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
-
-    // Setup webview if URL provided
-    final url = widget.displayUrl ?? 'https://frontiertower.io';
-    _webController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..loadRequest(Uri.parse(url));
   }
 
   @override
@@ -57,13 +49,22 @@ class _StartTourOverlayState extends State<StartTourOverlay>
       color: Colors.transparent,
       child: Stack(
         children: [
-          // Background - webpage or solid color
-          if (_webController != null)
-            Positioned.fill(
-              child: WebViewWidget(controller: _webController!),
-            )
-          else
-            Container(color: Colors.black87),
+          // Background - gradient for now (webview would need platform check)
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF1a1a2e),
+                    Color(0xFF16213e),
+                    Color(0xFF0f3460),
+                  ],
+                ),
+              ),
+            ),
+          ),
 
           // Semi-transparent overlay to make button pop
           Positioned.fill(
