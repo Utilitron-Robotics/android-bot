@@ -282,6 +282,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
       debugPrint('BufferSequenceExecutor: Playing sound');
       _currentPhase = SequencePhase.speaking; // Treat as speaking phase
       _currentWaitDurationMs = 0;
+    } else if (type == 'button_standby') {
+      // Relay is now showing START TOUR button - waiting for visitor
+      debugPrint('BufferSequenceExecutor: Relay showing START TOUR button - awaiting visitor');
+      _currentPhase = SequencePhase.awaitingVisitor;
+      _awaitingVisitorAtStart = true;
+      _currentWaitDurationMs = 0;
     } else {
       _currentWaitDurationMs = 0;
       debugPrint('BufferSequenceExecutor: Unknown command type: $type');
@@ -340,45 +346,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
     }
 
-    // Special handling: arrived at start, now await visitor
-    // Only trigger once (when nav to start completes), not when button_standby completes
-    if (_awaitingVisitorAtStart &&
-        result.isSuccess &&
-        _currentPhase != SequencePhase.awaitingVisitor) {
-      debugPrint('BufferSequenceExecutor: Arrived at start - entering awaitingVisitor phase');
-      _currentPhase = SequencePhase.awaitingVisitor;
-
-      // Send button_standby command to relay - this shows START TOUR button on tablet
-      final seq = _currentSequence!;
-      _bufferClient.loadCommands([
-        BufferCommand.buttonStandby(
-          sequenceId: seq.id,
-          buttonText: seq.effectiveAwaitButtonText,
-          displayUrl: seq.effectiveAwaitDisplayUrl,
-        ),
-      ], clearExisting: false);  // Don't clear - we'll load tour commands after button press
-
-      debugPrint('BufferSequenceExecutor: Sent button_standby to relay - tablet will show START TOUR');
-      notifyListeners();
-      return;
-    }
-
     // Special handling: button_standby completed (visitor pressed START TOUR on tablet)
-    if (_awaitingVisitorAtStart &&
-        result.isSuccess &&
-        _currentPhase == SequencePhase.awaitingVisitor &&
-        result.commandId.contains('button_standby')) {
-      debugPrint('BufferSequenceExecutor: Tablet START TOUR pressed! Loading tour commands...');
+    // Relay continues with remaining commands autonomously - Flutter just tracks phase
+    if (result.isSuccess && result.commandId.contains('button_standby')) {
+      debugPrint('BufferSequenceExecutor: Tablet START TOUR pressed! Tour continuing...');
       _awaitingVisitorAtStart = false;
       _currentPhase = SequencePhase.navigating;
-
-      // Load the rest of the sequence (skip nav to start since we're already there)
-      final commands = _buildSequenceCommands(_currentSequence!, skipNavToStart: true);
-      _totalCommandCount = commands.length;
-      _completedCommandCount = 0;
-
-      _bufferClient.loadCommands(commands, clearExisting: true);
-      debugPrint('BufferSequenceExecutor: ✓ Tour commands loaded from tablet button press');
       notifyListeners();
       return;
     }
@@ -628,6 +601,18 @@ class BufferSequenceExecutor extends ChangeNotifier {
       debugPrint(
           'BufferSequenceExecutor: Adding start waypoint: ${sequence.startWaypoint}');
       commands.add(BufferCommand.navigate(sequence.startWaypoint!));
+
+      // If await visitor is enabled, add button_standby AFTER nav to start
+      // Relay executes this autonomously - no Flutter involvement needed
+      if (sequence.awaitVisitorAtStart) {
+        debugPrint(
+            'BufferSequenceExecutor: Adding button_standby for visitor await');
+        commands.add(BufferCommand.buttonStandby(
+          sequenceId: sequence.id,
+          buttonText: sequence.effectiveAwaitButtonText,
+          displayUrl: sequence.effectiveAwaitDisplayUrl,
+        ));
+      }
     }
 
     // Intro text (spoken at start position after arriving)
