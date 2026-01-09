@@ -1,10 +1,10 @@
-/// CIOT/Pudu/smAiT Robot Adapter
+/// CIOT/Pudu/Chassis Robot Adapter
 /// Primary adapter for service robots using rosbridge protocol
 ///
 /// Supports:
 /// - Pudu Robotics (BellaBot, PuduBot, HolaBot, etc.)
 /// - CIOT robots
-/// - smAiT robots
+/// - Chassis robots
 /// - Any rosbridge-compatible service robot
 library;
 
@@ -22,7 +22,7 @@ enum SafetyZone {
   stop, // < 0.5m
 }
 
-/// Status for CIOT/Pudu/smAiT robots
+/// Status for CIOT/Pudu/Chassis robots
 class CiotPuduStatus extends adapter.RobotStatus {
   final bool _connected;
   final int? _battery;
@@ -108,7 +108,7 @@ class CiotPuduStatus extends adapter.RobotStatus {
   }
 }
 
-/// Adapter for CIOT/Pudu/smAiT service robots
+/// Adapter for CIOT/Pudu/Chassis service robots
 class CiotPuduAdapter extends adapter.RobotAdapter {
   final RosbridgeClient _client;
   CiotPuduStatus? _status;

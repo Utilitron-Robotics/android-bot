@@ -307,7 +307,7 @@
                 android:background="@drawable/joystick_background_rounded" />
 
             <!-- Joystick control -->
-            <com.smait.robotrelay.ui.JoystickView
+            <com.utilitron.robotrelay.ui.JoystickView
                 android:id="@+id/joystickView"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"

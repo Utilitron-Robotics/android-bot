@@ -22,11 +22,11 @@
                                                     │
                                          ┌──────────┴──────────┐
                                          │    ROBOT BASE       │
-                                         │  (Pudu/smAiT)       │
+                                         │  (Robot/chassis)       │
                                          │                     │
                                          │  Also broadcasts:   │
                                          │  WiFi Hotspot       │
-                                         │  TY126AA003F0-XXXXX │
+                                         │  MobileBase003F0-XXXXX │
                                          │  → 10.42.0.1:9090   │
                                          └─────────────────────┘
 ```
@@ -50,7 +50,7 @@
 - **Path**: Tech device → Robot WiFi hotspot → Robot Base
 - **Protocol**: WebSocket direct to rosbridge
 - **When**: Tablet/relay unavailable, tech maintenance
-- **Robot WiFi SSIDs**: TY126AA003F0-005878, TY126AA003F0-005993
+- **Robot WiFi SSIDs**: MobileBase003F0-005878, MobileBase003F0-005993
 - **Password**: 123456789
 
 ## IP Addresses

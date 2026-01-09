@@ -282,6 +282,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
       debugPrint('BufferSequenceExecutor: Playing sound');
       _currentPhase = SequencePhase.speaking; // Treat as speaking phase
       _currentWaitDurationMs = 0;
+    } else if (type == 'button_standby') {
+      // Relay is now showing START TOUR button - waiting for visitor
+      debugPrint('BufferSequenceExecutor: Relay showing START TOUR button - awaiting visitor');
+      _currentPhase = SequencePhase.awaitingVisitor;
+      _awaitingVisitorAtStart = true;
+      _currentWaitDurationMs = 0;
     } else {
       _currentWaitDurationMs = 0;
       debugPrint('BufferSequenceExecutor: Unknown command type: $type');
@@ -340,12 +346,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
     }
 
-    // Special handling: arrived at start, now await visitor
-    if (_awaitingVisitorAtStart && result.isSuccess) {
-      debugPrint('BufferSequenceExecutor: Arrived at start - entering awaitingVisitor phase');
-      _currentPhase = SequencePhase.awaitingVisitor;
-      // Stay in running state but don't load more commands
-      // UI will show START TOUR overlay, call resumeFromVisitor() when pressed
+    // Special handling: button_standby completed (visitor pressed START TOUR on tablet)
+    // Relay continues with remaining commands autonomously - Flutter just tracks phase
+    if (result.isSuccess && result.commandId.contains('button_standby')) {
+      debugPrint('BufferSequenceExecutor: Tablet START TOUR pressed! Tour continuing...');
+      _awaitingVisitorAtStart = false;
+      _currentPhase = SequencePhase.navigating;
       notifyListeners();
       return;
     }
@@ -595,6 +601,18 @@ class BufferSequenceExecutor extends ChangeNotifier {
       debugPrint(
           'BufferSequenceExecutor: Adding start waypoint: ${sequence.startWaypoint}');
       commands.add(BufferCommand.navigate(sequence.startWaypoint!));
+
+      // If await visitor is enabled, add button_standby AFTER nav to start
+      // Relay executes this autonomously - waits for TTS idle before showing button
+      if (sequence.awaitVisitorAtStart) {
+        debugPrint(
+            'BufferSequenceExecutor: Adding button_standby for visitor await');
+        commands.add(BufferCommand.buttonStandby(
+          sequenceId: sequence.id,
+          buttonText: sequence.effectiveAwaitButtonText,
+          displayUrl: sequence.effectiveAwaitDisplayUrl,
+        ));
+      }
     }
 
     // Intro text (spoken at start position after arriving)

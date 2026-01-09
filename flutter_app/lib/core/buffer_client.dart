@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'rosbridge_client.dart';
+import 'heartbeat.dart';
 
 /// Command to send to the relay buffer
 class BufferCommand {
@@ -8,17 +9,20 @@ class BufferCommand {
   final String type;
   final Map<String, dynamic> data;
   final int? timeoutMs;
+  final ProcessingType processingType;  // Sequential or parallel execution
 
   BufferCommand({
     String? id,
     required this.type,
     this.data = const {},
     this.timeoutMs,
+    this.processingType = ProcessingType.sequential,  // Default: wait for completion
   }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'type': type,
+        'processing_type': processingType.name,  // sequential, parallel, or barrier
         ...data, // Flat format for simplicity
         if (timeoutMs != null) 'timeout_ms': timeoutMs,
       };
@@ -386,6 +390,10 @@ typedef BufferEventCallback = void Function(String event, dynamic data);
 /// Client for communicating with the relay command buffer.
 ///
 /// ALL logic lives here in Flutter. The relay is just a dumb buffer.
+///
+/// Bidirectional heartbeat:
+/// - Drummer: Sends heartbeats TO Relay (Flutter→Relay)
+/// - Messenger: Receives heartbeats FROM Relay (Relay→Flutter)
 class BufferClient extends ChangeNotifier {
   final RosbridgeClient _client;
   StreamSubscription? _messageSubscription;
@@ -399,6 +407,14 @@ class BufferClient extends ChangeNotifier {
   BufferEventCallback? onCommandStarted;
   BufferEventCallback? onCommandCompleted;
   BufferEventCallback? onHeartbeat;
+
+  // === Bidirectional Heartbeat ===
+
+  // Drummer: Sends heartbeats TO Relay
+  late final Drummer _drummer;
+
+  // Messenger: Receives heartbeats FROM Relay (replaces old rhythm tracking)
+  late final Messenger _messenger;
 
   // Rhythm-based heartbeat tracking (SINC-style correlation)
   DateTime? _lastHeartbeat;
@@ -445,8 +461,53 @@ class BufferClient extends ChangeNotifier {
   bool get isRobotDataStale => _state.robot.isDataStale;
 
   BufferClient(this._client) {
+    // Initialize Drummer: sends heartbeats TO Relay
+    _drummer = Drummer(
+      interval: const Duration(seconds: 1),
+      source: 'flutter',
+      onBeat: _sendHeartbeatToRelay,
+      payloadBuilder: _buildHeartbeatPayload,
+    );
+
+    // Initialize Messenger: receives heartbeats FROM Relay
+    _messenger = Messenger(
+      expectedSource: 'relay',
+      missedBeatsThreshold: 3,
+      onStale: _onRelayStale,
+      onRecovered: _onRelayRecovered,
+    );
+
     _setupMessageHandler();
     _setupConnectionStateHandler();
+  }
+
+  /// Send heartbeat to Relay (Drummer callback)
+  void _sendHeartbeatToRelay(HeartbeatData data) {
+    _client.send({
+      'op': 'flutter_heartbeat',
+      ...data.toJson(),
+    });
+  }
+
+  /// Build payload for outgoing heartbeat
+  Map<String, dynamic> _buildHeartbeatPayload() {
+    return {
+      'connected': _client.connectionState.value == WsConnectionState.connected,
+      'pending_count': _state.pendingCount,
+      'relay_stale': _messenger.isStale,
+    };
+  }
+
+  /// Called when Relay connection goes stale
+  void _onRelayStale() {
+    debugPrint('BufferClient: Relay connection STALE');
+    notifyListeners();
+  }
+
+  /// Called when Relay connection recovers
+  void _onRelayRecovered() {
+    debugPrint('BufferClient: Relay connection RECOVERED');
+    notifyListeners();
   }
 
   void _setupConnectionStateHandler() {
@@ -461,6 +522,16 @@ class BufferClient extends ChangeNotifier {
         _expectedInterval = const Duration(milliseconds: 500);
         _lastHeartbeat = null;
         _setupMessageHandler();
+
+        // Start bidirectional heartbeat
+        _drummer.start();
+        _messenger.start();
+        debugPrint('BufferClient: Bidirectional heartbeat started');
+      } else if (state == WsConnectionState.disconnected) {
+        // Stop heartbeat on disconnect
+        _drummer.stop();
+        _messenger.stop();
+        debugPrint('BufferClient: Bidirectional heartbeat stopped');
       }
     });
   }
@@ -494,16 +565,21 @@ class BufferClient extends ChangeNotifier {
   void _handleHeartbeat(Map<String, dynamic> json) {
     final now = DateTime.now();
 
-    // Learn the rhythm: measure interval between heartbeats
+    // Convert to HeartbeatData and feed to Messenger for SINC-style rhythm tracking
+    final heartbeatData = HeartbeatData(
+      timestamp: json['timestamp'] as int? ?? now.millisecondsSinceEpoch,
+      source: 'relay',
+      sequenceNumber: json['sequence'] as int? ?? _heartbeatCount,
+      payload: json,
+    );
+    _messenger.receiveHeartbeat(heartbeatData);
+
+    // Legacy rhythm tracking (kept for backwards compatibility with isStale getter)
     if (_lastHeartbeat != null) {
       final interval = now.difference(_lastHeartbeat!);
-      // Use exponential moving average to smooth the rhythm measurement
-      // This adapts to the actual relay heartbeat rate
       if (_heartbeatCount < 5) {
-        // First few beats: quick adaptation
         _expectedInterval = interval;
       } else {
-        // After warmup: smooth adaptation (90% old, 10% new)
         final oldMs = _expectedInterval.inMilliseconds * 0.9;
         final newMs = interval.inMilliseconds * 0.1;
         _expectedInterval = Duration(milliseconds: (oldMs + newMs).round());
@@ -704,8 +780,21 @@ class BufferClient extends ChangeNotifier {
 
   @override
   void dispose() {
+    _drummer.stop();
+    _messenger.stop();
     _messageSubscription?.cancel();
     _stateSubscription?.cancel();
     super.dispose();
   }
+
+  // === Heartbeat Accessors ===
+
+  /// Current drummer sequence number (outgoing heartbeats)
+  int get drummerSequence => _drummer.currentSequence;
+
+  /// Current messenger learned interval (incoming heartbeat rhythm)
+  Duration get messengerLearnedInterval => _messenger.learnedInterval;
+
+  /// Whether the Messenger considers connection stale (modern SINC approach)
+  bool get isMessengerStale => _messenger.isStale;
 }

@@ -1,9 +1,9 @@
 /// Abstract base classes for robot adapters
-/// Allows supporting multiple robot platforms beyond CIOT/Pudu/smAiT
+/// Allows supporting multiple robot platforms beyond CIOT/Pudu/Chassis
 ///
 /// Architecture:
 /// - RobotAdapter: Abstract interface for robot communication
-/// - CiotPuduAdapter: Implementation for CIOT/Pudu/smAiT service robots (primary)
+/// - CiotPuduAdapter: Implementation for CIOT/Pudu/Chassis service robots (primary)
 /// - Future: TurtleBotAdapter, Spot adapter, custom robot adapters
 library;
 

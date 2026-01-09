@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'smait_protocol.dart';
+import 'chassis_protocol.dart';
 
 /// Connection mode for robot communication
 enum ConnectionMode {
@@ -177,7 +177,7 @@ class DualConnectionManager extends ChangeNotifier {
       // Use HTTP for relay mode (more reliable for velocity)
       _sendRelayHttp('/velocity', {'linear': linear, 'angular': angular});
     } else {
-      send(SmaitProtocol.publishVelocity(linear, angular));
+      send(ChassisProtocol.publishVelocity(linear, angular));
     }
   }
 
@@ -202,7 +202,7 @@ class DualConnectionManager extends ChangeNotifier {
     if (_mode == ConnectionMode.relay && _relayIp.isNotEmpty) {
       _sendRelayHttp('/stop', {});
     } else {
-      send(SmaitProtocol.stopRobot());
+      send(ChassisProtocol.stopRobot());
     }
   }
 
@@ -211,7 +211,7 @@ class DualConnectionManager extends ChangeNotifier {
     if (_mode == ConnectionMode.relay && _relayIp.isNotEmpty) {
       _sendRelayHttp('/estop', {'enabled': enabled});
     } else {
-      send(SmaitProtocol.publishSoftStop(enabled));
+      send(ChassisProtocol.publishSoftStop(enabled));
     }
   }
 
@@ -220,7 +220,7 @@ class DualConnectionManager extends ChangeNotifier {
     if (_mode == ConnectionMode.relay && _relayIp.isNotEmpty) {
       _sendRelayHttp('/navigate', {'poi': poi});
     } else {
-      send(SmaitProtocol.callNavigateToPoi(poi));
+      send(ChassisProtocol.callNavigateToPoi(poi));
     }
   }
 
@@ -229,18 +229,18 @@ class DualConnectionManager extends ChangeNotifier {
     if (_mode == ConnectionMode.relay && _relayIp.isNotEmpty) {
       _sendRelayHttp('/cancel', {});
     } else {
-      send(SmaitProtocol.publishCancelGoal());
+      send(ChassisProtocol.publishCancelGoal());
     }
   }
 
   /// Set speed mode
   void setSpeedMode(int mode) {
-    send(SmaitProtocol.callSetSpeedMode(mode));
+    send(ChassisProtocol.callSetSpeedMode(mode));
   }
 
   /// Get robot info
   void getRobotInfo() {
-    send(SmaitProtocol.callGetRobotInfo());
+    send(ChassisProtocol.callGetRobotInfo());
   }
 
   /// Send HTTP request to relay
@@ -310,16 +310,16 @@ class DualConnectionManager extends ChangeNotifier {
 
   Future<void> _setupSubscriptions() async {
     // Advertise for publishing
-    send(SmaitProtocol.advertiseVelocity());
-    send(SmaitProtocol.advertiseCancelGoal());
-    send(SmaitProtocol.advertiseSoftStop());
+    send(ChassisProtocol.advertiseVelocity());
+    send(ChassisProtocol.advertiseCancelGoal());
+    send(ChassisProtocol.advertiseSoftStop());
 
     await Future.delayed(const Duration(milliseconds: 200));
 
     // Subscribe to status topics
-    send(SmaitProtocol.subscribeRobotStatus());
-    send(SmaitProtocol.subscribeRobotPose());
-    send(SmaitProtocol.subscribeNaviStatus());
+    send(ChassisProtocol.subscribeRobotStatus());
+    send(ChassisProtocol.subscribeRobotPose());
+    send(ChassisProtocol.subscribeNaviStatus());
   }
 
   void _parseStatusUpdate(Map<String, dynamic> msg) {

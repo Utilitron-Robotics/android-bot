@@ -4,14 +4,14 @@ This document lists all instances of hardcoded time values (delays, waits, timeo
 
 ## Android App (`relay_app` and `app`)
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/cloud/AwsIotClient.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/cloud/AwsIotClient.kt`
 - L163: `delay(5000)` - 5-second delay for reporting.
 - L208: `delay(2000)` - 2-second delay for polling.
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/service/CloudTtsService.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/service/CloudTtsService.kt`
 - L276: `delay(500)` - 0.5-second delay for rate limiting.
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/service/CommandBuffer.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/service/CommandBuffer.kt`
 - L192: `delay(2000)` - 2-second delay.
 - L225: `delay(1000)` - 1-second delay.
 - L277: `delay(100)` - 0.1-second delay.
@@ -27,19 +27,19 @@ This document lists all instances of hardcoded time values (delays, waits, timeo
 - L605: `delay(500)` - 0.5-second delay for sound to play.
 - L626: `delay(500)` - 0.5-second delay.
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/service/RelayServer.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/service/RelayServer.kt`
 - L141: `delay(1000)` - 1-second delay.
 - L167: `delay(10_000)` - 10-second delay.
 - L209: `delay(100)` - 0.1-second delay with comment "Reduced from 500ms for faster recovery".
 - `PING_INTERVAL_MS` is a constant, but used in `delay()`.
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/service/RobotWebSocketClient.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/service/RobotWebSocketClient.kt`
 - L35: `RECONNECT_DELAY_MS = 1000L` - constant for 1-second reconnect delay.
 - L95: `delay(500)` - 0.5-second delay.
 - L239: `delay(300)` - 0.3-second delay.
 - L247: `delay(2000)` - 2-second delay.
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/service/RelayService.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/service/RelayService.kt`
 - L204: `delay(30_000)` - 30-second delay.
 - L879: `delay(100)` - 0.1-second delay.
 - L881: `delay(100)` - 0.1-second delay.
@@ -50,10 +50,10 @@ This document lists all instances of hardcoded time values (delays, waits, timeo
 - L909: `delay(30)` - 30ms delay.
 - L979: `Thread.sleep(durationMs.toLong() + 50)` - blocking sleep with 50ms added.
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/ui/MainActivity.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/ui/MainActivity.kt`
 - L555: `delay(100)` - 0.1-second delay.
 
-### `relay_app/app/src/main/java/com/smait/robotrelay/grpc/GrpcServer.kt`
+### `relay_app/app/src/main/java/com/chassis/robotrelay/grpc/GrpcServer.kt`
 - L92: `delay(30_000)` - 30-second delay.
 - L29: `KEEPALIVE_TIMEOUT_MS = 5_000L` - 5-second timeout.
 
@@ -63,7 +63,7 @@ This document lists all instances of hardcoded time values (delays, waits, timeo
 - L40: `delay(3000)` - 3-second delay.
 - L46: `delay(2000)` - 2-second delay.
 
-### `app/src/prod/java/com/opendroids/tourbot/robot/PuduRobot.kt`
+### `app/src/prod/java/com/opendroids/tourbot/robot/RobotRobot.kt`
 - L51: `delay(5000)` - 5-second delay.
 
 ## Flutter App (`flutter_app`)

@@ -144,7 +144,7 @@ Over cellular/WAN, this matters A LOT.
                               └─────────┬──────────┘
                                         │
                               ┌─────────┴──────────┐
-                              │   Pudu/smAiT Robot │
+                              │   Robot/chassis Robot │
                               │   Base Controller  │
                               └────────────────────┘
 ```
@@ -330,8 +330,8 @@ message Status {
 #### Android (relay_app):
 1. `app/build.gradle` - Add gRPC dependencies
 2. `app/src/main/proto/robot_control.proto` - Define messages
-3. `app/src/main/java/com/smait/robotrelay/grpc/RobotControlService.kt` - NEW
-4. `app/src/main/java/com/smait/robotrelay/service/RelayService.kt` - Replace WebSocket server with gRPC
+3. `app/src/main/java/com/chassis/robotrelay/grpc/RobotControlService.kt` - NEW
+4. `app/src/main/java/com/chassis/robotrelay/service/RelayService.kt` - Replace WebSocket server with gRPC
 5. **DELETE:** `RelayServer.kt` (no longer needed)
 
 #### Flutter (flutter_app):

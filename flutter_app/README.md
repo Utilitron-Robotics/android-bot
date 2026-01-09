@@ -35,7 +35,7 @@ flutter run
 ## Target Robots
 
 Designed for rosbridge-compatible robots, particularly:
-- Pudu restaurant/delivery robots
+- Robot restaurant/delivery robots
 - Any robot with rosbridge_server running
 
 ## Protocol

@@ -11,7 +11,7 @@ This checklist is based on the `IMPLEMENTATION_PLAN.md` file, with tasks re-orde
     -   [ ] Define `Robot` interface in `app/src/main/java/com/opendroids/tourbot/robot/Robot.kt`.
 -   [ ] **Implement `Robot` Interface**
     -   [ ] Create `FakeRobot` class in `src/fake/java` and implement `Robot`.
-    -   [ ] Create `PuduRobot` class in `src/prod/java` and implement `Robot`.
+    -   [ ] Create `RobotRobot` class in `src/prod/java` and implement `Robot`.
 -   [ ] **Hilt Module for `Robot`**
     -   [ ] Create a Hilt module to provide the correct `Robot` implementation based on the build flavor.
 -   [ ] **ViewModel Refactoring**

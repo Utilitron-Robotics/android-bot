@@ -1,7 +1,7 @@
 # Android-Bot Project Documentation
 
 ## Project Overview
-Cross-platform robot control system for Pudu/smAiT food service robots using the smAiT Upper Computer Communication Protocol. Consists of:
+Cross-platform robot control system for Robot/chassis food service robots using the chassis Upper Computer Communication Protocol. Consists of:
 1. **Flutter App** - Primary cross-platform controller (macOS/iOS/Android/Web)
 2. **Relay App** - Android tablet bridge for remote control via house WiFi
 
@@ -27,7 +27,7 @@ Cross-platform robot control system for Pudu/smAiT food service robots using the
                               └──────────┬──────────┘
                                          │
                               ┌──────────┴──────────┐
-                              │   Pudu/smAiT Robot  │
+                              │   Robot/chassis Robot  │
                               │   Base Controller   │
                               └─────────────────────┘
 ```
@@ -44,11 +44,11 @@ Cross-platform robot control system for Pudu/smAiT food service robots using the
 ### WiFi Credentials
 | Robot | SSID | Password | Direct IP |
 |-------|------|----------|-----------|
-| Pudu Bot 1 | TY126AA003F0-005878 | 123456789 | 10.42.0.1:9090 |
-| Pudu Bot 2 | TY126AA003F0-005993 | 123456789 | 10.42.0.1:9090 |
+| Robot Bot 1 | MobileBase003F0-005878 | 123456789 | 10.42.0.1:9090 |
+| Robot Bot 2 | MobileBase003F0-005993 | 123456789 | 10.42.0.1:9090 |
 
-### smAiT Protocol Reference
-Based on "smAiT Upper Computer Communication Protocol" - JSON over WebSocket (rosbridge-like).
+### chassis Protocol Reference
+Based on "chassis Upper Computer Communication Protocol" - JSON over WebSocket (rosbridge-like).
 
 **Key Topics:**
 | Topic | Type | Description |
@@ -204,7 +204,7 @@ The tablet UI has multiple overlays:
 
 ### Key Files
 ```
-relay_app/app/src/main/java/com/smait/robotrelay/
+relay_app/app/src/main/java/com/chassis/robotrelay/
 ├── ui/
 │   └── MainActivity.kt          # UI with joystick, tour mode, lock screen
 ├── service/
@@ -213,7 +213,7 @@ relay_app/app/src/main/java/com/smait/robotrelay/
 │   ├── CommandBuffer.kt         # Sequence command execution
 │   └── RobotWebSocketClient.kt  # Connection to robot base
 ├── protocol/
-│   └── SmaitProtocol.kt         # Protocol message builders
+│   └── ChassisProtocol.kt         # Protocol message builders
 └── cloud/
     ├── AwsIotClient.kt          # Future: AWS IoT integration
     └── FleetManager.kt          # Future: Fleet management

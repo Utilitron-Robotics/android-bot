@@ -175,7 +175,7 @@ class RobotIntrospection {
 
   Future<List<String>> _discoverWaypoints() async {
     try {
-      // smAiT protocol: call /poi with empty string to get available waypoints
+      // Chassis protocol: call /poi with empty string to get available waypoints
       final result = await client.callService(
         service: '/poi',
         args: {'poi': ''},

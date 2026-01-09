@@ -7,7 +7,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/robot_connection.dart';
 import '../core/sequence_mode.dart'
     show SequenceManager, SequenceStatus, SequencePhase, Sequence;
-import '../core/smait_protocol.dart' as protocol;
+import '../core/chassis_protocol.dart' as protocol;
 import '../core/task_engine.dart';
 import '../utils/file_utils.dart';
 import '../services/audio_announcer.dart';
@@ -1835,9 +1835,9 @@ class _HudScreenState extends State<HudScreen>
               debugPrint(
                   'HUD: E-STOP pressed, current=${robot.status.softEstop}');
               // Advertise first, then publish
-              robot.client.send(protocol.SmaitProtocol.advertiseSoftStop());
+              robot.client.send(protocol.ChassisProtocol.advertiseSoftStop());
               Future.delayed(const Duration(milliseconds: 100), () {
-                robot.client.send(protocol.SmaitProtocol.publishSoftStop(
+                robot.client.send(protocol.ChassisProtocol.publishSoftStop(
                     !robot.status.softEstop));
               });
             },
