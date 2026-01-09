@@ -20,7 +20,6 @@ import '../widgets/fleet_picker.dart';
 import '../widgets/crowd_logic_settings.dart';
 import '../widgets/announcement_presets.dart';
 import '../widgets/mode_editor.dart';
-import '../widgets/start_tour_overlay.dart';
 
 /// Connection mode options for HUD
 enum ConnectionMode {
@@ -561,19 +560,8 @@ class _HudScreenState extends State<HudScreen>
                   child: _buildLargeCountdownTimer(tourManager),
                 ),
 
-              // === LAYER 5: Await Visitor Overlay (fullscreen, topmost) ===
-              // Shows START TOUR button when waiting for visitor at start location
-              if (tourRunning && currentPhase == SequencePhase.awaitingVisitor)
-                Positioned.fill(
-                  child: StartTourOverlay(
-                    buttonText: tourManager.currentSequence?.effectiveAwaitButtonText ?? 'START TOUR',
-                    displayUrl: tourManager.currentSequence?.effectiveAwaitDisplayUrl,
-                    onStart: () {
-                      debugPrint('HUD: START TOUR button pressed!');
-                      tourManager.resumeFromVisitor();
-                    },
-                  ),
-                ),
+              // LAYER 5: Await Visitor overlay now shows on TABLET (not Flutter)
+              // Visitor taps START TOUR on tablet, or operator presses FORWARD
             ],
           );
         },
@@ -1702,47 +1690,9 @@ class _HudScreenState extends State<HudScreen>
 
   Widget _buildSequenceContent(
       List<String> waypoints, SequenceManager tourManager) {
-    final currentSequence = tourManager.currentSequence;
-    final hasStartWaypoint = currentSequence?.startWaypoint != null &&
-        currentSequence!.startWaypoint!.isNotEmpty;
-
     return Column(
       children: [
-        // Add START TOUR button at the top if there's a startWaypoint
-        if (hasStartWaypoint &&
-            tourManager.status != SequenceStatus.running) ...[
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.rocket_launch, size: 24),
-              label: Text(
-                'START TOUR FROM ${currentSequence.startWaypoint!.toUpperCase()}',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(50),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              onPressed: () {
-                debugPrint(
-                    'START TOUR pressed - setting up await visitor at ${currentSequence.startWaypoint}');
-                // Enable await visitor to show START TOUR button overlay
-                final awaitSequence = currentSequence.copyWith(
-                  awaitVisitorAtStart: true,
-                );
-                SequenceManager.instance.startSequence(awaitSequence);
-                // This will navigate to startWaypoint, then show START TOUR overlay
-                // When visitor taps button -> intro text -> Tour begins!
-              },
-            ),
-          ),
-        ],
-        // The existing sequence editor
+        // The sequence editor
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(8),
