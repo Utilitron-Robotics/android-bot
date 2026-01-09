@@ -355,7 +355,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Special handling: button_standby completed (visitor pressed START TOUR on tablet)
     // Now load the remaining tour commands
     if (result.isSuccess && result.commandId.contains('button_standby')) {
-      debugPrint('BufferSequenceExecutor: Tablet START TOUR pressed! Loading tour commands...');
+      debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
+      debugPrint('BufferSequenceExecutor: BUTTON_STANDBY COMPLETED');
+      debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
+      debugPrint('BufferSequenceExecutor: Visitor pressed START TOUR!');
+      debugPrint('BufferSequenceExecutor: commandId=${result.commandId}');
+      debugPrint('BufferSequenceExecutor: result=${result.result}');
+      debugPrint('BufferSequenceExecutor: Calling resumeFromVisitor()...');
       // Note: resumeFromVisitor() handles setting _awaitingVisitorAtStart = false
       // and _currentPhase = navigating internally
       resumeFromVisitor();
@@ -502,8 +508,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
       return;
     }
 
-    debugPrint('BufferSequenceExecutor: Starting sequence "${sequence.name}"');
-    debugPrint('BufferSequenceExecutor: awaitVisitorAtStart=${sequence.awaitVisitorAtStart}, startWaypoint=${sequence.startWaypoint}');
+    debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
+    debugPrint('BufferSequenceExecutor: START SEQUENCE "${sequence.name}"');
+    debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
+    debugPrint('BufferSequenceExecutor: awaitVisitorAtStart=${sequence.awaitVisitorAtStart}');
+    debugPrint('BufferSequenceExecutor: startWaypoint=${sequence.startWaypoint}');
+    debugPrint('BufferSequenceExecutor: stops=${sequence.stops.length}');
+    debugPrint('BufferSequenceExecutor: introText=${sequence.introText?.isNotEmpty == true ? "YES" : "NO"}');
 
     _currentSequence = sequence;
     _currentStopIndex = -1;
@@ -523,15 +534,25 @@ class BufferSequenceExecutor extends ChangeNotifier {
     if (sequence.awaitVisitorAtStart &&
         sequence.startWaypoint != null &&
         sequence.startWaypoint!.isNotEmpty) {
-      debugPrint('BufferSequenceExecutor: Await visitor mode - navigating to start first');
+      debugPrint('BufferSequenceExecutor: 🚦 AWAIT VISITOR PATH');
+      debugPrint('BufferSequenceExecutor: Phase 1 - navigating to start waypoint: ${sequence.startWaypoint}');
 
       // Phase 1: Just navigate to start waypoint
       final navCommand = BufferCommand.navigate(sequence.startWaypoint!);
       _totalCommandCount = 1; // Just the nav for now
 
-      final loaded = await _bufferClient.loadCommands([navCommand], clearExisting: true);
-      if (!loaded) {
-        debugPrint('BufferSequenceExecutor: ✗ Failed to load nav command - aborting');
+      try {
+        final loaded = await _bufferClient.loadCommands([navCommand], clearExisting: true);
+        if (!loaded) {
+          debugPrint('BufferSequenceExecutor: ✗ FAILED to load nav command - aborting');
+          _status = SequenceExecutorStatus.idle;
+          _currentSequence = null;
+          notifyListeners();
+          return;
+        }
+      } catch (e, stack) {
+        debugPrint('BufferSequenceExecutor: ✗ EXCEPTION loading nav command: $e');
+        debugPrint('BufferSequenceExecutor: Stack: $stack');
         _status = SequenceExecutorStatus.idle;
         _currentSequence = null;
         notifyListeners();
@@ -540,39 +561,66 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
       // Will enter awaitingVisitor phase when nav completes (in _onCommandCompleted)
       _awaitingVisitorAtStart = true;
-      debugPrint('BufferSequenceExecutor: ✓ Nav to start loaded, will await visitor on arrival');
+      debugPrint('BufferSequenceExecutor: ✓ Nav to start loaded');
+      debugPrint('BufferSequenceExecutor: ✓ _awaitingVisitorAtStart = true');
+      debugPrint('BufferSequenceExecutor: ✓ Waiting for nav completion to show START TOUR button');
       notifyListeners();
       return;
     }
 
     // Normal start - load all commands at once
+    debugPrint('BufferSequenceExecutor: 🚀 NORMAL START PATH (no await visitor)');
     final commands = _buildSequenceCommands(sequence);
     _totalCommandCount = commands.length;
-    debugPrint(
-        'BufferSequenceExecutor: Loading $_totalCommandCount commands into buffer');
+    debugPrint('BufferSequenceExecutor: Built $_totalCommandCount commands');
+
+    // Log first few commands for debugging
+    for (var i = 0; i < commands.length && i < 5; i++) {
+      debugPrint('BufferSequenceExecutor:   [$i] ${commands[i].type}: ${commands[i].data}');
+    }
+    if (commands.length > 5) {
+      debugPrint('BufferSequenceExecutor:   ... and ${commands.length - 5} more');
+    }
 
     // Load all commands into the relay buffer and WAIT for confirmation
-    final loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
-    if (!loaded) {
-      debugPrint('BufferSequenceExecutor: ✗ Failed to confirm command load - aborting');
+    try {
+      final loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
+      if (!loaded) {
+        debugPrint('BufferSequenceExecutor: ✗ FAILED to confirm command load - aborting');
+        _status = SequenceExecutorStatus.idle;
+        _currentSequence = null;
+        notifyListeners();
+        return;
+      }
+    } catch (e, stack) {
+      debugPrint('BufferSequenceExecutor: ✗ EXCEPTION loading commands: $e');
+      debugPrint('BufferSequenceExecutor: Stack: $stack');
       _status = SequenceExecutorStatus.idle;
       _currentSequence = null;
       notifyListeners();
       return;
     }
 
-    debugPrint('BufferSequenceExecutor: ✓ All commands confirmed - starting sequence');
+    debugPrint('BufferSequenceExecutor: ✓ All commands confirmed - sequence running!');
     notifyListeners();
   }
 
   /// Resume from visitor wait - called when START TOUR button is pressed
   Future<void> resumeFromVisitor() async {
+    debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
+    debugPrint('BufferSequenceExecutor: RESUME FROM VISITOR');
+    debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
+    debugPrint('BufferSequenceExecutor: _awaitingVisitorAtStart=$_awaitingVisitorAtStart');
+    debugPrint('BufferSequenceExecutor: _currentSequence=${_currentSequence?.name}');
+
     if (!_awaitingVisitorAtStart || _currentSequence == null) {
-      debugPrint('BufferSequenceExecutor: resumeFromVisitor called but not awaiting');
+      debugPrint('BufferSequenceExecutor: ✗ NOT awaiting visitor - ignoring');
+      debugPrint('BufferSequenceExecutor:   _awaitingVisitorAtStart=$_awaitingVisitorAtStart');
+      debugPrint('BufferSequenceExecutor:   _currentSequence=${_currentSequence?.name ?? "NULL"}');
       return;
     }
 
-    debugPrint('BufferSequenceExecutor: Visitor triggered! Loading tour commands...');
+    debugPrint('BufferSequenceExecutor: ✓ Visitor triggered! Loading tour commands...');
     _awaitingVisitorAtStart = false;
     _currentPhase = SequencePhase.navigating;
 
@@ -581,15 +629,30 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _totalCommandCount = commands.length;
     _completedCommandCount = 0;
 
-    final loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
-    if (!loaded) {
-      debugPrint('BufferSequenceExecutor: ✗ Failed to load tour commands');
+    debugPrint('BufferSequenceExecutor: Built $_totalCommandCount commands (skipNavToStart=true)');
+
+    // Log first few commands
+    for (var i = 0; i < commands.length && i < 5; i++) {
+      debugPrint('BufferSequenceExecutor:   [$i] ${commands[i].type}: ${commands[i].data}');
+    }
+
+    try {
+      final loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
+      if (!loaded) {
+        debugPrint('BufferSequenceExecutor: ✗ FAILED to load tour commands');
+        _status = SequenceExecutorStatus.failed;
+        notifyListeners();
+        return;
+      }
+    } catch (e, stack) {
+      debugPrint('BufferSequenceExecutor: ✗ EXCEPTION loading tour commands: $e');
+      debugPrint('BufferSequenceExecutor: Stack: $stack');
       _status = SequenceExecutorStatus.failed;
       notifyListeners();
       return;
     }
 
-    debugPrint('BufferSequenceExecutor: ✓ Tour commands loaded, starting!');
+    debugPrint('BufferSequenceExecutor: ✓ Tour commands loaded - tour starting!');
     notifyListeners();
   }
 

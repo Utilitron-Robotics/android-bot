@@ -828,6 +828,17 @@ class SequenceManager extends ChangeNotifier {
                 'SequenceManager: Added new tour from cloud: ${cloudSeq.name}');
           } else if (cloudSeq.modifiedAt > localSeq.modifiedAt) {
             // Cloud is newer - use cloud version
+            // LOG IMPORTANT FIELDS TO DETECT DATA LOSS
+            debugPrint('SequenceManager: ⚠️ CLOUD OVERWRITE "${cloudSeq.name}"');
+            debugPrint('SequenceManager:   cloud.modifiedAt=${cloudSeq.modifiedAt}');
+            debugPrint('SequenceManager:   local.modifiedAt=${localSeq.modifiedAt}');
+            debugPrint('SequenceManager:   cloud.awaitVisitorAtStart=${cloudSeq.awaitVisitorAtStart}');
+            debugPrint('SequenceManager:   local.awaitVisitorAtStart=${localSeq.awaitVisitorAtStart}');
+            debugPrint('SequenceManager:   cloud.startWaypoint=${cloudSeq.startWaypoint}');
+            debugPrint('SequenceManager:   local.startWaypoint=${localSeq.startWaypoint}');
+            if (localSeq.awaitVisitorAtStart && !cloudSeq.awaitVisitorAtStart) {
+              debugPrint('SequenceManager: ❌ WARNING: awaitVisitorAtStart being RESET from true to false!');
+            }
             _sequences[cloudSeq.id] = cloudSeq;
             merged++;
             debugPrint(
