@@ -142,6 +142,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
             }
           }
           break;
+        case 'button_standby':
+        case 'motion_standby':
+          // Standby modes - just keep phase as awaiting visitor, no spam
+          _currentPhase = SequencePhase.awaitingVisitor;
+          _countdownSeconds = 0;
+          break;
         default:
           debugPrint(
               'BufferSequenceExecutor: Unknown command type: ${state.current!.type}');
