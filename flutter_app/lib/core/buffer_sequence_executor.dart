@@ -347,12 +347,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     // Special handling: button_standby completed (visitor pressed START TOUR on tablet)
-    // Relay continues with remaining commands autonomously - Flutter just tracks phase
+    // Now load the remaining tour commands
     if (result.isSuccess && result.commandId.contains('button_standby')) {
-      debugPrint('BufferSequenceExecutor: Tablet START TOUR pressed! Tour continuing...');
-      _awaitingVisitorAtStart = false;
-      _currentPhase = SequencePhase.navigating;
-      notifyListeners();
+      debugPrint('BufferSequenceExecutor: Tablet START TOUR pressed! Loading tour commands...');
+      // Note: resumeFromVisitor() handles setting _awaitingVisitorAtStart = false
+      // and _currentPhase = navigating internally
+      resumeFromVisitor();
       return;
     }
 
@@ -369,6 +369,29 @@ class BufferSequenceExecutor extends ChangeNotifier {
     // Check for sequence completion
     if (result.isSuccess || result.result == 'cancelled') {
       _navRetryCount = 0; // Reset retry count on success/cancel
+
+      // Special handling: nav to start completed while awaiting visitor
+      // Now send button_standby to show START TOUR overlay on tablet
+      if (_awaitingVisitorAtStart &&
+          _currentPhase == SequencePhase.navigating &&
+          _currentSequence != null) {
+        debugPrint('BufferSequenceExecutor: Arrived at start! Sending button_standby for visitor overlay...');
+        _currentPhase = SequencePhase.awaitingVisitor;
+
+        // Send button_standby command - relay will show START TOUR button
+        final buttonCmd = BufferCommand.buttonStandby(
+          sequenceId: _currentSequence!.id,
+          buttonText: _currentSequence!.effectiveAwaitButtonText,
+          displayUrl: _currentSequence!.effectiveAwaitDisplayUrl,
+        );
+        _totalCommandCount = 2; // nav + button_standby
+        _bufferClient.loadCommands([buttonCmd], clearExisting: false);
+
+        debugPrint('BufferSequenceExecutor: ✓ button_standby sent - waiting for visitor to press START TOUR');
+        notifyListeners();
+        return; // Don't check completion - wait for button press
+      }
+
       // Check completion immediately - we track command count locally, no need to wait for heartbeat
       _checkSequenceCompletion();
     }
