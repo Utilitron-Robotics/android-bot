@@ -506,8 +506,17 @@ class BufferSequenceExecutor extends ChangeNotifier {
     debugPrint(
         'BufferSequenceExecutor: Loading $_totalCommandCount commands into buffer');
 
-    // Load all commands into the relay buffer
-    _bufferClient.loadCommands(commands, clearExisting: true);
+    // Load all commands into the relay buffer and WAIT for confirmation
+    final loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
+    if (!loaded) {
+      debugPrint('BufferSequenceExecutor: ✗ Failed to confirm command load - aborting');
+      _status = SequenceExecutorStatus.idle;
+      _callback.onSequenceError(sequence, 'Failed to load commands into relay buffer');
+      notifyListeners();
+      return;
+    }
+
+    debugPrint('BufferSequenceExecutor: ✓ All commands confirmed - starting sequence mode');
 
     // Start sequence mode on tablet - locks screen for customer-facing display
     _bufferClient.startSequenceMode();
