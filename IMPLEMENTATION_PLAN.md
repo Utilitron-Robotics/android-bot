@@ -14,7 +14,7 @@ This phase focuses on strengthening the app's architecture, making it easier to 
         *   `fake`: For a simulated robot, where all actions are logged and return success immediately. This will be the default for debugging and UI testing.
     *   Create `src/fake/java` and `src/prod/java` source sets.
     *   Move the `FakeTourRepository` logic into a new `FakeRobot` class in the `fake` source set.
-    *   Move the `RealTourRepository` logic into a `PuduRobot` class in the `prod` source set.
+    *   Move the `RealTourRepository` logic into a `RobotRobot` class in the `prod` source set.
 
 2.  **Create `Robot` Interface:**
     *   Define a `Robot` interface in the `main` source set (`app/src/main/java/com/opendroids/tourbot/robot/Robot.kt`).
@@ -27,7 +27,7 @@ This phase focuses on strengthening the app's architecture, making it easier to 
         *   `fun pause()`
         *   `fun resume()`
         *   `fun getWaypoints(): Flow<List<Waypoint>>`
-    *   The `PuduRobot` and `FakeRobot` classes will implement this interface.
+    *   The `RobotRobot` and `FakeRobot` classes will implement this interface.
     *   A Hilt module will provide the correct `Robot` implementation based on the build flavor.
 
 3.  **ViewModel Refactoring:**
@@ -76,7 +76,7 @@ This phase focuses on removing old, now-redundant code.
     *   Remove the `setTestMode` function.
 
 3.  **Consolidate Repositories:**
-    *   The `RealTourRepository` and `FakeTourRepository` will be fully replaced by the `PuduRobot` and `FakeRobot` classes. The old repository files will be deleted.
+    *   The `RealTourRepository` and `FakeTourRepository` will be fully replaced by the `RobotRobot` and `FakeRobot` classes. The old repository files will be deleted.
     *   The `TourRepository` interface may be absorbed into the new `Robot` interface, or it may be kept as a higher-level abstraction if needed. This will be decided during implementation.
 
 ---

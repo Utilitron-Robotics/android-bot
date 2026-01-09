@@ -1,8 +1,8 @@
-# Pudu/smAiT Robot Communication Protocol
+# Robot/chassis Robot Communication Protocol
 ## WebSocket JSON Protocol - Field-Tested Implementation
 
 **Last Updated:** January 2026
-**Based On:** Pudu TY126AA robots running smAiT firmware
+**Based On:** Robot MobileBase robots running chassis firmware
 **Protocol:** WebSocket (`ws://10.42.0.1:9090`) with JSON messages
 
 This document describes the **actual working protocol** as implemented and tested in our Frontier Tower deployment. Unlike the vendor manual, this reflects real-world behavior, including undocumented quirks and field-tested solutions.
@@ -758,8 +758,8 @@ PNG encoding:
   "service": "/robot_info",
   "result": true,
   "values": {
-    "robot_id": "TY126AA003F0-005878",
-    "robot_type": "PUDU",
+    "robot_id": "MobileBase003F0-005878",
+    "robot_type": "MOBILE_BASE",
     "software_version": "4.1.0-alpha",
     "firmware_version": "1.0.2",
     "hardware_version": "2.0.0"
@@ -1196,7 +1196,7 @@ ws.onopen = () => ws.send(JSON.stringify({
 
 **2026-01-07**
 - Document created from field deployment experience
-- Based on Pudu TY126AA robots, smAiT firmware 4.1.0-alpha
+- Based on Robot MobileBase robots, chassis firmware 4.1.0-alpha
 - Tested at Frontier Tower (Spaceship floor, Mezzanine floor)
 - Includes undocumented behaviors: velocity timeout, typo in POI list, dual nav status sources
 
@@ -1204,5 +1204,5 @@ ws.onopen = () => ws.send(JSON.stringify({
 
 **For Implementation Examples:**
 - See `flutter_app/lib/core/rosbridge_client.dart` - WebSocket client
-- See `flutter_app/lib/core/smait_protocol.dart` - Message builders
-- See `relay_app/.../SmaitProtocol.kt` - Kotlin implementation
+- See `flutter_app/lib/core/chassis_protocol.dart` - Message builders
+- See `relay_app/.../ChassisProtocol.kt` - Kotlin implementation

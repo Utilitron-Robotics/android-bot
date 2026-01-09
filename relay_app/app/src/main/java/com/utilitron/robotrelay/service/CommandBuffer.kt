@@ -1,4 +1,4 @@
-package com.smait.robotrelay.service
+package com.utilitron.robotrelay.service
 
 import android.util.Log
 import com.google.gson.Gson

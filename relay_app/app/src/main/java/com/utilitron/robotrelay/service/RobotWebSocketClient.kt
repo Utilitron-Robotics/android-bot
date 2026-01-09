@@ -1,7 +1,7 @@
-package com.smait.robotrelay.service
+package com.utilitron.robotrelay.service
 
 import android.util.Log
-import com.smait.robotrelay.protocol.SmaitProtocol
+import com.utilitron.robotrelay.protocol.ChassisProtocol
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -177,19 +177,19 @@ class RobotWebSocketClient(
     }
 
     private fun setupSubscriptions() {
-        send(SmaitProtocol.advertiseVelocity())
-        send(SmaitProtocol.advertiseCancelGoal())
-        send(SmaitProtocol.advertiseSoftStop())
-        send(SmaitProtocol.subscribeRobotStatus())
-        send(SmaitProtocol.subscribeRobotPose())
-        send(SmaitProtocol.subscribeNaviStatus())
-        send(SmaitProtocol.subscribeSensorsCore())
-        send(SmaitProtocol.subscribeLaserData())
-        send(SmaitProtocol.subscribeGlobalPath())  // For obstacle path intersection
-        send(SmaitProtocol.subscribePeopleDetected())  // For human motion detection
+        send(ChassisProtocol.advertiseVelocity())
+        send(ChassisProtocol.advertiseCancelGoal())
+        send(ChassisProtocol.advertiseSoftStop())
+        send(ChassisProtocol.subscribeRobotStatus())
+        send(ChassisProtocol.subscribeRobotPose())
+        send(ChassisProtocol.subscribeNaviStatus())
+        send(ChassisProtocol.subscribeSensorsCore())
+        send(ChassisProtocol.subscribeLaserData())
+        send(ChassisProtocol.subscribeGlobalPath())  // For obstacle path intersection
+        send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection
         // Subscribe to /map so it's always flowing to Flutter clients
         // This ensures map works after Flutter hot restart
-        val mapSubMsg = SmaitProtocol.subscribeMapSimple()
+        val mapSubMsg = ChassisProtocol.subscribeMapSimple()
         val mapSent = send(mapSubMsg)
         Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
         Log.i(TAG, ">>> /map subscription sent: $mapSent")
@@ -242,7 +242,7 @@ class RobotWebSocketClient(
             Log.i(TAG, ">>> MAP REFRESH: Starting aggressive refresh sequence")
 
             // Step 1: Unsubscribe first to clear any stale state
-            val unsubMsg = SmaitProtocol.unsubscribe(SmaitProtocol.TOPIC_MAP, "get_map_simple")
+            val unsubMsg = ChassisProtocol.unsubscribe(ChassisProtocol.TOPIC_MAP, "get_map_simple")
             send(unsubMsg)
             Log.i(TAG, ">>> MAP REFRESH: Sent unsubscribe")
 
@@ -250,7 +250,7 @@ class RobotWebSocketClient(
             delay(300)
 
             // Step 2: Subscribe again
-            val subMsg = SmaitProtocol.subscribeMapSimple()
+            val subMsg = ChassisProtocol.subscribeMapSimple()
             val sent = send(subMsg)
             Log.i(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
 
@@ -276,7 +276,7 @@ class RobotWebSocketClient(
             _lastRobotDataTime = System.currentTimeMillis()
 
             when (topic) {
-                SmaitProtocol.TOPIC_ROBOT_STATUS -> {
+                ChassisProtocol.TOPIC_ROBOT_STATUS -> {
                     val velocity = msg.get("velocity")?.asJsonArray?.map { it.asDouble } ?: current.velocity
                     _robotStatus.value = current.copy(
                         battery = msg.get("battery")?.asInt ?: current.battery,
@@ -295,7 +295,7 @@ class RobotWebSocketClient(
                         obstacleClassifier?.updateRobotVelocity(velocity[0], velocity[1])
                     }
                 }
-                SmaitProtocol.TOPIC_ROBOT_POSE -> {
+                ChassisProtocol.TOPIC_ROBOT_POSE -> {
                     val x = msg.get("x")?.asDouble ?: current.x
                     val y = msg.get("y")?.asDouble ?: current.y
                     val theta = msg.get("theta")?.asDouble ?: current.theta
@@ -303,12 +303,12 @@ class RobotWebSocketClient(
                     // Feed to obstacle classifier
                     obstacleClassifier?.updateRobotPose(x, y, theta)
                 }
-                SmaitProtocol.TOPIC_SENSORS_CORE -> {
+                ChassisProtocol.TOPIC_SENSORS_CORE -> {
                     val bumper = msg.get("bumper")?.asInt ?: 0
                     val cliff = msg.get("cliff")?.asInt ?: 0
 
                     // Parse ultrasonic sensor data (analog_input array)
-                    // Per smAiT protocol: only analog_input[1] is valid (central ultrasonic sensor)
+                    // Per Chassis protocol: only analog_input[1] is valid (central ultrasonic sensor)
                     val analogInput = msg.get("analog_input")?.asJsonArray
                     val ultrasonicMm = if (analogInput != null && analogInput.size() >= 2) {
                         analogInput.get(1).asInt  // Central ultrasonic in millimeters
@@ -351,7 +351,7 @@ class RobotWebSocketClient(
                     )
                     // TODO: Add ultrasonic distance to RobotStatusData for motion detection
                 }
-                SmaitProtocol.TOPIC_LASER_DATA -> {
+                ChassisProtocol.TOPIC_LASER_DATA -> {
                     // Try px/py format first (coordinate arrays)
                     val px = msg.get("px")?.asJsonArray?.map { it.asDouble }
                     val py = msg.get("py")?.asJsonArray?.map { it.asDouble }
@@ -373,7 +373,7 @@ class RobotWebSocketClient(
                         checkLaserData(points)
                     }
                 }
-                SmaitProtocol.TOPIC_GLOBAL_PATH -> {
+                ChassisProtocol.TOPIC_GLOBAL_PATH -> {
                     // Navigation path for obstacle-in-path detection
                     val px = msg.get("px")?.asJsonArray?.map { it.asDouble }
                     val py = msg.get("py")?.asJsonArray?.map { it.asDouble }
@@ -382,7 +382,7 @@ class RobotWebSocketClient(
                         obstacleClassifier?.updateGlobalPath(pathPoints)
                     }
                 }
-                SmaitProtocol.TOPIC_PEOPLE_DETECTED -> {
+                ChassisProtocol.TOPIC_PEOPLE_DETECTED -> {
                     // Robot's built-in people detection
                     val detected = msg.get("data")?.asBoolean ?: false
                     if (detected != _peopleDetected.value) {
@@ -457,23 +457,23 @@ class RobotWebSocketClient(
             }
             else -> { /* WARN or CLEAR, no adjustment needed */ }
         }
-        send(SmaitProtocol.publishVelocity(adjustedLinear, angularZ))
+        send(ChassisProtocol.publishVelocity(adjustedLinear, angularZ))
     }
 
     fun stop() {
-        send(SmaitProtocol.stopRobot())
+        send(ChassisProtocol.stopRobot())
     }
 
     fun cancelNavigation() {
-        send(SmaitProtocol.publishCancelGoal())
+        send(ChassisProtocol.publishCancelGoal())
     }
 
     fun setSoftStop(enabled: Boolean) {
-        send(SmaitProtocol.publishSoftStop(enabled))
+        send(ChassisProtocol.publishSoftStop(enabled))
     }
 
     fun navigateToPoi(poiName: String) {
-        send(SmaitProtocol.callNavigateToPoi(poiName))
+        send(ChassisProtocol.callNavigateToPoi(poiName))
     }
 
     fun setSpeedMode(mode: Int) {

@@ -1,4 +1,4 @@
-package com.smait.robotrelay.service
+package com.utilitron.robotrelay.service
 
 import android.util.Log
 import com.google.gson.Gson
@@ -13,7 +13,7 @@ import java.net.NetworkInterface
  *
  * Listens for broadcast messages on port 9999 and responds with relay info.
  * Protocol:
- *   Request:  "SMAIT_RELAY_DISCOVER" (broadcast to 255.255.255.255:9999)
+ *   Request:  "UTILITRON_RELAY_DISCOVER" (broadcast to 255.255.255.255:9999)
  *   Response: JSON with relay info (unicast back to sender)
  */
 class DiscoveryService(
@@ -23,8 +23,8 @@ class DiscoveryService(
     companion object {
         private const val TAG = "DiscoveryService"
         const val DISCOVERY_PORT = 9999
-        const val DISCOVERY_REQUEST = "SMAIT_RELAY_DISCOVER"
-        const val DISCOVERY_RESPONSE_TYPE = "SMAIT_RELAY_RESPONSE"
+        const val DISCOVERY_REQUEST = "UTILITRON_RELAY_DISCOVER"
+        const val DISCOVERY_RESPONSE_TYPE = "UTILITRON_RELAY_RESPONSE"
     }
 
     private val gson = Gson()

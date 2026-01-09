@@ -1,4 +1,4 @@
-package com.smait.robotrelay.service
+package com.utilitron.robotrelay.service
 
 import android.app.*
 import android.content.Context
@@ -15,9 +15,9 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import com.smait.robotrelay.cloud.FleetApiClient
-import com.smait.robotrelay.protocol.SmaitProtocol
-import com.smait.robotrelay.ui.MainActivity
+import com.utilitron.robotrelay.cloud.FleetApiClient
+import com.utilitron.robotrelay.protocol.ChassisProtocol
+import com.utilitron.robotrelay.ui.MainActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,11 +60,11 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         private const val ROBOT_WIRED_IP = "192.168.20.22"
 
         // Broadcast actions for UI updates
-        const val ACTION_DISPLAY = "com.smait.robotrelay.DISPLAY"
-        const val ACTION_TASK_STATUS = "com.smait.robotrelay.TASK_STATUS"
-        const val ACTION_COUNTDOWN = "com.smait.robotrelay.COUNTDOWN"
-        const val ACTION_TOUR_MODE = "com.smait.robotrelay.TOUR_MODE"
-        const val ACTION_TOUR_STANDBY = "com.smait.robotrelay.TOUR_STANDBY"
+        const val ACTION_DISPLAY = "com.utilitron.robotrelay.DISPLAY"
+        const val ACTION_TASK_STATUS = "com.utilitron.robotrelay.TASK_STATUS"
+        const val ACTION_COUNTDOWN = "com.utilitron.robotrelay.COUNTDOWN"
+        const val ACTION_TOUR_MODE = "com.utilitron.robotrelay.TOUR_MODE"
+        const val ACTION_TOUR_STANDBY = "com.utilitron.robotrelay.TOUR_STANDBY"
         const val EXTRA_URL = "url"
         const val EXTRA_STATUS = "status"
         const val EXTRA_COUNTDOWN_SECONDS = "countdown_seconds"
@@ -118,7 +118,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private var discoveryService: DiscoveryService? = null
 
     // gRPC server for WAN-ready communication (OPUS LEVEL!)
-    private var grpcServer: com.smait.robotrelay.grpc.GrpcServer? = null
+    private var grpcServer: com.utilitron.robotrelay.grpc.GrpcServer? = null
 
     // Current task execution state
     private val _currentTask = MutableStateFlow<WaypointTask?>(null)
@@ -297,7 +297,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
         // Start gRPC server (port 50051) - THIS IS THE REAL WAN-READY PROTOCOL!
         try {
-            grpcServer = com.smait.robotrelay.grpc.GrpcServer(
+            grpcServer = com.utilitron.robotrelay.grpc.GrpcServer(
                 port = 50051,
                 robotClient = robotClient,
                 taskExecutor = this

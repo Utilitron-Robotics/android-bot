@@ -1,4 +1,4 @@
-/// smAiT Upper Computer Communication Protocol for Flutter
+/// Chassis Upper Computer Communication Protocol for Flutter
 /// Supports both direct robot connection and relay connection
 library;
 
@@ -59,8 +59,8 @@ const int speedSmoothOn = 60;
 const int speedSmoothOff = 61;
 const int speedGetCurrent = 99;
 
-/// smAiT Protocol message builder
-class SmaitProtocol {
+/// Chassis Protocol message builder
+class ChassisProtocol {
   // === Subscription Messages ===
 
   static Map<String, dynamic> subscribeRobotPose() => {

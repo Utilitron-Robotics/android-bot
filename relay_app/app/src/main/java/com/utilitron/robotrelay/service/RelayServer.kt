@@ -1,9 +1,9 @@
-package com.smait.robotrelay.service
+package com.utilitron.robotrelay.service
 
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.smait.robotrelay.protocol.SmaitProtocol
+import com.utilitron.robotrelay.protocol.ChassisProtocol
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoWSD
 import kotlinx.coroutines.*
@@ -351,7 +351,7 @@ class RelayHttpServer(
     private fun handleDiscovery(): Response {
         val status = robotClient.robotStatus.value
         val data = mapOf(
-            "type" to "SMAIT_RELAY",
+            "type" to "UTILITRON_RELAY",
             "version" to "1.0",
             "relayHttpPort" to (this as NanoHTTPD).listeningPort,
             "relayWsPort" to (this as NanoHTTPD).listeningPort + 1,
@@ -375,7 +375,7 @@ class RelayHttpServer(
     }
 
     private fun handleGetInfo(): Response {
-        robotClient.send(com.smait.robotrelay.protocol.SmaitProtocol.callGetRobotInfo())
+        robotClient.send(com.utilitron.robotrelay.protocol.ChassisProtocol.callGetRobotInfo())
         return newFixedLengthResponse(Response.Status.OK, "application/json",
             gson.toJson(mapOf("status" to "requested")))
     }

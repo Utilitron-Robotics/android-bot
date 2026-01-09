@@ -1,11 +1,11 @@
-package com.smait.robotrelay.cloud
+package com.utilitron.robotrelay.cloud
 
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
-import com.smait.robotrelay.service.ConnectionState
-import com.smait.robotrelay.service.RobotStatusData
-import com.smait.robotrelay.service.RobotWebSocketClient
+import com.utilitron.robotrelay.service.ConnectionState
+import com.utilitron.robotrelay.service.RobotStatusData
+import com.utilitron.robotrelay.service.RobotWebSocketClient
 
 /**
  * Fleet Manager - Bridges local robot control with cloud fleet management

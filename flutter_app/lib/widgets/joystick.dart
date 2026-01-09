@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
-import '../core/smait_protocol.dart';
+import '../core/chassis_protocol.dart';
 import '../services/audio_announcer.dart';
 
 /// Robot speed mode - controls built-in collision avoidance behavior

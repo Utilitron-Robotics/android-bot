@@ -197,7 +197,7 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
   }
 
   void _subscribeToStatus() {
-    // Always subscribe to robot_status - smAiT robots always have this
+    // Always subscribe to robot_status - Chassis robots always have this
     _client.subscribe(
       topic: '/robot_status',
       type: 'yutong_assistance/RobotStatus',
@@ -303,7 +303,7 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
   }
 
   /// Send velocity command (joystick)
-  /// smAiT protocol: advertise then publish to /cmd_vel_mux/input/teleop
+  /// Chassis protocol: advertise then publish to /cmd_vel_mux/input/teleop
   /// Speed command lasts 0.6 seconds per the protocol spec
   void sendVelocity(double linear, double angular) {
     if (!isConnected) return;

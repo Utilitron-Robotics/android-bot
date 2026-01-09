@@ -1,4 +1,4 @@
-package com.smait.robotrelay.ui
+package com.utilitron.robotrelay.ui
 
 import android.content.*
 import android.graphics.Rect
@@ -17,13 +17,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import com.smait.robotrelay.R
-import com.smait.robotrelay.databinding.ActivityMainBinding
-import com.smait.robotrelay.protocol.SmaitProtocol
-import com.smait.robotrelay.service.ConnectionState
-import com.smait.robotrelay.service.RelayService
-import com.smait.robotrelay.service.SafetyZone
-import com.smait.robotrelay.service.SensorStatus
+import com.utilitron.robotrelay.R
+import com.utilitron.robotrelay.databinding.ActivityMainBinding
+import com.utilitron.robotrelay.protocol.ChassisProtocol
+import com.utilitron.robotrelay.service.ConnectionState
+import com.utilitron.robotrelay.service.RelayService
+import com.utilitron.robotrelay.service.SafetyZone
+import com.utilitron.robotrelay.service.SensorStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -621,14 +621,14 @@ class MainActivity : AppCompatActivity() {
                         val now = System.currentTimeMillis()
 
                         // Reset when nav starts fresh
-                        if (navStatus == SmaitProtocol.NAV_RUNNING && lastNavStatus != SmaitProtocol.NAV_RUNNING) {
+                        if (navStatus == ChassisProtocol.NAV_RUNNING && lastNavStatus != ChassisProtocol.NAV_RUNNING) {
                             announcedThisNav = SafetyZone.CLEAR
                             lastWarningTime = 0L  // Reset cooldown on new navigation
                         }
                         lastNavStatus = navStatus
 
                         // Only announce during active navigation
-                        if (navStatus != SmaitProtocol.NAV_RUNNING) return@collect
+                        if (navStatus != ChassisProtocol.NAV_RUNNING) return@collect
 
                         // Severity: CLEAR(0) < WARN(1) < CREEP(2) < STOP(3)
                         val zoneSeverity = when (zone) {
@@ -672,9 +672,9 @@ class MainActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 svc.getRobotStatus().map { it?.navStatus }.distinctUntilChanged().collect { navStatus ->
                     when (navStatus) {
-                        SmaitProtocol.NAV_SUCCESS -> speak("Navigation successful.")
-                        SmaitProtocol.NAV_FAILED -> speak("Navigation failed.")
-                        SmaitProtocol.NAV_CANCELLED -> speak("Navigation cancelled.")
+                        ChassisProtocol.NAV_SUCCESS -> speak("Navigation successful.")
+                        ChassisProtocol.NAV_FAILED -> speak("Navigation failed.")
+                        ChassisProtocol.NAV_CANCELLED -> speak("Navigation cancelled.")
                     }
                 }
             }
@@ -695,11 +695,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSlamStatus(controlState: Int) {
         when (controlState) {
-            SmaitProtocol.STATE_MAPPING -> {
+            ChassisProtocol.STATE_MAPPING -> {
                 binding.tvSlamStatus.text = "Mode: Mapping"
                 binding.ivSlamIcon.visibility = View.VISIBLE
             }
-            SmaitProtocol.STATE_NAVIGATION -> {
+            ChassisProtocol.STATE_NAVIGATION -> {
                 binding.tvSlamStatus.text = "Mode: Navigating"
                 binding.ivSlamIcon.visibility = View.GONE
             }

@@ -68,3 +68,10 @@ hidden/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# NDA/Confidential Documents (keep local, never commit)
+*Chassis Specification*.pdf
+*Communication Protocol*.pdf
+*Protocol*.pdf
+*Manual*.pdf
+docs/confidential/

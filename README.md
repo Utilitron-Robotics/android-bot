@@ -5,18 +5,18 @@
 [![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)]()
 [![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android%20%7C%20Web%20%7C%20macOS-lightgrey.svg)]()
 [![Protocol](https://img.shields.io/badge/protocol-gRPC%20%7C%20WebSocket-green.svg)]()
-[![Compatible](https://img.shields.io/badge/compatible-Pudu%20%7C%20CIOT%20%7C%20smAiT-green.svg)]()
+[![Compatible](https://img.shields.io/badge/compatible-Robot%20%7C%20CIOT%20%7C%20chassis-green.svg)]()
 
 ## The $8 Billion Market Opportunity
 
 ### The Problem: 100,000+ Underutilized Robots
-- **Pudu Robotics:** 80,000+ units deployed globally (2020-2024), most running legacy firmware
+- **Robot Robotics:** 80,000+ units deployed globally (2020-2024), most running legacy firmware
 - **CIOT:** 10,000+ annual production, primarily Chinese market with basic software
 - **Industry Reality:** 200,000 service robots sold in 2024, but hospitality sector seeing -11% utilization
 - **The Truth:** Most of these $13,000-$23,000 robots are glorified planters because the OEM software doesn't deliver
 
 ### Why This Matters
-Every Pudu, CIOT, and smAiT robot ships with:
+Every Robot, CIOT, and chassis robot ships with:
 - ✅ Android tablet (usually 10"+)
 - ✅ Rockchip or similar ARM processor
 - ✅ rosbridge-compatible base
@@ -36,7 +36,7 @@ Every Pudu, CIOT, and smAiT robot ships with:
 - **Frustrated Managers** who bought robots that don't work
 - **Smart Operators** who want 10x more from existing hardware
 - **Forward Thinkers** ready for true automation
-- **Anyone** with a Pudu/CIOT/smAiT robot gathering dust
+- **Anyone** with a Robot/CIOT/chassis robot gathering dust
 
 ## Screenshots & Real World Deployments
 
@@ -49,8 +49,8 @@ Every Pudu, CIOT, and smAiT robot ships with:
 
 ### Robot Hardware
 
-![smAiT Robot with RobotOS Pro](IMG_3048.jpeg)
-*smAiT service robot running RobotOS Pro - Android tablet displaying real-time navigation map with path planning*
+![chassis Robot with RobotOS Pro](IMG_3048.jpeg)
+*chassis service robot running RobotOS Pro - Android tablet displaying real-time navigation map with path planning*
 
 ![Robot Base Close-up](IMG_3049.jpg)
 *Robot base unit showing ultrasonic sensors, status indicators, and clean industrial design*
@@ -62,7 +62,7 @@ Every Pudu, CIOT, and smAiT robot ships with:
 
 ## Overview
 
-RobotOS Pro is a comprehensive multi-mode operating system that transforms underutilized service robots into versatile business automation platforms. Built for Pudu, smAiT, CIOT, and compatible platforms using the rosbridge protocol, it enables sophisticated operations across hospitality, healthcare, office, and retail environments.
+RobotOS Pro is a comprehensive multi-mode operating system that transforms underutilized service robots into versatile business automation platforms. Built for Robot, chassis, CIOT, and compatible platforms using the rosbridge protocol, it enables sophisticated operations across hospitality, healthcare, office, and retail environments.
 
 ### Multi-Mode Platform - One Robot, Endless Possibilities
 
@@ -488,7 +488,7 @@ service RobotControl {
 
 ### Before RoboTour Pro
 - **Hotel Manager, California:** "We spent $18,000 on a delivery robot. It delivered maybe 3 items a day. Guests called it 'the expensive obstacle.'"
-- **Office Manager, New York:** "Our Pudu robot literally holds a plant now. $20,000 planter."
+- **Office Manager, New York:** "Our Robot robot literally holds a plant now. $20,000 planter."
 - **Restaurant Owner, Texas:** "The robot worked for 2 weeks, then the software crashed. Support wanted $5,000 to fix it."
 
 ### After RoboTour Pro

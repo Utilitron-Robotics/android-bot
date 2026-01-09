@@ -3,7 +3,7 @@
 ## 1. Application Analysis
 
 ### 1.1. High-Level Summary
-This project, RobotOS Pro, is a sophisticated software platform designed to transform underutilized service robots (like those from Pudu, CIOT, and smAiT) into versatile, multi-purpose automation tools. It replaces the limited OEM software with a powerful, 7-mode operating system that includes capabilities for guided tours, deliveries, security patrols, and more. The architecture is built for modern, internet-scale fleet management, enabling remote control and coordination of robots over a WAN.
+This project, RobotOS Pro, is a sophisticated software platform designed to transform underutilized service robots (like those from Robot, CIOT, and chassis) into versatile, multi-purpose automation tools. It replaces the limited OEM software with a powerful, 7-mode operating system that includes capabilities for guided tours, deliveries, security patrols, and more. The architecture is built for modern, internet-scale fleet management, enabling remote control and coordination of robots over a WAN.
 
 ### 1.2. Architecture Overview
 The system consists of three main components that communicate in a chain, as illustrated in the root `README.md`:

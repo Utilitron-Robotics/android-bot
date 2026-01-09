@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace 'com.smait.robotrelay'
+    namespace 'com.utilitron.robotrelay'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.smait.robotrelay"
+        applicationId "com.utilitron.robotrelay"
         minSdk 24
         targetSdk 34
         versionCode 1

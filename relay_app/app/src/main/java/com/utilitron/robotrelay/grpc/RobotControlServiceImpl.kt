@@ -1,15 +1,15 @@
-package com.smait.robotrelay.grpc
+package com.utilitron.robotrelay.grpc
 
 import android.util.Log
-import com.smait.robotrelay.service.RobotWebSocketClient
-import com.smait.robotrelay.service.RelayServer
-import com.smait.robotrelay.service.ConnectionState
+import com.utilitron.robotrelay.service.RobotWebSocketClient
+import com.utilitron.robotrelay.service.RelayServer
+import com.utilitron.robotrelay.service.ConnectionState
 import io.grpc.stub.StreamObserver
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.util.concurrent.ConcurrentHashMap
-import com.smait.robotrelay.grpc.RobotControlProto.*
-import com.smait.robotrelay.grpc.RobotControlGrpc
+import com.utilitron.robotrelay.grpc.RobotControlProto.*
+import com.utilitron.robotrelay.grpc.RobotControlGrpc
 
 /**
  * gRPC service implementation for robot control

@@ -67,7 +67,7 @@ debugPrint('TaskEngine: executeForWaypoint($waypoint) - hasMode=${hasMode(waypoi
 
 **Files to modify:**
 - `flutter_app/lib/services/audio_announcer.dart`
-- `relay_app/app/src/main/java/com/smait/robotrelay/service/RelayService.kt`
+- `relay_app/app/src/main/java/com/chassis/robotrelay/service/RelayService.kt`
 
 ### 5. Rename "Tour" to "Sequence" in Left Sidebar
 **Location:** `hud_screen.dart` left panel tab label

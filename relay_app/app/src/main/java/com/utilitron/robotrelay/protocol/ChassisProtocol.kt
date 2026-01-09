@@ -1,14 +1,14 @@
-package com.smait.robotrelay.protocol
+package com.utilitron.robotrelay.protocol
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 
 /**
- * smAiT Upper Computer Communication Protocol implementation
+ * Chassis Upper Computer Communication Protocol implementation
  * Based on WebSocket JSON protocol for robot chassis control
  */
-object SmaitProtocol {
+object ChassisProtocol {
     private val gson = Gson()
 
     // Operation types
