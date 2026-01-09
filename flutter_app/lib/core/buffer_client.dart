@@ -558,10 +558,10 @@ class BufferClient extends ChangeNotifier {
 
       final state = data as BufferState;
       attempts++;
-      debugPrint('BufferClient: Confirmation check $attempts/$maxAttempts - pending=${state.pending}');
+      debugPrint('BufferClient: Confirmation check $attempts/$maxAttempts - pending=${state.pendingCount}');
 
-      if (state.pending >= expectedCount) {
-        debugPrint('BufferClient: ✓ Commands confirmed loaded (${state.pending} pending)');
+      if (state.pendingCount >= expectedCount) {
+        debugPrint('BufferClient: ✓ Commands confirmed loaded (${state.pendingCount} pending)');
         onHeartbeat = originalCallback;
         if (!completer.isCompleted) completer.complete(true);
       } else if (attempts >= maxAttempts) {
