@@ -331,6 +331,19 @@ class _HudScreenState extends State<HudScreen>
 
     debugPrint('HUD: 🔍 Health check - isStale=$isStale, lastHeartbeat=${hbAge}s ago');
 
+    // Check if a tour is awaiting visitor - DON'T reconnect in this case!
+    // User may have backgrounded app to go press the button on tablet
+    final tourManager = context.read<SequenceManager>();
+    final bufferExecutor = tourManager.bufferExecutor;
+    final isAwaitingVisitor = bufferExecutor?.currentPhase == SequencePhase.awaitingVisitor ||
+                              bufferExecutor?.isAwaitingVisitor == true;
+
+    if (isStale && isAwaitingVisitor) {
+      debugPrint('HUD: ⚠️ Connection stale but AWAITING VISITOR - skipping reconnect to preserve tour state');
+      debugPrint('HUD: 💡 User may be pressing START TOUR button on tablet');
+      return;
+    }
+
     if (isStale) {
       debugPrint('HUD: ⚠️ Connection STALE! Forcing reconnect...');
       final savedUrl = robot.robotUrl;
