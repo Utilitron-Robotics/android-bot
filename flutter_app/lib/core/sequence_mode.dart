@@ -78,15 +78,10 @@ class Sequence {
       restAtEndSeconds; // Wait at end waypoint before returning to start (for loops)
   final int modifiedAt; // Timestamp for conflict resolution (ms since epoch)
 
-  // Motion trigger settings - start tour when someone approaches
-  final bool
-      motionTriggerStart; // Enable motion-triggered tour start at start waypoint
-  final String?
-      motionGreeting; // TTS greeting when motion detected (e.g., "Hello! Would you like a tour?")
-  final String?
-      motionButtonText; // Button text shown on tablet (e.g., "Start Tour", "Begin Experience")
-  final String?
-      motionDisplayUrl; // URL to show on tablet when awaiting tour start (start button)
+  // Await visitor at start - show button overlay until tap or sensor triggers
+  final bool awaitVisitorAtStart; // Wait for tap/sensor before starting tour
+  final String? awaitButtonText; // Button text (default: "START TOUR")
+  final String? awaitDisplayUrl; // URL to show behind button (default: "https://frontiertower.io")
 
   Sequence({
     required this.id,
@@ -100,12 +95,15 @@ class Sequence {
     this.startWaypoint,
     this.endWaypoint,
     this.restAtEndSeconds = 0,
-    this.motionTriggerStart = false,
-    this.motionGreeting,
-    this.motionButtonText,
-    this.motionDisplayUrl,
+    this.awaitVisitorAtStart = false,
+    this.awaitButtonText,
+    this.awaitDisplayUrl,
     int? modifiedAt,
   }) : modifiedAt = modifiedAt ?? DateTime.now().millisecondsSinceEpoch;
+
+  // Effective values with defaults
+  String get effectiveAwaitButtonText => awaitButtonText ?? 'START TOUR';
+  String get effectiveAwaitDisplayUrl => awaitDisplayUrl ?? 'https://frontiertower.io';
 
   /// Create sequence from waypoint list with auto-loaded scripts
   static Sequence fromWaypointList({
@@ -354,14 +352,13 @@ class Sequence {
         'announce_arrival': announceArrival,
         'rest_at_end_seconds': restAtEndSeconds,
         'modified_at': modifiedAt,
-        'motion_trigger_start': motionTriggerStart,
+        'await_visitor_at_start': awaitVisitorAtStart,
         if (introText != null) 'intro_text': introText,
         if (outroText != null) 'outro_text': outroText,
         if (startWaypoint != null) 'start_waypoint': startWaypoint,
         if (endWaypoint != null) 'end_waypoint': endWaypoint,
-        if (motionGreeting != null) 'motion_greeting': motionGreeting,
-        if (motionButtonText != null) 'motion_button_text': motionButtonText,
-        if (motionDisplayUrl != null) 'motion_display_url': motionDisplayUrl,
+        if (awaitButtonText != null) 'await_button_text': awaitButtonText,
+        if (awaitDisplayUrl != null) 'await_display_url': awaitDisplayUrl,
       };
 
   factory Sequence.fromJson(Map<String, dynamic> json) => Sequence(
@@ -381,10 +378,14 @@ class Sequence {
         startWaypoint: json['start_waypoint'] as String?,
         endWaypoint: json['end_waypoint'] as String?,
         modifiedAt: json['modified_at'] as int?,
-        motionTriggerStart: json['motion_trigger_start'] as bool? ?? false,
-        motionGreeting: json['motion_greeting'] as String?,
-        motionButtonText: json['motion_button_text'] as String?,
-        motionDisplayUrl: json['motion_display_url'] as String?,
+        // Migrate from old motion_trigger_start field
+        awaitVisitorAtStart: json['await_visitor_at_start'] as bool? ??
+            json['motion_trigger_start'] as bool? ??
+            false,
+        awaitButtonText: json['await_button_text'] as String? ??
+            json['motion_button_text'] as String?,
+        awaitDisplayUrl: json['await_display_url'] as String? ??
+            json['motion_display_url'] as String?,
       );
 
   Sequence copyWith({
@@ -400,10 +401,9 @@ class Sequence {
     String? endWaypoint,
     int? restAtEndSeconds,
     int? modifiedAt,
-    bool? motionTriggerStart,
-    String? motionGreeting,
-    String? motionButtonText,
-    String? motionDisplayUrl,
+    bool? awaitVisitorAtStart,
+    String? awaitButtonText,
+    String? awaitDisplayUrl,
   }) =>
       Sequence(
         id: id ?? this.id,
@@ -418,10 +418,9 @@ class Sequence {
         startWaypoint: startWaypoint ?? this.startWaypoint,
         endWaypoint: endWaypoint ?? this.endWaypoint,
         modifiedAt: modifiedAt ?? this.modifiedAt,
-        motionTriggerStart: motionTriggerStart ?? this.motionTriggerStart,
-        motionGreeting: motionGreeting ?? this.motionGreeting,
-        motionButtonText: motionButtonText ?? this.motionButtonText,
-        motionDisplayUrl: motionDisplayUrl ?? this.motionDisplayUrl,
+        awaitVisitorAtStart: awaitVisitorAtStart ?? this.awaitVisitorAtStart,
+        awaitButtonText: awaitButtonText ?? this.awaitButtonText,
+        awaitDisplayUrl: awaitDisplayUrl ?? this.awaitDisplayUrl,
       );
 
   /// Add a stop
@@ -1613,6 +1612,19 @@ class SequenceManager extends ChangeNotifier {
     _status = SequenceStatus.running;
     _navigateToNextStop();
     notifyListeners();
+  }
+
+  /// Resume from visitor wait - called when START TOUR button is pressed
+  void resumeFromVisitor() {
+    // Only works with buffer executor
+    if (_useBufferExecutor && _bufferExecutor != null) {
+      debugPrint(
+          'SequenceManager.resumeFromVisitor: Starting tour via BufferSequenceExecutor');
+      _bufferExecutor!.resumeFromVisitor();
+      return;
+    }
+
+    debugPrint('SequenceManager.resumeFromVisitor: No buffer executor available');
   }
 
   /// Skip to next stop
