@@ -488,6 +488,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     debugPrint('BufferSequenceExecutor: Starting sequence "${sequence.name}"');
+    debugPrint('BufferSequenceExecutor: awaitVisitorAtStart=${sequence.awaitVisitorAtStart}, startWaypoint=${sequence.startWaypoint}');
 
     _currentSequence = sequence;
     _currentStopIndex = -1;
