@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -71,6 +72,9 @@ class _HudScreenState extends State<HudScreen>
   String? _navigatingTo;
   String? _lastWaypoint;
   int? _lastNavStatus;
+
+  // Tour start health check - detect phase transition from standby
+  SequencePhase? _lastKnownPhase;
 
   // Animation controllers for smooth panel transitions
   late AnimationController _leftPanelController;
@@ -286,37 +290,12 @@ class _HudScreenState extends State<HudScreen>
 
   /// Called when app returns from background/lock screen
   void _onAppResumed() {
-    // Check if robot connection is still alive
     final robot = context.read<RobotConnection>();
 
     if (robot.state == RobotConnectionState.connected) {
-      // Connection might be stale - check BufferClient heartbeat freshness
-      final bufferClient = SequenceExecutor().bufferClient;
-      final isStale = bufferClient?.isStale ?? false;
-      final lastHb = bufferClient?.lastHeartbeat;
-      final hbAge = lastHb != null
-          ? DateTime.now().difference(lastHb).inSeconds
-          : -1;
-
-      debugPrint('HUD: Connection appears alive, checking staleness... '
-          'isStale=$isStale, lastHeartbeat=${hbAge}s ago');
-
-      if (isStale) {
-        // Connection is stale - force full reconnect
-        debugPrint('HUD: Connection is STALE! Forcing reconnect...');
-        final savedUrl = robot.robotUrl;
-        robot.disconnect();
-        if (savedUrl.isNotEmpty) {
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) {
-              robot.connect(savedUrl);
-            }
-          });
-        }
-      } else {
-        // Connection seems fresh - just notify listeners
-        robot.notifyListeners();
-      }
+      // Use shared health check for staleness detection
+      debugPrint('HUD: App resumed - running SINC health check');
+      _checkConnectionHealth(robot);
     } else if (robot.state == RobotConnectionState.disconnected ||
                robot.state == RobotConnectionState.error) {
       // Connection was lost during background - auto-reconnect
@@ -350,6 +329,42 @@ class _HudScreenState extends State<HudScreen>
       WakelockPlus.disable();
       _wakelockEnabled = false;
       debugPrint('HUD: Wake lock DISABLED - screen can turn off');
+    }
+  }
+
+  /// Check connection health and reconnect if stale
+  /// Called from: app resume, tour start (SINC seeding)
+  void _checkConnectionHealth(RobotConnection robot) {
+    if (robot.state != RobotConnectionState.connected) {
+      debugPrint('HUD: _checkConnectionHealth - not connected, skipping');
+      return;
+    }
+
+    final bufferClient = SequenceExecutor().bufferClient;
+    final isStale = bufferClient?.isStale ?? false;
+    final lastHb = bufferClient?.lastHeartbeat;
+    final hbAge = lastHb != null
+        ? DateTime.now().difference(lastHb).inSeconds
+        : -1;
+
+    debugPrint('HUD: 🔍 Health check - isStale=$isStale, lastHeartbeat=${hbAge}s ago');
+
+    if (isStale) {
+      debugPrint('HUD: ⚠️ Connection STALE! Forcing reconnect...');
+      final savedUrl = robot.robotUrl;
+      robot.disconnect();
+      if (savedUrl.isNotEmpty) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            debugPrint('HUD: 🔄 Reconnecting to $savedUrl');
+            robot.connect(savedUrl);
+          }
+        });
+      }
+    } else {
+      debugPrint('HUD: ✓ Connection healthy');
+      // Seed the SINC rhythm by triggering a state update
+      robot.notifyListeners();
     }
   }
 
@@ -399,6 +414,21 @@ class _HudScreenState extends State<HudScreen>
           } else if (!tourRunning && _wakelockEnabled) {
             _disableWakelock();
           }
+
+          // TOUR START HEALTH CHECK: When leaving standby (awaitingVisitor),
+          // seed the SINC rhythm detection by checking connection health
+          final currentPhase = tourManager.currentPhase;
+          if (_lastKnownPhase == SequencePhase.awaitingVisitor &&
+              currentPhase != SequencePhase.awaitingVisitor &&
+              currentPhase != null) {
+            debugPrint('HUD: 🚀 TOUR STARTING - phase changed from awaitingVisitor to $currentPhase');
+            debugPrint('HUD: Seeding SINC health check at tour start...');
+            // Check connection health at this critical moment
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _checkConnectionHealth(robot);
+            });
+          }
+          _lastKnownPhase = currentPhase;
 
           // Debug: Log when sequence status changes
           if (_enableVerboseLogging &&
@@ -2173,14 +2203,7 @@ class _HudScreenState extends State<HudScreen>
             subtitle: const Text('Test TTS on tablet'),
             onTap: () => robot.client.tabletSpeak('Audio test successful.'),
           ),
-          // Crowd Logic link
-          ListTile(
-            leading: const Icon(Icons.people, color: Colors.blue),
-            title: const Text('Crowd Logic'),
-            subtitle: Text('Current: ${announcer.crowdConfig.venue.label}'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _showFeaturePanel('crowd', robot),
-          ),
+          // Crowd Logic is in left sidebar tab 3 - no need to duplicate here
         ],
       ),
     );
