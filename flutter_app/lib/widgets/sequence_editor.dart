@@ -28,10 +28,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
   final TextEditingController _tourNameController = TextEditingController();
   final TextEditingController _introTextController = TextEditingController();
   final TextEditingController _outroTextController = TextEditingController();
-  final TextEditingController _motionGreetingController =
-      TextEditingController();
-  final TextEditingController _motionButtonTextController =
-      TextEditingController();
   final Map<String, TextEditingController> _stopControllers = {};
 
   // Cache to reduce unnecessary rebuilds - only rebuild when these actually change
@@ -89,8 +85,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.dispose();
     _introTextController.dispose();
     _outroTextController.dispose();
-    _motionGreetingController.dispose();
-    _motionButtonTextController.dispose();
     for (final c in _stopControllers.values) {
       c.dispose();
     }
@@ -129,8 +123,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.text = newTour.name;
     _introTextController.text = '';
     _outroTextController.text = '';
-    _motionGreetingController.text = '';
-    _motionButtonTextController.text = '';
     setState(() {
       _selectedSequence = newTour;
       _isEditing = true;
@@ -148,8 +140,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _tourNameController.text = seq.name;
     _introTextController.text = seq.introText ?? '';
     _outroTextController.text = seq.outroText ?? '';
-    _motionGreetingController.text = seq.motionGreeting ?? '';
-    _motionButtonTextController.text = seq.motionButtonText ?? '';
 
     setState(() {
       _selectedSequence = seq;
@@ -229,13 +219,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
           _outroTextController.text.isEmpty ? null : _outroTextController.text,
       startWaypoint: _selectedSequence!.startWaypoint,
       endWaypoint: _selectedSequence!.endWaypoint,
-      motionTriggerStart: _selectedSequence!.motionTriggerStart,
-      motionGreeting: _motionGreetingController.text.isEmpty
-          ? null
-          : _motionGreetingController.text,
-      motionButtonText: _motionButtonTextController.text.isEmpty
-          ? null
-          : _motionButtonTextController.text,
     );
 
     _selectedSequence = updatedTour;
@@ -244,16 +227,13 @@ class _SequenceEditorState extends State<SequenceEditor> {
         'SequenceEditor._saveSequence: Save completed for "${updatedTour.name}"');
   }
 
-  void _updateTourOptions(
-      {bool? loop, bool? announceArrival, bool? motionTriggerStart}) {
+  void _updateTourOptions({bool? loop, bool? announceArrival}) {
     // Only for checkboxes - these need immediate state update AND save
     if (_selectedSequence == null) return;
     setState(() {
       _selectedSequence = _selectedSequence!.copyWith(
         loop: loop ?? _selectedSequence!.loop,
         announceArrival: announceArrival ?? _selectedSequence!.announceArrival,
-        motionTriggerStart:
-            motionTriggerStart ?? _selectedSequence!.motionTriggerStart,
       );
     });
     // Auto-save checkbox changes
@@ -1292,76 +1272,6 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   value: seq.announceArrival,
                   dense: true,
                   onChanged: (v) => _updateTourOptions(announceArrival: v),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // Motion Trigger - Start tour when someone approaches
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: seq.motionTriggerStart
-                ? Colors.blue.withValues(alpha: 0.1)
-                : Colors.grey.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color:
-                  seq.motionTriggerStart ? Colors.blue : Colors.grey.shade700,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    seq.motionTriggerStart ? Icons.sensors : Icons.sensors_off,
-                    color: seq.motionTriggerStart ? Colors.blue : Colors.grey,
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Motion Trigger',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Switch(
-                    value: seq.motionTriggerStart,
-                    onChanged: (v) => _updateTourOptions(motionTriggerStart: v),
-                  ),
-                ],
-              ),
-              // Greeting (only shown when motion trigger is ON)
-              if (seq.motionTriggerStart) ...[
-                Text(
-                  'Robot greets visitors at Start location and shows Start button',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _motionGreetingController,
-                  decoration: const InputDecoration(
-                    labelText: 'Greeting Message (TTS)',
-                    hintText: 'Would you like a Tour of the Robotics Floor?',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    prefixIcon: Icon(Icons.record_voice_over, size: 18),
-                  ),
-                ),
-                const SizedBox(height: 8),
-              ],
-              // Button text - ALWAYS visible, separate from motion trigger
-              TextField(
-                controller: _motionButtonTextController,
-                decoration: const InputDecoration(
-                  labelText: 'Button Text',
-                  hintText: 'Start Tour',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  prefixIcon: Icon(Icons.touch_app, size: 18),
                 ),
               ),
             ],
