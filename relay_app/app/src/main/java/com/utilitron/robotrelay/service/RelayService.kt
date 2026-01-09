@@ -867,7 +867,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         executeTask(WaypointTask(taskType, data, waitSeconds))
     }
 
-    override fun playAlertSound(soundType: String) {
+    override fun playAlertSound(soundType: String, onComplete: (() -> Unit)?) {
         Log.i(TAG, ">>> playAlertSound() called: '$soundType'")
         // Run sound generation on background thread to avoid blocking
         scope.launch(Dispatchers.Default) {
@@ -919,8 +919,16 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                         generateTone(660.0, 150)  // E5
                     }
                 }
+                // Sound complete - call callback on Main thread
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke()
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to play alert sound: ${e.message}", e)
+                // Still call callback on error so caller isn't stuck
+                withContext(Dispatchers.Main) {
+                    onComplete?.invoke()
+                }
             }
         }
     }

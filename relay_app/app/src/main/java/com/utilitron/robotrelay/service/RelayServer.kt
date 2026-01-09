@@ -38,7 +38,7 @@ class RelayServer(
         fun closeDisplay()
         fun runTask(type: String, data: String, waitSeconds: Int)
         fun cancelTask()
-        fun playAlertSound(soundType: String)
+        fun playAlertSound(soundType: String, onComplete: (() -> Unit)? = null)
         fun setTtsApiKey(apiKey: String?)
         fun hasTtsApiKey(): Boolean
         // Countdown timer overlay

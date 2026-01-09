@@ -687,10 +687,16 @@ class CommandBuffer(
 
             "sound" -> {
                 val sound = cmd.data["sound"] as? String ?: "beep"
+                val soundComplete = CompletableDeferred<Unit>()
+
                 withContext(Dispatchers.Main) {
-                    taskExecutor?.playAlertSound(sound)
+                    taskExecutor?.playAlertSound(sound) {
+                        soundComplete.complete(Unit)
+                    }
                 }
-                delay(500)  // Brief delay for sound to play
+
+                // Wait for actual sound completion (no guessing!)
+                soundComplete.await()
                 completeCommand(cmd.id, "success")
             }
 
