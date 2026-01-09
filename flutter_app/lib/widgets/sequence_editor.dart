@@ -28,8 +28,10 @@ class _SequenceEditorState extends State<SequenceEditor> {
   final TextEditingController _tourNameController = TextEditingController();
   final TextEditingController _introTextController = TextEditingController();
   final TextEditingController _outroTextController = TextEditingController();
-  final TextEditingController _awaitButtonTextController = TextEditingController();
-  final TextEditingController _awaitDisplayUrlController = TextEditingController();
+  final TextEditingController _awaitButtonTextController =
+      TextEditingController();
+  final TextEditingController _awaitDisplayUrlController =
+      TextEditingController();
   final Map<String, TextEditingController> _stopControllers = {};
 
   // Cache to reduce unnecessary rebuilds - only rebuild when these actually change
@@ -242,14 +244,16 @@ class _SequenceEditorState extends State<SequenceEditor> {
         'SequenceEditor._saveSequence: Save completed for "${updatedTour.name}"');
   }
 
-  void _updateTourOptions({bool? loop, bool? announceArrival, bool? awaitVisitorAtStart}) {
+  void _updateTourOptions(
+      {bool? loop, bool? announceArrival, bool? awaitVisitorAtStart}) {
     // Only for checkboxes/switches - these need immediate state update AND save
     if (_selectedSequence == null) return;
     setState(() {
       _selectedSequence = _selectedSequence!.copyWith(
         loop: loop ?? _selectedSequence!.loop,
         announceArrival: announceArrival ?? _selectedSequence!.announceArrival,
-        awaitVisitorAtStart: awaitVisitorAtStart ?? _selectedSequence!.awaitVisitorAtStart,
+        awaitVisitorAtStart:
+            awaitVisitorAtStart ?? _selectedSequence!.awaitVisitorAtStart,
       );
     });
     // Auto-save checkbox changes
@@ -296,7 +300,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
     await _saveSequence();
 
     // Now that data is saved, reorder the stops in the model
-    final reorderedSequence = _selectedSequence!.reorderStop(oldIndex, newIndex);
+    final reorderedSequence =
+        _selectedSequence!.reorderStop(oldIndex, newIndex);
 
     // Update the model with reordered stops
     _selectedSequence = reorderedSequence;
@@ -321,7 +326,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     // Default to AWS CloudFormation API Gateway endpoint
     final apiUrlController = TextEditingController(
       text: SequenceManager.instance.cloudApiUrl ??
-            'https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev',
+          'https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev',
     );
 
     // Auto-detect map ID from connected robot
@@ -708,14 +713,17 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   final pushed =
                       await SequenceManager.instance.pushAllToCloud();
                   if (mounted) {
-                    final totalTours = SequenceManager.instance.sequences.length;
+                    final totalTours =
+                        SequenceManager.instance.sequences.length;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(pushed == totalTours
                             ? 'Pushed $pushed tour(s) to cloud!'
                             : 'ERROR: Only pushed $pushed/$totalTours tours! Check debug console for errors.'),
-                        backgroundColor: pushed == totalTours ? null : Colors.red,
-                        duration: Duration(seconds: pushed == totalTours ? 2 : 5),
+                        backgroundColor:
+                            pushed == totalTours ? null : Colors.red,
+                        duration:
+                            Duration(seconds: pushed == totalTours ? 2 : 5),
                       ),
                     );
                     setState(() {});
@@ -760,7 +768,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   final count = SequenceManager.instance.sequences.length;
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Pulled $count tour(s) from cloud!')),
+                      SnackBar(
+                          content: Text('Pulled $count tour(s) from cloud!')),
                     );
                     setState(() {});
                   }
@@ -1304,8 +1313,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
                 : Colors.grey.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color:
-                  seq.awaitVisitorAtStart ? Colors.purple : Colors.grey.shade700,
+              color: seq.awaitVisitorAtStart
+                  ? Colors.purple
+                  : Colors.grey.shade700,
             ),
           ),
           child: Column(
@@ -1314,8 +1324,11 @@ class _SequenceEditorState extends State<SequenceEditor> {
               Row(
                 children: [
                   Icon(
-                    seq.awaitVisitorAtStart ? Icons.touch_app : Icons.touch_app_outlined,
-                    color: seq.awaitVisitorAtStart ? Colors.purple : Colors.grey,
+                    seq.awaitVisitorAtStart
+                        ? Icons.touch_app
+                        : Icons.touch_app_outlined,
+                    color:
+                        seq.awaitVisitorAtStart ? Colors.purple : Colors.grey,
                   ),
                   const SizedBox(width: 8),
                   const Expanded(
@@ -1326,8 +1339,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   ),
                   Switch(
                     value: seq.awaitVisitorAtStart,
-                    activeColor: Colors.purple,
-                    onChanged: (v) => _updateTourOptions(awaitVisitorAtStart: v),
+                    activeThumbColor: Colors.purple,
+                    onChanged: (v) =>
+                        _updateTourOptions(awaitVisitorAtStart: v),
                   ),
                 ],
               ),
@@ -1355,12 +1369,12 @@ class _SequenceEditorState extends State<SequenceEditor> {
                     Expanded(
                       child: TextField(
                         controller: _awaitDisplayUrlController,
-                        decoration: InputDecoration(
+                        decoration: const InputDecoration(
                           labelText: 'Display URL',
                           hintText: 'frontiertower.io',
-                          border: const OutlineInputBorder(),
+                          border: OutlineInputBorder(),
                           isDense: true,
-                          prefixIcon: const Icon(Icons.web, size: 18),
+                          prefixIcon: Icon(Icons.web, size: 18),
                         ),
                       ),
                     ),

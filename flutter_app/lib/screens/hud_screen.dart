@@ -84,7 +84,6 @@ class _HudScreenState extends State<HudScreen>
   late AnimationController _rightPanelController;
   late AnimationController _bottomPanelController;
 
-
   // Cyberpunk accent color
   static const _accentColor = Color(0xFF00D4FF); // Cyan glow
   static const _accentSecondary = Color(0xFF00FF88); // Green glow
@@ -298,9 +297,10 @@ class _HudScreenState extends State<HudScreen>
       debugPrint('HUD: App resumed - running SINC health check');
       _checkConnectionHealth(robot);
     } else if (robot.state == RobotConnectionState.disconnected ||
-               robot.state == RobotConnectionState.error) {
+        robot.state == RobotConnectionState.error) {
       // Connection was lost during background - auto-reconnect
-      debugPrint('HUD: Connection lost during background, attempting reconnect');
+      debugPrint(
+          'HUD: Connection lost during background, attempting reconnect');
       final savedUrl = robot.robotUrl;
       if (savedUrl.isNotEmpty) {
         robot.connect(savedUrl);
@@ -325,21 +325,23 @@ class _HudScreenState extends State<HudScreen>
     final bufferClient = SequenceExecutor().bufferClient;
     final isStale = bufferClient?.isStale ?? false;
     final lastHb = bufferClient?.lastHeartbeat;
-    final hbAge = lastHb != null
-        ? DateTime.now().difference(lastHb).inSeconds
-        : -1;
+    final hbAge =
+        lastHb != null ? DateTime.now().difference(lastHb).inSeconds : -1;
 
-    debugPrint('HUD: 🔍 Health check - isStale=$isStale, lastHeartbeat=${hbAge}s ago');
+    debugPrint(
+        'HUD: 🔍 Health check - isStale=$isStale, lastHeartbeat=${hbAge}s ago');
 
     // Check if a tour is awaiting visitor - DON'T reconnect in this case!
     // User may have backgrounded app to go press the button on tablet
     final tourManager = context.read<SequenceManager>();
     final bufferExecutor = tourManager.bufferExecutor;
-    final isAwaitingVisitor = bufferExecutor?.currentPhase == SequencePhase.awaitingVisitor ||
-                              bufferExecutor?.isAwaitingVisitor == true;
+    final isAwaitingVisitor =
+        bufferExecutor?.currentPhase == SequencePhase.awaitingVisitor ||
+            bufferExecutor?.isAwaitingVisitor == true;
 
     if (isStale && isAwaitingVisitor) {
-      debugPrint('HUD: ⚠️ Connection stale but AWAITING VISITOR - skipping reconnect to preserve tour state');
+      debugPrint(
+          'HUD: ⚠️ Connection stale but AWAITING VISITOR - skipping reconnect to preserve tour state');
       debugPrint('HUD: 💡 User may be pressing START TOUR button on tablet');
       return;
     }
@@ -425,9 +427,9 @@ class _HudScreenState extends State<HudScreen>
           // seed the SINC rhythm detection by checking connection health
           final currentPhase = tourManager.currentPhase;
           if (_lastKnownPhase == SequencePhase.awaitingVisitor &&
-              currentPhase != SequencePhase.awaitingVisitor &&
-              currentPhase != null) {
-            debugPrint('HUD: 🚀 TOUR STARTING - phase changed from awaitingVisitor to $currentPhase');
+              currentPhase != SequencePhase.awaitingVisitor) {
+            debugPrint(
+                'HUD: 🚀 TOUR STARTING - phase changed from awaitingVisitor to $currentPhase');
             debugPrint('HUD: Seeding SINC health check at tour start...');
             // Check connection health at this critical moment
             WidgetsBinding.instance.addPostFrameCallback((_) {

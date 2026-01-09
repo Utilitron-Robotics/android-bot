@@ -4,6 +4,7 @@
 /// Messenger: Receives heartbeats and detects connection staleness
 ///
 /// Both Flutter and Relay use this pattern for bidirectional health monitoring.
+library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
@@ -116,7 +117,8 @@ class Drummer {
 
     // Then at regular intervals
     _timer = Timer.periodic(interval, (_) => _sendBeat());
-    debugPrint('Drummer[$source]: Started with ${interval.inMilliseconds}ms interval');
+    debugPrint(
+        'Drummer[$source]: Started with ${interval.inMilliseconds}ms interval');
   }
 
   /// Stop sending heartbeats
@@ -222,7 +224,8 @@ class Messenger {
     _isStale = false;
 
     if (wasStale) {
-      debugPrint('Messenger[$expectedSource]: Connection recovered at seq $_lastSequence');
+      debugPrint(
+          'Messenger[$expectedSource]: Connection recovered at seq $_lastSequence');
       onRecovered?.call();
     }
 

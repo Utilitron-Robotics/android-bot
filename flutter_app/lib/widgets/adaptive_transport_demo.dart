@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import '../core/adaptive_transport.dart';
-import '../core/robot_transport.dart';
 
 /// Demo widget showing the POWER of adaptive multi-protocol transport
 /// This bad boy will maintain connection through apocalyptic network conditions
