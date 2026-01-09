@@ -38,7 +38,7 @@ Every Robot, CIOT, and chassis robot ships with:
 - **Forward Thinkers** ready for true automation
 - **Anyone** with a Robot/CIOT/chassis robot gathering dust
 
-## Screenshots & Real World Deployments
+## Screenshots & Development Preview
 
 ### Flutter Control App
 ![Flutter Map View](map%20of%20droid%2039%20at%20Front%20Door.jpg)
@@ -160,6 +160,8 @@ Universal controller with adaptive UI based on robot capabilities.
 
 ### 2. Android Relay Bridge (`relay_app/`)
 Tablet-based bridge providing WAN connectivity and customer interaction.
+
+📖 **[See full Relay App documentation](relay_app/README.md)**
 
 **Features:**
 - gRPC server (port 50051) for WAN communication
@@ -484,17 +486,19 @@ service RobotControl {
 }
 ```
 
-## Real-World Success Stories
+## Expected Outcomes
 
-### Before RoboTour Pro
-- **Hotel Manager, California:** "We spent $18,000 on a delivery robot. It delivered maybe 3 items a day. Guests called it 'the expensive obstacle.'"
-- **Office Manager, New York:** "Our Robot robot literally holds a plant now. $20,000 planter."
-- **Restaurant Owner, Texas:** "The robot worked for 2 weeks, then the software crashed. Support wanted $5,000 to fix it."
+### The Problem (Common Industry Complaints)
+- **Hotel Managers:** "We spent $18,000 on a delivery robot. It delivers maybe 3 items a day. Guests call it 'the expensive obstacle.'"
+- **Office Managers:** "Our robot literally holds a plant now. $20,000 planter."
+- **Restaurant Owners:** "The robot worked for 2 weeks, then the software crashed. Support wants $5,000 to fix it."
 
-### After RoboTour Pro
-- **Same Hotel:** "Now it gives 20+ tours daily, delivers room service, and guests love it. Best $299/month we spend."
-- **Same Office:** "It now gives client tours, delivers mail, and our reception saves 3 hours daily. The robot paid for itself."
-- **Same Restaurant:** "Fixed in 20 minutes for FREE. Now handles 50% of our deliveries. Saved two FTEs."
+### Projected Results with RobotOS Pro
+- **Hotels:** 20+ tours daily, room service delivery, guest engagement
+- **Offices:** Client tours, mail delivery, reception automation - potential 3+ hours/day saved
+- **Restaurants:** Restored functionality, 50%+ delivery capacity, significant labor offset
+
+*These are projected outcomes based on platform capabilities. Actual results will vary by deployment.*
 
 ## Deployment Scenarios
 
