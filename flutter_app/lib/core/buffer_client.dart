@@ -492,7 +492,7 @@ class BufferClient extends ChangeNotifier {
   /// Build payload for outgoing heartbeat
   Map<String, dynamic> _buildHeartbeatPayload() {
     return {
-      'connected': _client.connectionState.value == WsConnectionState.connected,
+      'connected': _client.state == WsConnectionState.connected,
       'pending_count': _state.pendingCount,
       'relay_stale': _messenger.isStale,
     };
