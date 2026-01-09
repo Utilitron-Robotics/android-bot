@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package robotcontrol;
 
-option java_package = "com.smait.robotrelay.grpc";
+option java_package = "com.utilitron.robotrelay.grpc";
 option java_outer_classname = "RobotControlProto";
 
 // Robot Control Service - replaces WebSocket for reliable communication
