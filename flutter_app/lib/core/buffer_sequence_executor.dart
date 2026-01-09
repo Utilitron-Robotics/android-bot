@@ -340,6 +340,16 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
     }
 
+    // Special handling: arrived at start, now await visitor
+    if (_awaitingVisitorAtStart && result.isSuccess) {
+      debugPrint('BufferSequenceExecutor: Arrived at start - entering awaitingVisitor phase');
+      _currentPhase = SequencePhase.awaitingVisitor;
+      // Stay in running state but don't load more commands
+      // UI will show START TOUR overlay, call resumeFromVisitor() when pressed
+      notifyListeners();
+      return;
+    }
+
     // Handle navigation failures with retry logic (ALL in Flutter)
     if (result.isFailure) {
       // Check if this was a navigation failure
@@ -426,6 +436,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
   }
 
+  // Track if we're waiting for visitor at start
+  bool _awaitingVisitorAtStart = false;
+
+  /// True if currently waiting for visitor tap at start
+  bool get isAwaitingVisitor => _awaitingVisitorAtStart;
+
   /// Start a sequence
   Future<void> startSequence(Sequence sequence) async {
     if (_status == SequenceExecutorStatus.running) {
@@ -442,13 +458,40 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _status = SequenceExecutorStatus.running;
     _needsStateRestore = false; // We have fresh state, no restore needed
     _reconnectTimestamp = 0; // Clear reconnect filter for fresh sequence
+    _awaitingVisitorAtStart = false;
 
     // Save sequence ID for reconnect recovery
     _saveRunningSequenceId(sequence.id);
 
     _callback.onSequenceStarted(sequence);
 
-    // Build command list for the entire sequence
+    // Check if we should await visitor at start
+    if (sequence.awaitVisitorAtStart &&
+        sequence.startWaypoint != null &&
+        sequence.startWaypoint!.isNotEmpty) {
+      debugPrint('BufferSequenceExecutor: Await visitor mode - navigating to start first');
+
+      // Phase 1: Just navigate to start waypoint
+      final navCommand = BufferCommand.navigate(sequence.startWaypoint!);
+      _totalCommandCount = 1; // Just the nav for now
+
+      final loaded = await _bufferClient.loadCommands([navCommand], clearExisting: true);
+      if (!loaded) {
+        debugPrint('BufferSequenceExecutor: ✗ Failed to load nav command - aborting');
+        _status = SequenceExecutorStatus.idle;
+        _currentSequence = null;
+        notifyListeners();
+        return;
+      }
+
+      // Will enter awaitingVisitor phase when nav completes (in _onCommandCompleted)
+      _awaitingVisitorAtStart = true;
+      debugPrint('BufferSequenceExecutor: ✓ Nav to start loaded, will await visitor on arrival');
+      notifyListeners();
+      return;
+    }
+
+    // Normal start - load all commands at once
     final commands = _buildSequenceCommands(sequence);
     _totalCommandCount = commands.length;
     debugPrint(
@@ -465,10 +508,34 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     debugPrint('BufferSequenceExecutor: ✓ All commands confirmed - starting sequence');
+    notifyListeners();
+  }
 
-    // DISABLED: Screen lock removed - was showing "Do not touch the screen"
-    // _bufferClient.startSequenceMode();
+  /// Resume from visitor wait - called when START TOUR button is pressed
+  Future<void> resumeFromVisitor() async {
+    if (!_awaitingVisitorAtStart || _currentSequence == null) {
+      debugPrint('BufferSequenceExecutor: resumeFromVisitor called but not awaiting');
+      return;
+    }
 
+    debugPrint('BufferSequenceExecutor: Visitor triggered! Loading tour commands...');
+    _awaitingVisitorAtStart = false;
+    _currentPhase = SequencePhase.navigating;
+
+    // Load the rest of the sequence (skip nav to start since we're already there)
+    final commands = _buildSequenceCommands(_currentSequence!, skipNavToStart: true);
+    _totalCommandCount = commands.length;
+    _completedCommandCount = 0;
+
+    final loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
+    if (!loaded) {
+      debugPrint('BufferSequenceExecutor: ✗ Failed to load tour commands');
+      _status = SequenceExecutorStatus.failed;
+      notifyListeners();
+      return;
+    }
+
+    debugPrint('BufferSequenceExecutor: ✓ Tour commands loaded, starting!');
     notifyListeners();
   }
 
@@ -492,7 +559,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
   /// Build buffer commands for a sequence
   ///
   /// Command execution order:
-  /// 1. Navigate to start waypoint (if set)
+  /// 1. Navigate to start waypoint (if set, unless skipNavToStart)
   /// 2. Speak intro text (if set)
   /// 3. For each stop:
   ///    a. Navigate to waypoint
@@ -506,7 +573,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
   /// The display stays up from arrival until next navigation starts.
   /// Wait timer does NOT cut off speech - it waits AFTER speech completes.
   List<BufferCommand> _buildSequenceCommands(Sequence sequence,
-      {int startIndex = 0}) {
+      {int startIndex = 0, bool skipNavToStart = false}) {
     final commands = <BufferCommand>[];
 
     // DEBUG: Log all stops and their config
@@ -520,7 +587,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // START waypoint - navigate here before starting tour
     // (Robot will navigate to start even if human moved it)
-    if (startIndex == 0 &&
+    // Skip if we already navigated there (awaitVisitor mode)
+    if (!skipNavToStart &&
+        startIndex == 0 &&
         sequence.startWaypoint != null &&
         sequence.startWaypoint!.isNotEmpty) {
       debugPrint(
@@ -661,6 +730,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _currentSequence = null;
     _currentStopIndex = -1;
     _navRetryCount = 0;
+    _awaitingVisitorAtStart = false;
     _stopCountdown();
     _needsStateRestore = true; // Ready to restore on next reconnect
 

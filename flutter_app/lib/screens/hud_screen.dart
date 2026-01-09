@@ -20,6 +20,7 @@ import '../widgets/fleet_picker.dart';
 import '../widgets/crowd_logic_settings.dart';
 import '../widgets/announcement_presets.dart';
 import '../widgets/mode_editor.dart';
+import '../widgets/start_tour_overlay.dart';
 
 /// Connection mode options for HUD
 enum ConnectionMode {
@@ -558,6 +559,20 @@ class _HudScreenState extends State<HudScreen>
                   bottom: 60,
                   right: _rightPanelExpanded ? 280 : 72,
                   child: _buildLargeCountdownTimer(tourManager),
+                ),
+
+              // === LAYER 5: Await Visitor Overlay (fullscreen, topmost) ===
+              // Shows START TOUR button when waiting for visitor at start location
+              if (tourRunning && currentPhase == SequencePhase.awaitingVisitor)
+                Positioned.fill(
+                  child: StartTourOverlay(
+                    buttonText: tourManager.currentSequence?.effectiveAwaitButtonText ?? 'START TOUR',
+                    displayUrl: tourManager.currentSequence?.effectiveAwaitDisplayUrl,
+                    onStart: () {
+                      debugPrint('HUD: START TOUR button pressed!');
+                      tourManager.resumeFromVisitor();
+                    },
+                  ),
                 ),
             ],
           );
