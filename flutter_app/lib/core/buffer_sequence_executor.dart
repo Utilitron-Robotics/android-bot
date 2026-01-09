@@ -388,9 +388,18 @@ class BufferSequenceExecutor extends ChangeNotifier {
           displayUrl: _currentSequence!.effectiveAwaitDisplayUrl,
         );
         _totalCommandCount = 2; // nav + button_standby
-        _bufferClient.loadCommands([buttonCmd], clearExisting: false);
 
-        debugPrint('BufferSequenceExecutor: ✓ button_standby sent - waiting for visitor to press START TOUR');
+        // Load async but handle result
+        _bufferClient.loadCommands([buttonCmd], clearExisting: false).then((loaded) {
+          if (loaded) {
+            debugPrint('BufferSequenceExecutor: ✓ button_standby confirmed - waiting for visitor to press START TOUR');
+          } else {
+            debugPrint('BufferSequenceExecutor: ✗ button_standby load FAILED - tour may be stuck');
+            // Try to recover by loading full tour anyway
+            resumeFromVisitor();
+          }
+        });
+
         notifyListeners();
         return; // Don't check completion - wait for button press
       }
