@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-// import 'package:wakelock_plus/wakelock_plus.dart'; // DISABLED - investigating freeze
+import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/robot_connection.dart';
 import '../core/sequence_mode.dart'
     show SequenceManager, SequenceStatus, SequencePhase, Sequence;
@@ -75,6 +75,9 @@ class _HudScreenState extends State<HudScreen>
 
   // Tour start health check - detect phase transition from standby
   SequencePhase? _lastKnownPhase;
+
+  // Wake lock state - keeps screen on during tours
+  bool _wakelockEnabled = false;
 
   // Animation controllers for smooth panel transitions
   late AnimationController _leftPanelController;
@@ -257,6 +260,12 @@ class _HudScreenState extends State<HudScreen>
     // Unregister lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
 
+    // Release wake lock if active
+    if (_wakelockEnabled) {
+      WakelockPlus.disable();
+      _wakelockEnabled = false;
+    }
+
     _urlController.dispose();
     _customSoundController.dispose();
     _leftPanelController.dispose();
@@ -298,6 +307,11 @@ class _HudScreenState extends State<HudScreen>
       }
     }
 
+    // Re-enable wake lock if a tour is running
+    final tourManager = context.read<SequenceManager>();
+    if (tourManager.status == SequenceStatus.running) {
+      _enableWakelock();
+    }
   }
 
   /// Check connection health and reconnect if stale
@@ -333,6 +347,24 @@ class _HudScreenState extends State<HudScreen>
       debugPrint('HUD: ✓ Connection healthy');
       // Seed the SINC rhythm by triggering a state update
       robot.notifyListeners();
+    }
+  }
+
+  /// Enable wake lock to keep screen on during tours
+  void _enableWakelock() {
+    if (!_wakelockEnabled) {
+      WakelockPlus.enable();
+      _wakelockEnabled = true;
+      debugPrint('HUD: Wake lock ENABLED - screen will stay on');
+    }
+  }
+
+  /// Disable wake lock when tour stops
+  void _disableWakelock() {
+    if (_wakelockEnabled) {
+      WakelockPlus.disable();
+      _wakelockEnabled = false;
+      debugPrint('HUD: Wake lock DISABLED - screen can turn off');
     }
   }
 
@@ -390,6 +422,17 @@ class _HudScreenState extends State<HudScreen>
             });
           }
           _lastKnownPhase = currentPhase;
+
+          // Manage wake lock based on tour state
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              if (tourRunning && !_wakelockEnabled) {
+                _enableWakelock();
+              } else if (!tourRunning && _wakelockEnabled) {
+                _disableWakelock();
+              }
+            }
+          });
 
           // Debug: Log when sequence status changes
           if (_enableVerboseLogging &&
