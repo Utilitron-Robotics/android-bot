@@ -17,8 +17,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import com.smait.robotrelay.R
-import com.smait.robotrelay.databinding.ActivityMainBinding
+import com.utilitron.robotrelay.R
+import com.utilitron.robotrelay.databinding.ActivityMainBinding
 import com.smait.robotrelay.protocol.SmaitProtocol
 import com.smait.robotrelay.service.ConnectionState
 import com.smait.robotrelay.service.RelayService
