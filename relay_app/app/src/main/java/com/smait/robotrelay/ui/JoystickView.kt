@@ -9,7 +9,7 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
-import com.smait.robotrelay.R
+import com.utilitron.robotrelay.R
 import kotlin.math.atan2
 import kotlin.math.min
 import kotlin.math.sqrt
