@@ -630,6 +630,9 @@ class SequenceManager extends ChangeNotifier {
   /// Get current buffer state (includes ultrasonic sensor data)
   BufferState? get bufferState => _bufferExecutor?.bufferClient.state;
 
+  /// Get buffer executor for phase/state checks (e.g., awaiting visitor)
+  BufferSequenceExecutor? get bufferExecutor => _bufferExecutor;
+
   /// Mirror buffer executor state to SequenceManager
   void _onBufferExecutorChanged() {
     final executor = _bufferExecutor;
