@@ -259,9 +259,10 @@ class BufferSequenceExecutor extends ChangeNotifier {
       debugPrint('BufferSequenceExecutor: Navigate waypoint=$waypoint');
 
       if (waypoint != null && _currentSequence != null) {
-        // Find the stop index for this waypoint
+        // Find the stop index for this waypoint (case-insensitive match)
+        final waypointNorm = waypoint.toLowerCase().trim();
         for (int i = 0; i < _currentSequence!.stops.length; i++) {
-          if (_currentSequence!.stops[i].waypoint == waypoint) {
+          if (_currentSequence!.stops[i].waypoint.toLowerCase().trim() == waypointNorm) {
             debugPrint(
                 'BufferSequenceExecutor: Found stop index $i for $waypoint');
             _currentStopIndex = i;
