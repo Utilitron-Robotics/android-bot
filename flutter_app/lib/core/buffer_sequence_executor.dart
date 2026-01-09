@@ -511,7 +511,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
     if (!loaded) {
       debugPrint('BufferSequenceExecutor: ✗ Failed to confirm command load - aborting');
       _status = SequenceExecutorStatus.idle;
-      _callback.onSequenceError(sequence, 'Failed to load commands into relay buffer');
+      _currentSequence = null;
       notifyListeners();
       return;
     }

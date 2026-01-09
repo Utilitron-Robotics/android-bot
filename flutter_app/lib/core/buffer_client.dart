@@ -548,14 +548,15 @@ class BufferClient extends ChangeNotifier {
     final completer = Completer<bool>();
 
     // Listen for heartbeat that confirms commands are loaded
-    void Function(String, BufferState)? originalCallback = onHeartbeat;
+    final originalCallback = onHeartbeat;
     int attempts = 0;
     const maxAttempts = 10; // 10 heartbeats = ~5 seconds at 500ms rate
 
-    onHeartbeat = (op, state) {
+    onHeartbeat = (op, data) {
       // Call original callback too
-      originalCallback?.call(op, state);
+      originalCallback?.call(op, data);
 
+      final state = data as BufferState;
       attempts++;
       debugPrint('BufferClient: Confirmation check $attempts/$maxAttempts - pending=${state.pending}');
 
