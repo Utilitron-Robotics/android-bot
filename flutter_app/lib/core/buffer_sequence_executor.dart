@@ -664,13 +664,6 @@ class BufferSequenceExecutor extends ChangeNotifier {
       commands.add(BufferCommand.speak(sequence.outroText!));
     }
 
-    // Rest at end - wait before going to end waypoint (for loops, or just resting)
-    if (sequence.restAtEndSeconds > 0) {
-      debugPrint(
-          'BufferSequenceExecutor: Adding rest at end: ${sequence.restAtEndSeconds}s');
-      commands.add(BufferCommand.wait(sequence.restAtEndSeconds * 1000));
-    }
-
     // Handle looping
     if (sequence.loop) {
       debugPrint('BufferSequenceExecutor: Tour set to loop - will restart');
@@ -678,7 +671,15 @@ class BufferSequenceExecutor extends ChangeNotifier {
       // If there's an end waypoint, go there first
       if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
         commands.add(BufferCommand.navigate(sequence.endWaypoint!));
-        // Brief wait at end waypoint
+      }
+
+      // Rest at end - wait AFTER arriving at end waypoint
+      if (sequence.restAtEndSeconds > 0) {
+        debugPrint(
+            'BufferSequenceExecutor: Rest at end (after arrival): ${sequence.restAtEndSeconds}s');
+        commands.add(BufferCommand.wait(sequence.restAtEndSeconds * 1000));
+      } else {
+        // Brief wait at end waypoint if no rest configured
         commands.add(BufferCommand.wait(5000));
       }
 
@@ -695,6 +696,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
       // Non-looping tour - navigate to end and close
       if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
         commands.add(BufferCommand.navigate(sequence.endWaypoint!));
+
+        // Rest at end - wait AFTER arriving at end waypoint
+        if (sequence.restAtEndSeconds > 0) {
+          debugPrint(
+              'BufferSequenceExecutor: Rest at end (after arrival): ${sequence.restAtEndSeconds}s');
+          commands.add(BufferCommand.wait(sequence.restAtEndSeconds * 1000));
+        }
       }
 
       // Close display at end
