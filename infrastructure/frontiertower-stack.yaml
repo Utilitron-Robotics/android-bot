@@ -624,6 +624,9 @@ Resources:
                   'outro_text': body.get('outro_text'),
                   'start_waypoint': body.get('start_waypoint'),
                   'end_waypoint': body.get('end_waypoint'),
+                  'await_visitor_at_start': body.get('await_visitor_at_start', False),  # Show START TOUR button at start
+                  'await_button_text': body.get('await_button_text'),  # Custom button text
+                  'await_display_url': body.get('await_display_url'),  # Custom display URL while waiting
                   'modified_at': body.get('modified_at', now),
                   'created_at': body.get('created_at', now),
                   'updated_at': now
@@ -652,7 +655,8 @@ Resources:
                   'name': 'n', 'description': 'd', 'waypoints': 'w', 'dwell_times': 'dt',
                   'loop': 'l', 'announce_arrival': 'aa', 'rest_at_end_seconds': 'rae',
                   'intro_text': 'it', 'outro_text': 'ot',
-                  'start_waypoint': 'sw', 'end_waypoint': 'ew', 'modified_at': 'ma', 'map_id': 'mi'
+                  'start_waypoint': 'sw', 'end_waypoint': 'ew', 'modified_at': 'ma', 'map_id': 'mi',
+                  'await_visitor_at_start': 'avs', 'await_button_text': 'abt', 'await_display_url': 'adu'
               }
 
               for field, abbrev in field_map.items():
