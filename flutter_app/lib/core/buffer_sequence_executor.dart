@@ -302,6 +302,14 @@ class BufferSequenceExecutor extends ChangeNotifier {
   }
 
   void _onCommandCompleted(CommandResult result) {
+    debugPrint('BufferSequenceExecutor: ════════ COMMAND COMPLETED ════════');
+    debugPrint('BufferSequenceExecutor: commandId=${result.commandId}');
+    debugPrint('BufferSequenceExecutor: result=${result.result}');
+    debugPrint('BufferSequenceExecutor: isSuccess=${result.isSuccess}');
+    debugPrint('BufferSequenceExecutor: _awaitingVisitorAtStart=$_awaitingVisitorAtStart');
+    debugPrint('BufferSequenceExecutor: _currentPhase=$_currentPhase');
+    debugPrint('BufferSequenceExecutor: counts=$_completedCommandCount/$_totalCommandCount');
+
     // Filter out stale events from before reconnect
     // Give 2 second grace period after reconnect to avoid processing buffered events
     final timeSinceReconnect =
@@ -354,7 +362,9 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // Special handling: button_standby completed (visitor pressed START TOUR on tablet)
     // Now load the remaining tour commands
-    if (result.isSuccess && result.commandId.contains('button_standby')) {
+    final isButtonStandby = result.commandId.contains('button_standby');
+    debugPrint('BufferSequenceExecutor: button_standby check: isSuccess=${result.isSuccess}, contains_button_standby=$isButtonStandby');
+    if (result.isSuccess && isButtonStandby) {
       debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
       debugPrint('BufferSequenceExecutor: BUTTON_STANDBY COMPLETED');
       debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
