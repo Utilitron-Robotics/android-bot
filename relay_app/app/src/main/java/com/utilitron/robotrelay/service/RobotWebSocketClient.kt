@@ -268,12 +268,15 @@ class RobotWebSocketClient(
     private fun parseStatusUpdate(json: String) {
         try {
             val obj = com.google.gson.JsonParser.parseString(json).asJsonObject
+
+            // Track when we last got ANY data from robot - do this FIRST!
+            // Before this fix, time was only set after topic/msg checks passed,
+            // so service responses and malformed messages wouldn't update the time.
+            _lastRobotDataTime = System.currentTimeMillis()
+
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
             val current = _robotStatus.value ?: RobotStatusData()
-
-            // Track when we last got data from robot - critical for stale detection!
-            _lastRobotDataTime = System.currentTimeMillis()
 
             when (topic) {
                 ChassisProtocol.TOPIC_ROBOT_STATUS -> {
