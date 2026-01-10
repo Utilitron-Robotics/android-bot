@@ -221,21 +221,22 @@ class MainActivity : AppCompatActivity() {
             val action = intent?.getStringExtra(RelayService.EXTRA_TOUR_ACTION)
             val pin = intent?.getStringExtra(RelayService.EXTRA_TOUR_PIN)
 
-            Log.i(TAG, ">>> tourModeReceiver: action=$action")
+            Log.i(TAG, ">>> tourModeReceiver: action=$action (LOCK SCREEN DISABLED)")
 
-            when (action) {
-                "start" -> {
-                    isTourModeActive = true
-                    if (!pin.isNullOrEmpty()) {
-                        tourUnlockPin = pin
-                    }
-                    showLockScreen()
-                }
-                "stop" -> {
-                    isTourModeActive = false
-                    hideLockScreen()
-                }
-            }
+            // DISABLED: Lock screen was interfering with normal operation
+            // when (action) {
+            //     "start" -> {
+            //         isTourModeActive = true
+            //         if (!pin.isNullOrEmpty()) {
+            //             tourUnlockPin = pin
+            //         }
+            //         showLockScreen()
+            //     }
+            //     "stop" -> {
+            //         isTourModeActive = false
+            //         hideLockScreen()
+            //     }
+            // }
         }
     }
 
