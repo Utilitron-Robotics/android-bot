@@ -539,9 +539,9 @@ class MainActivity : AppCompatActivity() {
             Log.i(TAG, "Start Tour button pressed for sequence: $currentMotionSequenceId")
             // Notify the service that the tour was started by button press
             service?.notifyTourStarted(currentMotionSequenceId ?: "")
-            // Hide motion overlay and show main layout
+            // Hide motion overlay and show webView for tour content
             binding.motionOverlay.visibility = View.GONE
-            binding.mainLayout.visibility = View.VISIBLE
+            binding.webView.visibility = View.VISIBLE
             // NOTE: Lock screen disabled - was causing issues
             // service?.startTourMode(null)
         }
