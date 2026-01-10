@@ -84,6 +84,11 @@ class AdaptiveCommand extends RobotCommand {
 class AdaptiveTransport extends ChangeNotifier {
   static const String _tag = 'AdaptiveTransport';
 
+  // Stored endpoints from initialize()
+  String? _grpcEndpoint;
+  String? _websocketUrl;
+  String? _httpEndpoint;
+
   // Transports in priority order
   final List<RobotTransport> _transports = [];
   RobotTransport? _activeTransport;
@@ -124,6 +129,11 @@ class AdaptiveTransport extends ChangeNotifier {
     String? websocketUrl,
     String? httpEndpoint,
   }) {
+    // Store endpoints for later use in connect()
+    _grpcEndpoint = grpcEndpoint;
+    _websocketUrl = websocketUrl;
+    _httpEndpoint = httpEndpoint;
+
     _transports.clear();
 
     // Add transports in priority order
@@ -425,14 +435,14 @@ class AdaptiveTransport extends ChangeNotifier {
   }
 
   String _getEndpointForTransport(RobotTransport transport) {
-    // TODO: Get from configuration
+    // Use stored endpoints from initialize() - no more hardcoded IPs!
     switch (transport.type) {
       case TransportType.grpc:
-        return '192.168.88.37:50051';
+        return _grpcEndpoint ?? '';
       case TransportType.websocket:
-        return 'ws://192.168.88.37:8766';
+        return _websocketUrl ?? '';
       case TransportType.http:
-        return 'http://192.168.88.37:8765';
+        return _httpEndpoint ?? '';
     }
   }
 

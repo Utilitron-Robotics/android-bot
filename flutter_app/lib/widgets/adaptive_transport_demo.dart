@@ -27,9 +27,11 @@ class _AdaptiveTransportDemoState extends State<AdaptiveTransportDemo>
     _transport = AdaptiveTransport();
 
     // Initialize with multiple fallback options
+    // NOTE: In production, get these from robot connection, not hardcoded!
+    // These are just demo defaults
     _transport.initialize(
-      websocketUrl: 'ws://192.168.88.37:8766', // Primary
-      httpEndpoint: 'http://192.168.88.37:8765', // Fallback
+      websocketUrl: 'ws://192.168.88.37:8766', // DEMO ONLY - get from robot
+      httpEndpoint: 'http://192.168.88.37:8765', // DEMO ONLY - get from robot
       // grpcEndpoint: '192.168.88.37:50051',    // Future WAN option
     );
 
