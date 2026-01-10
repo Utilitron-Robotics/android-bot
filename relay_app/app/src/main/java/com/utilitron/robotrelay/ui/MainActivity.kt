@@ -241,17 +241,30 @@ class MainActivity : AppCompatActivity() {
 
     private val tourStandbyReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            standbySequenceId = intent?.getStringExtra(RelayService.EXTRA_TOUR_SEQUENCE_ID)
-            standbyButtonText = intent?.getStringExtra(RelayService.EXTRA_TOUR_BUTTON_TEXT) ?: "Start Tour"
-            Log.i(TAG, ">>> tourStandbyReceiver: sequenceId=$standbySequenceId, buttonText=$standbyButtonText")
+            val sequenceId = intent?.getStringExtra(RelayService.EXTRA_TOUR_SEQUENCE_ID)
+            val buttonText = intent?.getStringExtra(RelayService.EXTRA_TOUR_BUTTON_TEXT) ?: "Start Tour"
+            Log.i(TAG, ">>> tourStandbyReceiver: sequenceId=$sequenceId, buttonText=$buttonText")
 
-            // Show the START TOUR button overlay for visitors
-            // This works whether or not tour mode lock is active
-            if (standbySequenceId != null) {
-                isTourModeActive = true  // Enable tour mode to show lock screen with button
-                showLockScreen()
-                Log.i(TAG, "Showing START TOUR button for visitor")
+            // Show the START TOUR button using motionOverlay (simple, no lock screen interference)
+            if (sequenceId != null) {
+                currentMotionSequenceId = sequenceId
+                binding.mainLayout.visibility = View.GONE
+                binding.webView.visibility = View.GONE
+                binding.motionOverlay.visibility = View.VISIBLE
+                binding.motionWaitingLayout.visibility = View.GONE
+                binding.motionStartLayout.visibility = View.VISIBLE
+                binding.btnStartTour.text = buttonText
+                Log.i(TAG, "Showing START TOUR button via motionOverlay for visitor")
             }
+
+            // OLD LOCK SCREEN APPROACH - commented out, interfered with button taps
+            // if (sequenceId != null) {
+            //     standbySequenceId = sequenceId
+            //     standbyButtonText = buttonText
+            //     isTourModeActive = true  // Enable tour mode to show lock screen with button
+            //     showLockScreen()
+            //     Log.i(TAG, "Showing START TOUR button for visitor")
+            // }
         }
     }
 
