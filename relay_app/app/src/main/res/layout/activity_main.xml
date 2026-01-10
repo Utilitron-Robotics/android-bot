@@ -638,6 +638,7 @@
         android:focusable="true">
 
         <!-- Professional START TOUR button - visible when locked, for visitors -->
+        <!-- clickable=true blocks click propagation to parent lockOverlay (fixes button being untappable) -->
         <LinearLayout
             android:id="@+id/lockStartTourLayout"
             android:layout_width="match_parent"
@@ -647,7 +648,9 @@
             android:layout_gravity="center"
             android:background="#F5F5F5"
             android:visibility="gone"
-            android:padding="32dp">
+            android:padding="32dp"
+            android:clickable="true"
+            android:focusable="true">
 
             <!-- Clean professional header -->
             <TextView
