@@ -183,11 +183,16 @@ class Messenger {
   /// Start monitoring for staleness
   void start() {
     _staleCheckTimer?.cancel();
+    // Reset state when starting fresh - critical for robot switching!
+    _lastTimestamp = 0;
+    _lastSequence = 0;
+    _isStale = true;
+    _expectedInterval = const Duration(milliseconds: 500);
     _staleCheckTimer = Timer.periodic(
       const Duration(milliseconds: 500),
       (_) => _checkStaleness(),
     );
-    debugPrint('Messenger[$expectedSource]: Started monitoring');
+    debugPrint('Messenger[$expectedSource]: Started monitoring (state reset)');
   }
 
   /// Stop monitoring
