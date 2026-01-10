@@ -1019,7 +1019,20 @@ class _HudScreenState extends State<HudScreen>
                     ),
                     const SizedBox(width: 4),
                   ],
-                  // Skip button
+                  // SKIP WAIT button - only shows when awaiting visitor
+                  if (tourManager.currentPhase == SequencePhase.awaitingVisitor) ...[
+                    _MiniControlButton(
+                      icon: Icons.fast_forward,
+                      color: Colors.amber,
+                      onTap: () {
+                        debugPrint('HUD: SKIP WAIT pressed - resuming tour without visitor');
+                        tourManager.resumeFromVisitor();
+                      },
+                      tooltip: 'Skip Wait',
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  // Skip to next stop button
                   _MiniControlButton(
                     icon: Icons.skip_next,
                     color: _accentColor,
