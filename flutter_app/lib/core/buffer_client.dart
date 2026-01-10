@@ -565,6 +565,13 @@ class BufferClient extends ChangeNotifier {
   void _handleHeartbeat(Map<String, dynamic> json) {
     final now = DateTime.now();
 
+    // DEBUG: Log robot data age from heartbeat
+    final robotData = json['robot'] as Map<String, dynamic>?;
+    final dataAgeMs = robotData?['data_age_ms'] as int? ?? -1;
+    if (dataAgeMs > 3000 || dataAgeMs < 0) {
+      debugPrint('BufferClient: ⚠️ Heartbeat robot data_age_ms=$dataAgeMs (stale if >5000 or <0)');
+    }
+
     // Convert to HeartbeatData and feed to Messenger for SINC-style rhythm tracking
     final heartbeatData = HeartbeatData(
       timestamp: json['timestamp'] as int? ?? now.millisecondsSinceEpoch,
