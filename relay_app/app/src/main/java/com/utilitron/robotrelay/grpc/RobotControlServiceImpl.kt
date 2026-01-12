@@ -287,7 +287,7 @@ class RobotControlServiceImpl(
                     .setTheta(status?.theta ?: 0.0)
                     .build())
                 .setLinearVelocity(status?.velocity?.getOrNull(0) ?: 0.0)
-                .setAngularVelocity(status?.velocity?.getOrnull(1) ?: 0.0)
+                .setAngularVelocity(status?.velocity?.getOrNull(1) ?: 0.0)
                 .build())
             .setBuffer(BufferState.newBuilder()
                 .setPaused(false)
