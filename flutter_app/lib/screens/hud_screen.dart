@@ -492,19 +492,37 @@ class _HudScreenState extends State<HudScreen>
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(6),
-                    child: MapView(
-                      fullscreen: true,
-                      onMapUpdate: (info, x, y) {
-                        if (mounted &&
-                            (info != _mapInfo ||
-                                x != _robotX ||
-                                y != _robotY)) {
-                          setState(() {
-                            _mapInfo = info;
-                            _robotX = x;
-                            _robotY = y;
-                          });
-                        }
+                    child: Consumer<UnifiedTransportManager>(
+                      builder: (context, manager, child) {
+                        return Stack(
+                          children: [
+                            MapView(
+                              fullscreen: true,
+                              mapStream: manager.mapStream, // <-- PASS THE STREAM
+                              onMapUpdate: (info, x, y) {
+                                if (mounted &&
+                                    (info != _mapInfo ||
+                                        x != _robotX ||
+                                        y != _robotY)) {
+                                  setState(() {
+                                    _mapInfo = info;
+                                    _robotX = x;
+                                    _robotY = y;
+                                  });
+                                }
+                              },
+                            ),
+                            Positioned(
+                              bottom: 16,
+                              left: 16,
+                              child: FloatingActionButton(
+                                onPressed: () => manager.connectMapStream(),
+                                tooltip: 'Connect Map Stream (WebRTC)',
+                                child: const Icon(Icons.stream),
+                              ),
+                            )
+                          ],
+                        );
                       },
                     ),
                   ),

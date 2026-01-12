@@ -1,5 +1,6 @@
 package com.utilitron.robotrelay.grpc
 
+import android.content.Context
 import android.util.Log
 import com.utilitron.robotrelay.service.RobotWebSocketClient
 import com.utilitron.robotrelay.service.RelayServer
@@ -21,7 +22,8 @@ import java.io.IOException
 class GrpcServer(
     private val port: Int = 50051,
     private val robotClient: RobotWebSocketClient,
-    private val taskExecutor: RelayServer.TaskExecutor? = null
+    private val taskExecutor: RelayServer.TaskExecutor? = null,
+    private val context: Context
 ) {
     companion object {
         private const val TAG = "GrpcServer"
@@ -37,7 +39,7 @@ class GrpcServer(
 
     fun start() {
         try {
-            serviceImpl = RobotControlServiceImpl(robotClient, taskExecutor)
+            serviceImpl = RobotControlServiceImpl(robotClient, taskExecutor, context)
 
             server = ServerBuilder
                 .forPort(port)
@@ -83,6 +85,7 @@ class GrpcServer(
         Log.i(TAG, "gRPC server stopped")
     }
 
+    @Suppress("unused")
     fun blockUntilShutdown() {
         server?.awaitTermination()
     }
@@ -103,12 +106,15 @@ class GrpcServer(
         }
     }
 
+    @get:Suppress("unused")
     val isRunning: Boolean
         get() = server?.let { !it.isShutdown && !it.isTerminated } ?: false
 
+    @get:Suppress("unused")
     val serverPort: Int
         get() = server?.port ?: -1
 
+    @get:Suppress("unused")
     val services: List<String>
         get() = server?.services?.map { it.serviceDescriptor.name } ?: emptyList()
 }

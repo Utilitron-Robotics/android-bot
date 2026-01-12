@@ -1,9 +1,11 @@
 package com.utilitron.robotrelay.grpc
 
+import android.content.Context
 import android.util.Log
 import com.utilitron.robotrelay.service.RobotWebSocketClient
 import com.utilitron.robotrelay.service.RelayServer
 import com.utilitron.robotrelay.service.ConnectionState
+import com.utilitron.robotrelay.service.WebRtcManager
 import io.grpc.stub.StreamObserver
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -17,7 +19,8 @@ import com.utilitron.robotrelay.grpc.RobotControlGrpc
  */
 class RobotControlServiceImpl(
     private val robotClient: RobotWebSocketClient,
-    private val taskExecutor: RelayServer.TaskExecutor?
+    private val taskExecutor: RelayServer.TaskExecutor?,
+    private val context: Context
 ) : RobotControlGrpc.RobotControlImplBase() {
 
     companion object {
@@ -27,6 +30,8 @@ class RobotControlServiceImpl(
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val activeStreams = ConcurrentHashMap<String, StreamObserver<ServerMessage>>()
+    private val webRtcManagers = ConcurrentHashMap<String, WebRtcManager>()
+
 
     /**
      * Bidirectional streaming - the CORE of gRPC communication
@@ -40,6 +45,13 @@ class RobotControlServiceImpl(
         activeStreams[streamId] = responseObserver
 
         Log.i(TAG, "New gRPC stream connected: $streamId")
+
+        // Initialize WebRTC Manager for this stream
+        val webRtcManager = WebRtcManager(context, robotClient) { signal ->
+            val serverMessage = ServerMessage.newBuilder().setWebrtcSignal(signal).build()
+            responseObserver.onNext(serverMessage)
+        }
+        webRtcManagers[streamId] = webRtcManager
 
         // Start heartbeat for this stream
         val heartbeatJob = scope.launch {
@@ -95,6 +107,14 @@ class RobotControlServiceImpl(
                 when (value.messageCase) {
                     ClientMessage.MessageCase.COMMAND -> handleCommand(value.command, streamId)
                     ClientMessage.MessageCase.BUFFER_CONTROL -> handleBufferControl(value.bufferControl)
+                    ClientMessage.MessageCase.REQUEST_MAP_STREAM -> {
+                        Log.i(TAG, "Received RequestMapStream from client")
+                        webRtcManagers[streamId]?.startMapStream()
+                    }
+                    ClientMessage.MessageCase.WEBRTC_SIGNAL -> {
+                        Log.d(TAG, "Received WebRTCSignal from client")
+                        webRtcManagers[streamId]?.handleSignal(value.webrtcSignal)
+                    }
                     ClientMessage.MessageCase.HEARTBEAT_REQUEST -> {} // Heartbeat already running
                     else -> Log.w(TAG, "Unknown message type: ${value.messageCase}")
                 }
@@ -267,7 +287,7 @@ class RobotControlServiceImpl(
                     .setTheta(status?.theta ?: 0.0)
                     .build())
                 .setLinearVelocity(status?.velocity?.getOrNull(0) ?: 0.0)
-                .setAngularVelocity(status?.velocity?.getOrNull(1) ?: 0.0)
+                .setAngularVelocity(status?.velocity?.getOrnull(1) ?: 0.0)
                 .build())
             .setBuffer(BufferState.newBuilder()
                 .setPaused(false)
@@ -283,11 +303,15 @@ class RobotControlServiceImpl(
 
     private fun cleanup(streamId: String, vararg jobs: Job) {
         activeStreams.remove(streamId)
+        webRtcManagers[streamId]?.close()
+        webRtcManagers.remove(streamId)
         jobs.forEach { it.cancel() }
     }
 
     fun shutdown() {
         scope.cancel()
+        webRtcManagers.values.forEach { it.close() }
+        webRtcManagers.clear()
         activeStreams.clear()
     }
 }

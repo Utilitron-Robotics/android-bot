@@ -300,7 +300,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             grpcServer = com.utilitron.robotrelay.grpc.GrpcServer(
                 port = 50051,
                 robotClient = robotClient,
-                taskExecutor = this
+                taskExecutor = this,
+                context = this
             )
             grpcServer?.start()
             Log.i(TAG, "✅ gRPC server started on port 50051 - WAN-READY!")

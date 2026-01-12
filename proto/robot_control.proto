@@ -23,6 +23,8 @@ message ClientMessage {
     Command command = 1;
     HeartbeatRequest heartbeat_request = 2;
     BufferControl buffer_control = 3;
+    WebRTCSignal webrtc_signal = 4; // For SDP and ICE candidates
+    RequestMapStream request_map_stream = 5; // To start the map stream
   }
 }
 
@@ -33,7 +35,23 @@ message ServerMessage {
     CommandResult command_result = 2;
     RobotStatus robot_status = 3;
     BufferState buffer_state = 4;
+    WebRTCSignal webrtc_signal = 5; // For SDP and ICE candidates
   }
+}
+
+// WebRTC Signaling Message
+message WebRTCSignal {
+  oneof signal {
+    string sdp = 1;
+    string candidate = 2;
+    string candidate_mid = 3; // sdpMid
+    int32 candidate_mline_index = 4; // sdpMLineIndex
+  }
+}
+
+// Message to request the WebRTC map stream
+message RequestMapStream {
+  // Can be extended later with resolution, framerate, etc.
 }
 
 // Command from Flutter to relay/robot

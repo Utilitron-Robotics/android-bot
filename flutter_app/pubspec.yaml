@@ -46,6 +46,8 @@ dependencies:
   # Keep screen awake during tours to prevent connection drops
   wakelock_plus: ^1.2.8
 
+  # WebRTC for real-time map streaming
+  flutter_webrtc: ^0.9.47
 dev_dependencies:
   flutter_test:
     sdk: flutter

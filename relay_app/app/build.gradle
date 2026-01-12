@@ -75,6 +75,9 @@ dependencies {
     implementation 'com.google.protobuf:protobuf-kotlin-lite:3.25.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
 
+    // WebRTC for real-time data streaming
+    implementation 'com.google.android.webrtc:webrtc:1.1.32006'
+
     // Annotations for gRPC
     compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
 }

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
 import '../core/rosbridge_client.dart';
+import '../models/occupancy_grid.dart' as model;
 
 /// Real-time map visualization from /map topic
 class MapView extends StatefulWidget {
@@ -16,10 +17,15 @@ class MapView extends StatefulWidget {
   /// Callback when map info changes (for external overlay display)
   final void Function(MapInfo? info, double robotX, double robotY)? onMapUpdate;
 
+  /// A real-time stream of map data from WebRTC. If provided, this will be used
+  /// instead of the legacy HTTP polling or WebSocket subscriptions.
+  final Stream<model.OccupancyGrid>? mapStream;
+
   const MapView({
     super.key,
     this.fullscreen = false,
     this.onMapUpdate,
+    this.mapStream,
   });
 
   @override
@@ -38,6 +44,7 @@ class _MapCache {
 class _MapViewState extends State<MapView> {
   StreamSubscription? _poseSubscription;
   StreamSubscription? _wsStateSubscription;
+  StreamSubscription? _mapStreamSubscription;
   ui.Image? _mapImage;
   MapInfo? _mapInfo;
   bool _isLoading = false;
@@ -56,11 +63,9 @@ class _MapViewState extends State<MapView> {
   @override
   void initState() {
     super.initState();
-    debugPrint('MapView: initState - using WebSocket for map');
 
     // Restore from static cache IMMEDIATELY to prevent "loading" flash
     if (_MapCache.image != null) {
-      debugPrint('MapView: Restoring map from static cache!');
       _mapImage = _MapCache.image;
       _mapInfo = _MapCache.info;
       _robotX = _MapCache.robotX;
@@ -69,21 +74,37 @@ class _MapViewState extends State<MapView> {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _robot = context.read<RobotConnection>();
-      _lastKnownConnected = _robot?.isConnected ?? false;
-      _lastWsState = _robot?.client.state;
+      final robot = context.read<RobotConnection>();
+      if (widget.mapStream != null) {
+        debugPrint('MapView: initState - Using WebRTC map stream.');
+        _subscribeToWebRtcMapStream();
+      } else {
+        debugPrint('MapView: initState - Using legacy WebSocket/HTTP for map.');
+        _robot = robot;
+        _lastKnownConnected = _robot?.isConnected ?? false;
+        _lastWsState = _robot?.client.state;
+        _updateHttpBaseUrl();
+        _startMapPolling();
+        _robot?.addListener(_onConnectionChanged);
+        _wsStateSubscription = _robot?.client.connectionState.listen(_onWsStateChanged);
+      }
+      
+      // Always subscribe to pose, assuming it comes from a separate topic
+      _subscribeToPose(robot);
+    });
+  }
 
-      // Extract HTTP base URL from WebSocket URL
-      _updateHttpBaseUrl();
-
-      // Start HTTP polling for map
-      _startMapPolling();
-
-      // Subscribe to robot pose via WebSocket (small messages, WS is fine)
-      _subscribeToPose();
-
-      _robot?.addListener(_onConnectionChanged);
-      _wsStateSubscription = _robot?.client.connectionState.listen(_onWsStateChanged);
+  void _subscribeToWebRtcMapStream() {
+    _mapStreamSubscription?.cancel();
+    _mapStreamSubscription = widget.mapStream!.listen((grid) {
+      _handleMapMessage(grid);
+    }, onError: (e) {
+      debugPrint('MapView: Error from WebRTC map stream: $e');
+      if (mounted) {
+        setState(() {
+          _error = 'Map stream error: $e';
+        });
+      }
     });
   }
 
@@ -164,6 +185,7 @@ class _MapViewState extends State<MapView> {
   @override
   void dispose() {
     debugPrint('MapView: DISPOSE called');
+    _mapStreamSubscription?.cancel();
     _robot?.removeListener(_onConnectionChanged);
     _wsStateSubscription?.cancel();
     _poseSubscription?.cancel();
@@ -321,62 +343,64 @@ class _MapViewState extends State<MapView> {
 
   void _handleMapMessage(dynamic data) async {
     if (data == null) return;
+    
+    MapInfo newMapInfo;
+    List<int> gridData;
 
-    try {
-      final info = data['info'] as Map<String, dynamic>?;
-      final mapData = data['data'] as List?;
-
-      if (info == null || mapData == null) return;
-
-      final width = info['width'] as int? ?? 0;
-      final height = info['height'] as int? ?? 0;
-      final resolution = (info['resolution'] as num?)?.toDouble() ?? 0.05;
-      final originX = (info['origin']?['position']?['x'] as num?)?.toDouble() ?? 0;
-      final originY = (info['origin']?['position']?['y'] as num?)?.toDouble() ?? 0;
-
-      if (width == 0 || height == 0) return;
-
-      _mapInfo = MapInfo(
-        width: width,
-        height: height,
-        resolution: resolution,
-        originX: originX,
-        originY: originY,
+    // Adapt to either legacy message (Map<String, dynamic>) or new model
+    if (data is model.OccupancyGrid) {
+      newMapInfo = MapInfo(
+        width: data.info.width,
+        height: data.info.height,
+        resolution: data.info.resolution,
+        originX: data.info.origin.position.x,
+        originY: data.info.origin.position.y,
       );
+      gridData = data.data;
+    } else {
+       // Legacy path
+      try {
+        final info = data['info'] as Map<String, dynamic>?;
+        final mapDataList = data['data'] as List?;
+        if (info == null || mapDataList == null) return;
 
-      // Convert occupancy grid to image
-      final image = await _occupancyGridToImage(
-        mapData.cast<int>(),
-        width,
-        height,
-      );
-
-      if (mounted) {
-        final oldImage = _mapImage;
-        setState(() {
-          _mapImage = image;
-          _isLoading = false;
-          _error = null;
-          _MapCache.image = image;
-          _MapCache.info = _mapInfo;
-        });
-        // Dispose old image AFTER setState, outside the callback
-        if (oldImage != null && oldImage != image) {
-          oldImage.dispose();
-        }
-        debugPrint('MapView: Updated map (disposed old: ${oldImage != null && oldImage != image})');
+        newMapInfo = MapInfo(
+          width: info['width'] as int? ?? 0,
+          height: info['height'] as int? ?? 0,
+          resolution: (info['resolution'] as num?)?.toDouble() ?? 0.05,
+          originX: (info['origin']?['position']?['x'] as num?)?.toDouble() ?? 0,
+          originY: (info['origin']?['position']?['y'] as num?)?.toDouble() ?? 0,
+        );
+        gridData = mapDataList.cast<int>();
+      } catch (e) {
+         if (mounted) setState(() => _error = 'Legacy map parse error: $e');
+         return;
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = 'Map parse error: $e';
-          _isLoading = false;
-        });
+    }
+
+    if (newMapInfo.width == 0 || newMapInfo.height == 0) return;
+    
+    _mapInfo = newMapInfo;
+
+    // Convert occupancy grid to image
+    final image = await _occupancyGridToImage(gridData, newMapInfo.width, newMapInfo.height);
+
+    if (mounted) {
+      final oldImage = _mapImage;
+      setState(() {
+        _mapImage = image;
+        _isLoading = false;
+        _error = null;
+        _MapCache.image = image;
+        _MapCache.info = _mapInfo;
+      });
+      if (oldImage != null && oldImage != image) {
+        oldImage.dispose();
       }
     }
   }
 
-  void _handlePoseMessage(dynamic data) {
+  void _handlePoseMessage(dynamic data) async {
     if (data == null) return;
     final x = (data['x'] as num?)?.toDouble() ?? 0;
     final y = (data['y'] as num?)?.toDouble() ?? 0;

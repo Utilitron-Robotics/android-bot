@@ -17,6 +17,7 @@ library;
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import '../models/occupancy_grid.dart' as model;
 import 'transport_config.dart';
 import 'adaptive_transport.dart';
 import 'robot_transport.dart';
@@ -216,6 +217,8 @@ class UnifiedTransportManager extends ChangeNotifier {
       _statusController.stream;
   Stream<Map<String, dynamic>> get robotStatus => _robotStatusController.stream;
   Stream<CommandAck> get commandResults => _commandResultController.stream;
+  Stream<model.OccupancyGrid> get mapStream =>
+      _webrtc?.mapStream ?? const Stream.empty();
   bool get isConnected => _status.hasAnyConnection;
   String? get lastError => _lastError;
   PredictiveController get predictiveController => _predictiveController;
@@ -235,10 +238,10 @@ class UnifiedTransportManager extends ChangeNotifier {
       _setupGrpcListeners();
     }
 
-    // Initialize WebRTC if signaling URL provided
-    if (_endpoints.webrtcSignalingUrl != null) {
-      _webrtc = WebRtcTransport(config: _config);
-      _setupWebRtcListeners();
+    // Initialize WebRTC for data channels (requires gRPC for signaling)
+    if (_grpc != null) {
+      _webrtc = WebRtcTransport(grpcClient: _grpc!);
+      // Listeners for WebRTC state are now handled internally or by consumers
     }
 
     // Initialize MQTT if broker URL provided
@@ -295,6 +298,16 @@ class UnifiedTransportManager extends ChangeNotifier {
     _updateStatus();
 
     debugPrint('$_tag: Connection complete - status: $_status');
+  }
+
+  /// Connect to the WebRTC map stream
+  Future<void> connectMapStream() async {
+    if (_webrtc == null) {
+      throw Exception('WebRTC not configured or gRPC not available for signaling.');
+    }
+    debugPrint('$_tag: Connecting WebRTC for map stream...');
+    await _webrtc!.connect();
+    _updateStatus();
   }
 
   /// Connect to a specific robot (for WebRTC video)

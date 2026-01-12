@@ -45,11 +45,13 @@ class GrpcRobotClient extends ChangeNotifier {
   final _bufferStateController = StreamController<BufferState>.broadcast();
   final _commandResultController = StreamController<CommandResult>.broadcast();
   final _connectionStateController = StreamController<bool>.broadcast();
+  final _webRtcSignalController = StreamController<WebRTCSignal>.broadcast();
 
   Stream<RobotStatus> get robotStatus => _robotStatusController.stream;
   Stream<BufferState> get bufferState => _bufferStateController.stream;
   Stream<CommandResult> get commandResults => _commandResultController.stream;
   Stream<bool> get connectionState => _connectionStateController.stream;
+  Stream<WebRTCSignal> get webrtcSignalStream => _webRtcSignalController.stream;
 
   bool get isConnected => _isConnected;
   String? get lastError => _lastError;
@@ -142,6 +144,9 @@ class GrpcRobotClient extends ChangeNotifier {
         break;
       case ServerMessage_Message.commandResult:
         _commandResultController.add(message.commandResult);
+        break;
+      case ServerMessage_Message.webrtcSignal:
+        _webRtcSignalController.add(message.webrtcSignal);
         break;
       default:
         debugPrint('$_tag: Unknown message type');
@@ -299,6 +304,18 @@ class GrpcRobotClient extends ChangeNotifier {
     _sendMessage(message);
   }
 
+  /// Request the WebRTC map stream from the server
+  void requestMapStream() {
+    final message = ClientMessage()..requestMapStream = RequestMapStream();
+    _sendMessage(message);
+  }
+
+  /// Send a WebRTC signaling message (SDP or ICE candidate) to the server
+  void sendWebRtcSignal(WebRTCSignal signal) {
+    final message = ClientMessage()..webrtcSignal = signal;
+    _sendMessage(message);
+  }
+
   /// Send message to server
   void _sendMessage(ClientMessage message) {
     if (_commandStream?.isClosed ?? true) {
@@ -346,6 +363,7 @@ class GrpcRobotClient extends ChangeNotifier {
     _bufferStateController.close();
     _commandResultController.close();
     _connectionStateController.close();
+    _webRtcSignalController.close();
     super.dispose();
   }
 }

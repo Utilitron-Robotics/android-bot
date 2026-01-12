@@ -1,16 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'core/robot_connection.dart';
+import 'core/unified_transport.dart';
 import 'core/fleet_discovery.dart';
 import 'core/sequence_mode.dart';
 import 'core/task_engine.dart';
 import 'screens/hud_screen.dart';
 
+// Global instance of the transport manager
+final unifiedTransportManager = UnifiedTransportManager(
+  endpoints: const TransportEndpoints(
+    // NOTE: The gRPC host should be configured by the user in the UI.
+    // This is a placeholder for initialization.
+    grpcHost: '192.168.1.100', 
+    robotId: 'robot-1',
+  ),
+);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Load saved tours and task assignments before app starts
+  
+  // Initialize the transport manager
+  await unifiedTransportManager.initialize();
+  await unifiedTransportManager.connect();
+
+  // Load other saved states
   await SequenceManager.instance.load();
   await TaskEngine.instance.load();
+
   runApp(const DroidControllerApp());
 }
 
@@ -21,7 +37,8 @@ class DroidControllerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => RobotConnection()),
+        // Provide the single instance of the transport manager
+        ChangeNotifierProvider.value(value: unifiedTransportManager),
         ChangeNotifierProvider(create: (_) => FleetDiscovery()),
         ChangeNotifierProvider.value(value: SequenceManager.instance),
       ],
@@ -40,4 +57,5 @@ class DroidControllerApp extends StatelessWidget {
     );
   }
 }
+
 
