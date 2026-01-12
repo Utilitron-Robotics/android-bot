@@ -199,8 +199,8 @@ class _MapViewState extends State<MapView> {
   Future<void> _fetchMapViaHttp() async {
     if (_httpBaseUrl == null) return;
 
-    final robot = _robot;
-    if (robot == null || !robot.isConnected) return;
+    // Don't gate on robot.isConnected - HTTP is independent of WebSocket state
+    // The relay HTTP server runs regardless of WS connection
 
     try {
       final response = await http.get(
