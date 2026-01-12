@@ -64,7 +64,7 @@ class WebRtcManager(
                 val signal = WebRTCSignal.newBuilder()
                     .setCandidate(candidate.sdp)
                     .setCandidateMid(candidate.sdpMid)
-                    .setCandidateMlineIndex(candidate.sdpMLine)
+                    .setCandidateMlineIndex(candidate.sdpMLineIndex)
                     .build()
                 signalingSender(signal)
             }
