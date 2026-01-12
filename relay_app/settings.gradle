@@ -10,6 +10,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // JitPack for WebRTC
+        maven { url 'https://jitpack.io' }
     }
 }
 
