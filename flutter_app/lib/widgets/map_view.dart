@@ -197,10 +197,20 @@ class _MapViewState extends State<MapView> {
 
   /// Fetch map via HTTP - single request/response, no subscription issues
   Future<void> _fetchMapViaHttp() async {
-    if (_httpBaseUrl == null) return;
+    if (_httpBaseUrl == null) {
+      debugPrint('MapView: HTTP fetch skipped - no base URL');
+      return;
+    }
 
     final robot = _robot;
-    if (robot == null || !robot.isConnected) return;
+    if (robot == null) {
+      debugPrint('MapView: HTTP fetch skipped - robot is null');
+      return;
+    }
+
+    // Don't gate on isConnected - HTTP is independent of WebSocket state
+    // The relay HTTP server runs regardless of WS connection
+    debugPrint('MapView: Fetching map from $_httpBaseUrl/map');
 
     try {
       final response = await http.get(
