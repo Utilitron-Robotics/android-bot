@@ -62,10 +62,6 @@ class RobotWebSocketClient(
     private var _mapLastUpdated: Long = 0
     val mapLastUpdated: Long get() = _mapLastUpdated
 
-    // Debug counter for message tracking
-    @Volatile
-    private var _messageCount: Long = 0
-
     private val _robotStatus = MutableStateFlow<RobotStatusData?>(null)
     val robotStatus: StateFlow<RobotStatusData?> = _robotStatus
 
@@ -112,12 +108,6 @@ class RobotWebSocketClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            // Debug: log every 100th message to track flow
-            val msgCount = ++_messageCount
-            if (msgCount % 100 == 0L) {
-                Log.i(TAG, ">>> Message count: $msgCount, map cached: ${_cachedMapMessage != null}")
-            }
-
             // Log map messages specially - they're huge and might be the issue
             val isMapMsg = text.contains("\"/map\"") || text.contains("\"topic\":\"/map\"")
             if (isMapMsg) {
@@ -125,7 +115,7 @@ class RobotWebSocketClient(
                 // Cache the map for HTTP transport - more reliable than WS for big payloads
                 _cachedMapMessage = text
                 _mapLastUpdated = System.currentTimeMillis()
-                Log.i(TAG, ">>> Map cached for HTTP transport, age reset to 0")
+                Log.i(TAG, ">>> Map cached for HTTP transport")
             } else {
                 Log.d(TAG, text.take(200)) // Truncate other messages
             }
@@ -187,8 +177,6 @@ class RobotWebSocketClient(
     }
 
     private fun setupSubscriptions() {
-        Log.i(TAG, ">>> setupSubscriptions() STARTING - sending all subscriptions...")
-
         send(ChassisProtocol.advertiseVelocity())
         send(ChassisProtocol.advertiseCancelGoal())
         send(ChassisProtocol.advertiseSoftStop())
@@ -199,15 +187,12 @@ class RobotWebSocketClient(
         send(ChassisProtocol.subscribeLaserData())
         send(ChassisProtocol.subscribeGlobalPath())  // For obstacle path intersection
         send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection
-
         // Subscribe to /map so it's always flowing to Flutter clients
         // This ensures map works after Flutter hot restart
         val mapSubMsg = ChassisProtocol.subscribeMapSimple()
-        Log.i(TAG, ">>> MAP SUBSCRIPTION: Sending message: $mapSubMsg")
         val mapSent = send(mapSubMsg)
-        Log.i(TAG, ">>> MAP SUBSCRIPTION: send() returned: $mapSent")
-
-        Log.i(TAG, ">>> setupSubscriptions() COMPLETE - all subscriptions sent")
+        Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
+        Log.i(TAG, ">>> /map subscription sent: $mapSent")
     }
 
     /**
@@ -281,16 +266,14 @@ class RobotWebSocketClient(
     }
 
     private fun parseStatusUpdate(json: String) {
-        // Track when we last got ANY data from robot - ABSOLUTE FIRST before any parsing!
-        // Must happen before try block because JsonParser can throw on malformed JSON
-        _lastRobotDataTime = System.currentTimeMillis()
-
         try {
             val obj = com.google.gson.JsonParser.parseString(json).asJsonObject
-
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
             val current = _robotStatus.value ?: RobotStatusData()
+
+            // Track when we last got data from robot - critical for stale detection!
+            _lastRobotDataTime = System.currentTimeMillis()
 
             when (topic) {
                 ChassisProtocol.TOPIC_ROBOT_STATUS -> {
