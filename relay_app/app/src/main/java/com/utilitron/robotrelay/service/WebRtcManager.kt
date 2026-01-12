@@ -190,7 +190,7 @@ class WebRtcManager(
 
     private fun subscribeToMapData() {
         scope.launch {
-            robotWebSocketClient.messages
+            robotWebSocketClient.incomingMessages
                 .filter { it.contains("\"topic\":\"/map\"") }
                 .map { jsonString ->
                     // Instead of sending raw JSON, parse out the critical data
