@@ -67,8 +67,8 @@ dependencies {
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
     implementation 'org.nanohttpd:nanohttpd-websocket:2.3.1'
 
-    // TODO: WebRTC for video streaming - add back when implementing camera feed
-    // implementation 'io.getstream:stream-webrtc-android:1.1.1'
+    // WebRTC for real-time data streaming (map data channel)
+    implementation 'io.getstream:stream-webrtc-android:1.1.1'
 
     // gRPC and Protobuf
     implementation 'io.grpc:grpc-okhttp:1.60.0'
@@ -77,9 +77,6 @@ dependencies {
     implementation 'io.grpc:grpc-kotlin-stub:1.4.1'
     implementation 'com.google.protobuf:protobuf-kotlin-lite:3.25.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
-
-    // WebRTC for real-time data streaming
-    implementation 'com.google.android.webrtc:webrtc:1.1.32006'
 
     // Annotations for gRPC
     compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
