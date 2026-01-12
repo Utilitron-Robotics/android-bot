@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/unified_transport.dart';
+import 'core/robot_connection.dart';
 import 'core/fleet_discovery.dart';
 import 'core/sequence_mode.dart';
 import 'core/task_engine.dart';
@@ -39,6 +40,8 @@ class DroidControllerApp extends StatelessWidget {
       providers: [
         // Provide the single instance of the transport manager
         ChangeNotifierProvider.value(value: unifiedTransportManager),
+        // Legacy WebSocket connection for direct rosbridge communication
+        ChangeNotifierProvider(create: (_) => RobotConnection()),
         ChangeNotifierProvider(create: (_) => FleetDiscovery()),
         ChangeNotifierProvider.value(value: SequenceManager.instance),
       ],
