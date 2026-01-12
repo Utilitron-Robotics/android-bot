@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/robot_connection.dart';
+import '../core/unified_transport.dart' show UnifiedTransportManager;
 import '../core/sequence_mode.dart'
     show SequenceManager, SequenceStatus, SequencePhase, Sequence;
 import '../core/chassis_protocol.dart' as protocol;
