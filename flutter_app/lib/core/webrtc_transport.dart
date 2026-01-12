@@ -27,6 +27,15 @@ class WebRtcTransport extends ChangeNotifier {
   final _mapStreamController = StreamController<model.OccupancyGrid>.broadcast();
   Stream<model.OccupancyGrid> get mapStream => _mapStreamController.stream;
 
+  // Additional streams and getters for unified_transport.dart compatibility
+  final _stateStreamController = StreamController<WebRtcState>.broadcast();
+  Stream<WebRtcState> get stateStream => _stateStreamController.stream;
+
+  final _dataMessagesController = StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get dataMessages => _dataMessagesController.stream;
+
+  bool get hasDataChannel => _dataChannel != null && _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
+
   WebRtcTransport({required GrpcRobotClient grpcClient}) : _grpcClient = grpcClient;
 
   Future<void> connect() async {
@@ -159,13 +168,57 @@ class WebRtcTransport extends ChangeNotifier {
   void _setState(WebRtcState newState) {
     if (_state == newState) return;
     _state = newState;
+    _stateStreamController.add(newState);
     notifyListeners();
+  }
+
+  /// Create an SDP offer for video streaming (used by unified_transport.dart)
+  Future<RTCSessionDescription?> createOffer() async {
+    if (_peerConnection == null) {
+      debugPrint('$_tag: Cannot create offer - no peer connection');
+      return null;
+    }
+    try {
+      final offer = await _peerConnection!.createOffer();
+      await _peerConnection!.setLocalDescription(offer);
+      return offer;
+    } catch (e) {
+      debugPrint('$_tag: Failed to create offer: $e');
+      return null;
+    }
+  }
+
+  /// Send velocity command over data channel (for low-latency teleoperation)
+  void sendVelocity(double linear, double angular) {
+    sendData({
+      'type': 'velocity',
+      'linear': linear,
+      'angular': angular,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  /// Send arbitrary data over the data channel
+  void sendData(Map<String, dynamic> data) {
+    if (_dataChannel == null || _dataChannel!.state != RTCDataChannelState.RTCDataChannelOpen) {
+      debugPrint('$_tag: Cannot send data - data channel not open');
+      return;
+    }
+    try {
+      final jsonString = data.toString(); // Simple encoding
+      final bytes = Uint8List.fromList(jsonString.codeUnits);
+      _dataChannel!.send(RTCDataChannelMessage.fromBinary(bytes));
+    } catch (e) {
+      debugPrint('$_tag: Failed to send data: $e');
+    }
   }
 
   @override
   void dispose() {
     disconnect();
     _mapStreamController.close();
+    _stateStreamController.close();
+    _dataMessagesController.close();
     super.dispose();
   }
 }

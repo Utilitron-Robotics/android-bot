@@ -48,6 +48,9 @@ dependencies:
 
   # WebRTC for real-time map streaming
   flutter_webrtc: ^0.12.0
+
+  # Archive/compression utilities for WebRTC map data decompression
+  archive: ^3.6.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

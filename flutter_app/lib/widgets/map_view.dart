@@ -90,7 +90,7 @@ class _MapViewState extends State<MapView> {
       }
       
       // Always subscribe to pose, assuming it comes from a separate topic
-      _subscribeToPose(robot);
+      _subscribeToPose();
     });
   }
 

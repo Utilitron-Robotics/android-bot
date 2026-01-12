@@ -299,7 +299,7 @@ class GrpcRobotClient extends ChangeNotifier {
 
   /// Clear buffer
   void clearBuffer() {
-    final control = BufferControl()..clear = true;
+    final control = BufferControl()..clear_5 = true;
     final message = ClientMessage()..bufferControl = control;
     _sendMessage(message);
   }
