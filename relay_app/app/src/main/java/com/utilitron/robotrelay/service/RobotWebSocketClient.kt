@@ -266,13 +266,12 @@ class RobotWebSocketClient(
     }
 
     private fun parseStatusUpdate(json: String) {
+        // Track when we last got ANY data from robot - ABSOLUTE FIRST before any parsing!
+        // Must happen before try block because JsonParser can throw on malformed JSON
+        _lastRobotDataTime = System.currentTimeMillis()
+
         try {
             val obj = com.google.gson.JsonParser.parseString(json).asJsonObject
-
-            // Track when we last got ANY data from robot - do this FIRST!
-            // Before this fix, time was only set after topic/msg checks passed,
-            // so service responses and malformed messages wouldn't update the time.
-            _lastRobotDataTime = System.currentTimeMillis()
 
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
