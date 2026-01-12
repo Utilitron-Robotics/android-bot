@@ -67,6 +67,9 @@ dependencies {
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
     implementation 'org.nanohttpd:nanohttpd-websocket:2.3.1'
 
+    // WebRTC for video streaming
+    implementation 'io.getstream:stream-webrtc-android:1.1.1'
+
     // gRPC and Protobuf
     implementation 'io.grpc:grpc-okhttp:1.60.0'
     implementation 'io.grpc:grpc-protobuf-lite:1.60.0'
