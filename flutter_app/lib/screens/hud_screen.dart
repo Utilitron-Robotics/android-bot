@@ -307,8 +307,7 @@ class _HudScreenState extends State<HudScreen>
           robot.connect(savedUrl);
         } else {
           // Relay mode - reconnect gRPC
-          final uri = Uri.tryParse(savedUrl);
-          final host = (uri != null && uri.host.isNotEmpty) ? uri.host : savedUrl;
+          final host = _extractHost(savedUrl);
           context.read<UnifiedTransportManager>().connectToHost(host);
         }
       }
@@ -364,8 +363,7 @@ class _HudScreenState extends State<HudScreen>
             if (_connectionMode == ConnectionMode.direct) {
               robot.connect(savedUrl);
             } else {
-              final uri = Uri.tryParse(savedUrl);
-              final host = (uri != null && uri.host.isNotEmpty) ? uri.host : savedUrl;
+              final host = _extractHost(savedUrl);
               context.read<UnifiedTransportManager>().connectToHost(host);
             }
           }
@@ -2331,18 +2329,14 @@ class _HudScreenState extends State<HudScreen>
       robot.connectWithDisplayUrl(userUrl, userUrl);
     } else {
       // Relay mode: gRPC to relay tablet
-      // Extract host - handle both bare IP and URLs with scheme
-      String host = userUrl;
-      final uri = Uri.tryParse(userUrl);
-      if (uri != null && uri.host.isNotEmpty) {
-        host = uri.host;
-      }
+      // Extract host - strip any port or scheme
+      String host = _extractHost(userUrl);
 
       final transport = context.read<UnifiedTransportManager>();
       transport.connectToHost(host);
       debugPrint('HUD: Connecting gRPC to $host:50051');
-      // Save the URL for display purposes
-      robot.setDisplayUrl(userUrl);
+      // Save just the host for relay mode
+      robot.setDisplayUrl(host);
     }
   }
 
@@ -2373,6 +2367,25 @@ class _HudScreenState extends State<HudScreen>
     } else {
       setState(() => _connectionMode = ConnectionMode.relay);
     }
+  }
+
+  /// Extract just the host/IP from a URL, stripping scheme and port
+  String _extractHost(String url) {
+    // Try parsing with scheme
+    var uri = Uri.tryParse(url);
+    if (uri != null && uri.host.isNotEmpty) {
+      return uri.host;
+    }
+    // Try adding scheme to parse properly
+    uri = Uri.tryParse('http://$url');
+    if (uri != null && uri.host.isNotEmpty) {
+      return uri.host;
+    }
+    // Just strip port if present
+    if (url.contains(':')) {
+      return url.split(':').first;
+    }
+    return url;
   }
 
   /// Save connection mode to SharedPreferences

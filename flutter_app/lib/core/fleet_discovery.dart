@@ -211,66 +211,10 @@ class FleetDiscovery extends ChangeNotifier {
 
   /// Scan WiFi on macOS
   Future<void> _scanMacOsWifi({bool filterRobots = false}) async {
-    // Use airport to scan - note: may require WiFi to be on
-    final result = await Process.run(
-      '/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport',
-      ['-s'],
-    );
-
-    debugPrint('Airport scan exit code: ${result.exitCode}');
-    debugPrint('Airport scan stdout: ${result.stdout}');
-    debugPrint('Airport scan stderr: ${result.stderr}');
-
-    if (result.exitCode == 0) {
-      final output = result.stdout as String;
-      final lines = output.split('\n');
-
-      // Skip header line, parse each network
-      for (final line in lines.skip(1)) {
-        if (line.trim().isEmpty) continue;
-
-        // Airport output format: SSID BSSID RSSI CHANNEL HT CC SECURITY
-        // SSID can have spaces, so we parse from the end
-        final trimmed = line.trimLeft();
-        if (trimmed.isEmpty) continue;
-
-        // Find RSSI (negative number like -67)
-        final rssiMatch = RegExp(r'\s(-\d+)\s').firstMatch(line);
-        if (rssiMatch == null) continue;
-
-        final rssi = int.tryParse(rssiMatch.group(1) ?? '-100') ?? -100;
-        final ssidEnd = rssiMatch.start;
-        final ssid = line.substring(0, ssidEnd).trim();
-
-        if (ssid.isEmpty) continue;
-
-        // Check if secured (look for WPA, WEP, etc. at end of line)
-        final isSecured = line.contains('WPA') || line.contains('WEP');
-
-        // Filter for robot networks if requested
-        if (filterRobots) {
-          final upper = ssid.toUpperCase();
-          if (!upper.contains('PUDU') &&
-              !upper.contains('ROBOT') &&
-              !upper.contains('TIBO') &&
-              !upper.contains('TY126') &&  // Pudu base pattern
-              !upper.contains('ROS')) {
-            continue;
-          }
-        }
-
-        _scannedNetworks.add(ScannedNetwork(
-          ssid: ssid,
-          rssi: rssi,
-          isSecured: isSecured,
-        ));
-      }
-
-      // Sort by signal strength
-      _scannedNetworks.sort((a, b) => b.rssi.compareTo(a.rssi));
-    } else {
-      _lastError = 'Airport scan failed: ${result.stderr}';
-    }
+    // WiFi scanning requires native CoreWLAN on newer macOS
+    // For now, show message to use System Settings
+    _lastError = 'WiFi scanning not available. Use System Settings > Wi-Fi to connect, then enter relay IP manually.';
+    debugPrint('macOS WiFi scan: ${_lastError}');
   }
 
   /// Get current WiFi SSID
@@ -279,14 +223,17 @@ class FleetDiscovery extends ChangeNotifier {
       if (kIsWeb) return null;
 
       if (Platform.isMacOS) {
+        // Use networksetup which works on all macOS versions
         final result = await Process.run(
-          '/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport',
-          ['-I'],
+          'networksetup',
+          ['-getairportnetwork', 'en0'],
         );
 
         if (result.exitCode == 0) {
-          final match = RegExp(r'^\s*SSID:\s*(.+)$', multiLine: true)
-              .firstMatch(result.stdout as String);
+          final output = result.stdout as String;
+          // Format: "Current Wi-Fi Network: SSID_NAME"
+          final match = RegExp(r'Current Wi-Fi Network:\s*(.+)$', multiLine: true)
+              .firstMatch(output);
           _currentSsid = match?.group(1)?.trim();
           notifyListeners();
           return _currentSsid;
