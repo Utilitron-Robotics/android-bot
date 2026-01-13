@@ -2337,7 +2337,20 @@ class _HudScreenState extends State<HudScreen>
   Future<void> _showFleetPicker(RobotConnection robot) async {
     final selected = await FleetPicker.show(context);
     if (selected != null && mounted) {
-      _connectRobotWithTransportSync(robot, selected.wsUrl);
+      // Check if relay mode (ssid starts with RELAY:)
+      if (selected.ssid.startsWith('RELAY:')) {
+        // Relay mode - use gRPC
+        setState(() => _connectionMode = ConnectionMode.relay);
+        _urlController.text = selected.ip;
+        final transport = context.read<UnifiedTransportManager>();
+        transport.connectToHost(selected.ip);
+        robot.setDisplayUrl(selected.ip);
+      } else {
+        // Direct mode - use WebSocket
+        setState(() => _connectionMode = ConnectionMode.direct);
+        _urlController.text = selected.wsUrl;
+        robot.connect(selected.wsUrl);
+      }
     }
   }
 
@@ -2346,24 +2359,6 @@ class _HudScreenState extends State<HudScreen>
       setState(() => _connectionMode = ConnectionMode.direct);
     } else {
       setState(() => _connectionMode = ConnectionMode.relay);
-    }
-  }
-
-  /// Helper to connect robot AND sync UnifiedTransportManager
-  /// Use this instead of direct robot.connect() calls
-  void _connectRobotWithTransportSync(RobotConnection robot, String url) {
-    robot.connect(url);
-
-    // Extract host and sync UnifiedTransportManager
-    final uri = Uri.tryParse(url);
-    if (uri != null && uri.host.isNotEmpty) {
-      final relayHost = uri.host;
-      final transportManager = context.read<UnifiedTransportManager>();
-      transportManager.reconfigure(
-        grpcHost: relayHost,
-        websocketUrl: 'ws://$relayHost:8766',
-        httpBaseUrl: 'http://$relayHost:8765',
-      );
     }
   }
 
