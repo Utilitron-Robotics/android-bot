@@ -519,6 +519,9 @@ class UnifiedTransportManager extends ChangeNotifier {
         'nav_status': status.navStatus,
         'nav_goal': status.navGoal,
         'battery': status.battery,
+        'safety_zone': status.safetyZone,
+        'linear_velocity': status.linearVelocity,
+        'angular_velocity': status.angularVelocity,
         'pose': {
           'x': status.pose.x,
           'y': status.pose.y,

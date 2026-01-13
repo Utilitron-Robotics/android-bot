@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
 import '../core/chassis_protocol.dart';
+import '../core/unified_transport.dart';
 import '../services/audio_announcer.dart';
 
 /// Robot speed mode - controls built-in collision avoidance behavior
@@ -61,6 +61,7 @@ class _JoystickControlState extends State<JoystickControl> {
   bool _obstacleRight = false;
   double _minFrontRange = double.infinity;
   StreamSubscription? _scanSubscription;
+  StreamSubscription? _grpcStatusSubscription;
   RobotSpeedMode _robotSpeedMode = RobotSpeedMode.safetyMed;
   bool _speedModeLoading = false;
 
@@ -90,7 +91,36 @@ class _JoystickControlState extends State<JoystickControl> {
     AudioAnnouncer().init();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _subscribeToScan();
+      _subscribeToGrpcStatus();
       _querySpeedMode();
+    });
+  }
+
+  void _subscribeToGrpcStatus() {
+    final transport = context.read<UnifiedTransportManager>();
+    _grpcStatusSubscription = transport.robotStatus.listen((status) {
+      final safetyZone = status['safety_zone'] as String?;
+      if (safetyZone != null && mounted) {
+        // Convert safety zone to approximate distance for gauge
+        double distance;
+        switch (safetyZone.toUpperCase()) {
+          case 'STOP':
+            distance = 0.15;
+            break;
+          case 'CREEP':
+            distance = 0.35;
+            break;
+          case 'WARN':
+            distance = 0.65;
+            break;
+          default:
+            distance = double.infinity;
+        }
+        setState(() {
+          _minFrontRange = distance;
+          _obstacleAhead = distance < creepDistance;
+        });
+      }
     });
   }
 
@@ -143,6 +173,7 @@ class _JoystickControlState extends State<JoystickControl> {
   @override
   void dispose() {
     _sendTimer?.cancel();
+    _grpcStatusSubscription?.cancel();
     // Unsubscribe from /scan topic before cancelling listener
     if (_scanSubscription != null) {
       try {
@@ -163,53 +194,29 @@ class _JoystickControlState extends State<JoystickControl> {
     final robot = context.read<RobotConnection>();
     if (!robot.isConnected) return;
 
-    // Subscribe to laser data for obstacle detection
-    // Chassis robots use /laser_data topic (not /scan)
+    // Subscribe to laser scan for obstacle detection
     robot.client.send({
       'op': 'subscribe',
-      'topic': '/laser_data',
-      'type': 'yutong_assistance/point_array',
+      'topic': '/scan',
+      'type': 'sensor_msgs/LaserScan',
       'throttle_rate': 150, // ~6Hz for responsive safety
       'queue_length': 1,
     });
 
     _scanSubscription = robot.client.messages.listen((msg) {
-      if (msg['topic'] == '/laser_data') {
-        _handleLaserData(msg['msg']);
+      if (msg['topic'] == '/scan') {
+        _handleLaserScan(msg['msg']);
       }
     });
   }
 
-  void _handleLaserData(dynamic data) {
+  void _handleLaserScan(dynamic data) {
     if (data == null) return;
 
-    // Chassis /laser_data format: px/py coordinate arrays or points distance array
-    List<double> distances = [];
+    final ranges = data['ranges'] as List?;
+    if (ranges == null || ranges.isEmpty) return;
 
-    final px = data['px'] as List?;
-    final py = data['py'] as List?;
-    if (px != null && py != null && px.length == py.length) {
-      // Convert px/py coordinates to distances
-      for (var i = 0; i < px.length; i++) {
-        final x = (px[i] as num?)?.toDouble() ?? 0;
-        final y = (py[i] as num?)?.toDouble() ?? 0;
-        final dist = (x * x + y * y).abs();
-        if (dist > 0.01) distances.add(sqrt(dist));
-      }
-    } else {
-      // Fallback: points array (direct distances)
-      final points = data['points'] as List?;
-      if (points != null) {
-        distances = points
-            .map((p) => (p as num?)?.toDouble() ?? 0)
-            .where((d) => d > 0.01)
-            .toList();
-      }
-    }
-
-    if (distances.isEmpty) return;
-
-    final numRanges = distances.length;
+    final numRanges = ranges.length;
     // Front arc: center ~60 degrees
     final frontStart = (numRanges * 0.4).round();
     final frontEnd = (numRanges * 0.6).round();
@@ -224,21 +231,21 @@ class _JoystickControlState extends State<JoystickControl> {
     double minLeft = double.infinity;
     double minRight = double.infinity;
 
-    for (var i = frontStart; i < frontEnd && i < distances.length; i++) {
-      final r = distances[i];
+    for (var i = frontStart; i < frontEnd; i++) {
+      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
       if (r > 0.05 && r < minFront) minFront = r;
     }
-    for (var i = leftStart; i < leftEnd && i < distances.length; i++) {
-      final r = distances[i];
+    for (var i = leftStart; i < leftEnd; i++) {
+      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
       if (r > 0.05 && r < minLeft) minLeft = r;
     }
-    for (var i = rightStart; i < rightEnd && i < distances.length; i++) {
-      final r = distances[i];
+    for (var i = rightStart; i < rightEnd; i++) {
+      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
       if (r > 0.05 && r < minRight) minRight = r;
     }
 
     final wasObstacle = _obstacleAhead;
-    _obstacleAhead = minFront < creepDistance;
+    _obstacleAhead = minFront < creepDistance;  // Anything in creep zone or closer
     _obstacleLeft = minLeft < creepDistance;
     _obstacleRight = minRight < creepDistance;
     _minFrontRange = minFront;
