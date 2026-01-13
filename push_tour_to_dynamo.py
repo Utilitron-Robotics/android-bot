@@ -5,12 +5,17 @@ Because copy-pasting is for chumps! 😎
 """
 
 import json
+import os
 import requests
 import time
 from datetime import datetime
 
 # Your AWS API Gateway endpoint (found via my superior pattern matching skills 😏)
 API_ENDPOINT = "https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev"
+
+# API Key for authentication - set via environment variable or edit here
+# To set: export FLEET_API_KEY="your-api-key-here"
+API_KEY = os.environ.get("FLEET_API_KEY", "")
 
 # The tour scripts from legacy branch
 TOUR_SCRIPTS = {
@@ -98,6 +103,8 @@ def push_to_dynamo(tour_data):
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
 
     try:
         # Try PUT to update

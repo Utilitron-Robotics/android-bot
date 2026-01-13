@@ -5,11 +5,16 @@ The tour structure is different - tour.waypoints is an array of stop data, not P
 """
 
 import json
+import os
 import requests
 import time
 
 # Your AWS API Gateway endpoint
 API_ENDPOINT = "https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev"
+
+# API Key for authentication - set via environment variable or edit here
+# To set: export FLEET_API_KEY="your-api-key-here"
+API_KEY = os.environ.get("FLEET_API_KEY", "")
 
 # Map ID for robotics floor
 MAP_ID = "frontier_tower_floor_4"
@@ -79,6 +84,8 @@ def update_map_waypoints():
 
     # Push updated map
     headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
 
     try:
         # Try to update
@@ -147,6 +154,8 @@ def push_tour_to_dynamo(tour_data):
     update_url = f"{API_ENDPOINT}/tours/{tour_data['tour_id']}"
 
     headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers["X-API-Key"] = API_KEY
 
     try:
         # Try PUT to update

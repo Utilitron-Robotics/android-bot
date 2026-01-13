@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Robot Relay</string>
+
+    <!-- Robot Connection Configuration -->
+    <!-- Default robot IP via wired USB connection (see NETWORKING.md) -->
+    <string name="default_robot_ip">192.168.20.22</string>
+    <string name="default_robot_port">9090</string>
+    <string name="default_relay_port">8765</string>
+
+    <!-- Fleet API Configuration -->
+    <string name="default_fleet_api_endpoint">https://e536dpa128.execute-api.us-west-1.amazonaws.com/dev</string>
 </resources>

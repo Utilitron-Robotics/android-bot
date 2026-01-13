@@ -12,6 +12,12 @@ Parameters:
     Default: ''
     Description: Custom domain name (optional)
 
+  ApiKeyValue:
+    Type: String
+    Default: ''
+    Description: API key for authentication (leave empty to auto-generate)
+    NoEcho: true
+
 Resources:
   # DynamoDB Tables
   RobotsTable:
@@ -214,6 +220,7 @@ Resources:
           MAPS_TABLE: !Ref MapsTable
           TOURS_TABLE: !Ref ToursTable
           ENVIRONMENT: !Ref Environment
+          API_KEY: !Ref ApiKeyValue
       Code:
         ZipFile: |
           import json
@@ -247,6 +254,18 @@ Resources:
                   return [convert_floats(i) for i in obj]
               return obj
 
+          # API Key for authentication (set via environment variable)
+          API_KEY = os.environ.get('API_KEY', '')
+
+          def check_api_key(event):
+              """Validate API key from X-API-Key header"""
+              if not API_KEY:
+                  return True  # No key configured = allow all (dev mode)
+              headers = event.get('headers', {})
+              # Headers can be lowercase in HTTP API v2
+              provided_key = headers.get('x-api-key') or headers.get('X-API-Key', '')
+              return provided_key == API_KEY
+
           def handler(event, context):
               method = event.get('httpMethod', event.get('requestContext', {}).get('http', {}).get('method'))
               path = event.get('path', event.get('rawPath', ''))
@@ -259,6 +278,10 @@ Resources:
               # Handle CORS preflight OPTIONS requests
               if method == 'OPTIONS':
                   return response(200, {})
+
+              # Validate API key for write operations (POST, PUT, DELETE)
+              if method in ['POST', 'PUT', 'DELETE'] and not check_api_key(event):
+                  return response(401, {'error': 'Invalid or missing API key'})
 
               # Route requests
               if path == '/fleet/register' and method == 'POST':
