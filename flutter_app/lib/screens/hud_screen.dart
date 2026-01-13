@@ -304,7 +304,7 @@ class _HudScreenState extends State<HudScreen>
           'HUD: Connection lost during background, attempting reconnect');
       final savedUrl = robot.robotUrl;
       if (savedUrl.isNotEmpty) {
-        robot.connect(savedUrl);
+        _connectRobotWithTransportSync(robot, savedUrl);
       }
     }
 
@@ -355,7 +355,7 @@ class _HudScreenState extends State<HudScreen>
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
             debugPrint('HUD: 🔄 Reconnecting to $savedUrl');
-            robot.connect(savedUrl);
+            _connectRobotWithTransportSync(robot, savedUrl);
           }
         });
       }
@@ -2319,23 +2319,42 @@ class _HudScreenState extends State<HudScreen>
     // Determine the actual WebSocket URL for rosbridge connection
     // HTTP mode uses the same WebSocket connection, but we preserve the HTTP URL for display
     String connectUrl = userUrl;
+    String? relayHost;
+
     if (userUrl.startsWith('http://')) {
       final uri = Uri.tryParse(userUrl);
       if (uri != null) {
+        relayHost = uri.host;
         connectUrl = 'ws://${uri.host}:8766';
         debugPrint('HUD: Using WebSocket URL for rosbridge: $connectUrl');
+      }
+    } else if (userUrl.startsWith('ws://')) {
+      final uri = Uri.tryParse(userUrl);
+      if (uri != null) {
+        relayHost = uri.host;
       }
     }
 
     // Connect using the WebSocket URL but preserve the user's original URL
     robot.connectWithDisplayUrl(connectUrl, userUrl);
+
+    // Also reconfigure UnifiedTransportManager with the relay host
+    // This enables gRPC/WebRTC transports to the same relay tablet
+    if (relayHost != null && relayHost.isNotEmpty) {
+      final transportManager = context.read<UnifiedTransportManager>();
+      transportManager.reconfigure(
+        grpcHost: relayHost,
+        websocketUrl: 'ws://$relayHost:8766',
+        httpBaseUrl: 'http://$relayHost:8765',
+      );
+    }
   }
 
   /// Open fleet picker to switch robots
   Future<void> _showFleetPicker(RobotConnection robot) async {
     final selected = await FleetPicker.show(context);
     if (selected != null && mounted) {
-      robot.connect(selected.wsUrl);
+      _connectRobotWithTransportSync(robot, selected.wsUrl);
     }
   }
 
@@ -2346,6 +2365,24 @@ class _HudScreenState extends State<HudScreen>
       setState(() => _connectionMode = ConnectionMode.relayHttp);
     } else {
       setState(() => _connectionMode = ConnectionMode.direct);
+    }
+  }
+
+  /// Helper to connect robot AND sync UnifiedTransportManager
+  /// Use this instead of direct robot.connect() calls
+  void _connectRobotWithTransportSync(RobotConnection robot, String url) {
+    robot.connect(url);
+
+    // Extract host and sync UnifiedTransportManager
+    final uri = Uri.tryParse(url);
+    if (uri != null && uri.host.isNotEmpty) {
+      final relayHost = uri.host;
+      final transportManager = context.read<UnifiedTransportManager>();
+      transportManager.reconfigure(
+        grpcHost: relayHost,
+        websocketUrl: 'ws://$relayHost:8766',
+        httpBaseUrl: 'http://$relayHost:8765',
+      );
     }
   }
 

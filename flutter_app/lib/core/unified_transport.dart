@@ -173,7 +173,7 @@ class UnifiedTransportManager extends ChangeNotifier {
 
   // Configuration
   final TransportConfig _config;
-  final TransportEndpoints _endpoints;
+  TransportEndpoints _endpoints;
 
   // Individual transports
   GrpcRobotClient? _grpc;
@@ -298,6 +298,32 @@ class UnifiedTransportManager extends ChangeNotifier {
     _updateStatus();
 
     debugPrint('$_tag: Connection complete - status: $_status');
+  }
+
+  /// Reconfigure endpoints and reconnect
+  /// Call this when the user enters a new relay IP
+  Future<void> reconfigure({
+    String? grpcHost,
+    int? grpcPort,
+    String? websocketUrl,
+    String? httpBaseUrl,
+  }) async {
+    debugPrint('$_tag: Reconfiguring with host: $grpcHost');
+
+    // Disconnect existing transports
+    await disconnect();
+
+    // Update endpoints
+    _endpoints = _endpoints.copyWith(
+      grpcHost: grpcHost,
+      grpcPort: grpcPort,
+      websocketUrl: websocketUrl,
+      httpBaseUrl: httpBaseUrl,
+    );
+
+    // Re-initialize and connect
+    await initialize();
+    await connect();
   }
 
   /// Connect to the WebRTC map stream
