@@ -2365,19 +2365,23 @@ class _HudScreenState extends State<HudScreen>
       }
       robot.connectWithDisplayUrl(connectUrl, connectUrl);
     } else {
-      // Relay mode: gRPC to relay tablet
+      // Relay mode: gRPC + WebSocket to relay tablet
       final transport = context.read<UnifiedTransportManager>();
-      // Skip if already connected to gRPC
-      if (transport.status.grpcConnected) {
-        debugPrint('HUD: Relay mode - gRPC already connected, skipping');
-        return;
-      }
-      // Extract host - strip any port or scheme
       String host = _extractHost(userUrl);
-      transport.connectToHost(host);
-      debugPrint('HUD: Connecting gRPC to $host:50051');
-      // Save just the host for relay mode
-      robot.setDisplayUrl(host);
+
+      // Connect gRPC for commands
+      if (!transport.status.grpcConnected) {
+        transport.connectToHost(host);
+        debugPrint('HUD: Connecting gRPC to $host:50051');
+      }
+
+      // ALSO connect RobotConnection via WebSocket for capability discovery (waypoints!)
+      // The relay forwards WebSocket on port 8766 to the robot
+      if (robot.state != RobotConnectionState.connected) {
+        final wsUrl = 'ws://$host:8766';
+        robot.connectWithDisplayUrl(wsUrl, host);
+        debugPrint('HUD: Connecting WebSocket to $wsUrl for capability discovery');
+      }
     }
   }
 
