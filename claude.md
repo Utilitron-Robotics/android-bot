@@ -1,5 +1,9 @@
 # Android-Bot Project Documentation
 
+## Development Rules (MUST FOLLOW)
+- **NEVER hardcode time values** - All delays, timeouts, and intervals must be configurable constants or parameters, not magic numbers inline
+- **Use Kotlin, not Java** - The relay app is 100% Kotlin
+
 ## Project Overview
 Cross-platform robot control system for Robot/chassis food service robots using the chassis Upper Computer Communication Protocol. Consists of:
 1. **Flutter App** - Primary cross-platform controller (macOS/iOS/Android/Web)

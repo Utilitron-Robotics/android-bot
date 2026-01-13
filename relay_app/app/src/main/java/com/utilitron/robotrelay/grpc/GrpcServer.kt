@@ -5,7 +5,7 @@ import android.util.Log
 import com.utilitron.robotrelay.service.RobotWebSocketClient
 import com.utilitron.robotrelay.service.RelayServer
 import io.grpc.Server
-import io.grpc.ServerBuilder
+import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import kotlinx.coroutines.*
 import java.io.IOException
 
@@ -41,7 +41,7 @@ class GrpcServer(
         try {
             serviceImpl = RobotControlServiceImpl(robotClient, taskExecutor, context)
 
-            server = ServerBuilder
+            server = NettyServerBuilder
                 .forPort(port)
                 .addService(serviceImpl)
                 // Configure keepalive for WAN stability
@@ -66,8 +66,9 @@ class GrpcServer(
                 monitorServer()
             }
 
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to start gRPC server: ${e.message}")
+        } catch (e: Throwable) {
+            Log.e(TAG, "❌ gRPC server FAILED: ${e.javaClass.simpleName}: ${e.message}")
+            e.printStackTrace()
             throw e
         }
     }

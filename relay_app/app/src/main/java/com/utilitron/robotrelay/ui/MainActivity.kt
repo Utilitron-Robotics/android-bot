@@ -53,6 +53,13 @@ class MainActivity : AppCompatActivity() {
             service = relayBinder.getService()
             bound = true
             observeService()
+            // Update IP display now that service is available (shows gRPC status)
+            updateIpAddress()
+            // Refresh again after gRPC has time to start (or fail)
+            lifecycleScope.launch {
+                delay(2000)
+                updateIpAddress()
+            }
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -769,7 +776,12 @@ class MainActivity : AppCompatActivity() {
     private fun updateIpAddress() {
         val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         val ip = Formatter.formatIpAddress(wifiManager.connectionInfo.ipAddress)
-        binding.tvIpAddress.text = "Relay: http://$ip:8765 | ws://$ip:8766"
+        val grpcStatus = when {
+            service?.isGrpcRunning == true -> "gRPC:50051"
+            service?.grpcError != null -> "gRPC:${service?.grpcError?.take(20)}"
+            else -> "gRPC:OFF"
+        }
+        binding.tvIpAddress.text = "$ip | $grpcStatus | ws:8766"
     }
 
     private fun getNavStatusText(status: Int): String = when (status) {

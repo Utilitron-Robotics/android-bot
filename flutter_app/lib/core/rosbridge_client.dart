@@ -99,11 +99,18 @@ class RosbridgeClient {
     _stopTimers();
     _closeConnection();
 
-    _lastUrl = url;
+    // Normalize URL - add ws:// scheme if missing
+    String normalizedUrl = url;
+    if (!url.startsWith('ws://') && !url.startsWith('wss://')) {
+      normalizedUrl = 'ws://$url';
+      debugPrint('RosbridgeClient: Added ws:// scheme -> $normalizedUrl');
+    }
+
+    _lastUrl = normalizedUrl;
     _setState(WsConnectionState.connecting);
 
     try {
-      final uri = Uri.parse(url);
+      final uri = Uri.parse(normalizedUrl);
       _channel = WebSocketChannel.connect(uri);
 
       // Listen for incoming messages

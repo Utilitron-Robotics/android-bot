@@ -119,6 +119,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
     // gRPC server for WAN-ready communication (OPUS LEVEL!)
     private var grpcServer: com.utilitron.robotrelay.grpc.GrpcServer? = null
+    var grpcError: String? = null
+        private set
+    val isGrpcRunning: Boolean
+        get() = grpcServer?.isRunning ?: false
 
     // Current task execution state
     private val _currentTask = MutableStateFlow<WaypointTask?>(null)
@@ -313,8 +317,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             )
             grpcServer?.start()
             Log.i(TAG, "✅ gRPC server started on port 50051 - WAN-READY!")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start gRPC server: ${e.message}")
+        } catch (e: Throwable) {
+            grpcError = "${e.javaClass.simpleName}: ${e.message?.take(50) ?: "no message"}"
+            Log.e(TAG, "❌ gRPC server FAILED: $grpcError")
+            e.printStackTrace()
             // Continue without gRPC - legacy WebSocket still works
         }
 

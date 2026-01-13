@@ -2357,7 +2357,13 @@ class _HudScreenState extends State<HudScreen>
         debugPrint('HUD: Direct mode - already connected, skipping');
         return;
       }
-      robot.connectWithDisplayUrl(userUrl, userUrl);
+      // Normalize URL - add ws:// scheme if missing for direct mode
+      String connectUrl = userUrl;
+      if (!userUrl.startsWith('ws://') && !userUrl.startsWith('wss://')) {
+        connectUrl = 'ws://$userUrl';
+        _urlController.text = connectUrl; // Update text field to show normalized URL
+      }
+      robot.connectWithDisplayUrl(connectUrl, connectUrl);
     } else {
       // Relay mode: gRPC to relay tablet
       final transport = context.read<UnifiedTransportManager>();

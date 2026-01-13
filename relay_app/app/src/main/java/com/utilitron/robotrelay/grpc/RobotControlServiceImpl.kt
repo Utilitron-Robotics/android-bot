@@ -26,6 +26,7 @@ class RobotControlServiceImpl(
     companion object {
         private const val TAG = "RobotControlGRPC"
         private const val HEARTBEAT_INTERVAL_MS = 1000L
+        private const val STREAM_STABILIZE_DELAY_MS = 100L
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -55,6 +56,7 @@ class RobotControlServiceImpl(
 
         // Start heartbeat for this stream
         val heartbeatJob = scope.launch {
+            delay(STREAM_STABILIZE_DELAY_MS)
             while (isActive) {
                 try {
                     val heartbeat = buildHeartbeat()
