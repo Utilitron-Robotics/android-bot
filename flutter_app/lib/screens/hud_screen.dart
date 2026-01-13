@@ -303,7 +303,14 @@ class _HudScreenState extends State<HudScreen>
           'HUD: Connection lost during background, attempting reconnect');
       final savedUrl = robot.robotUrl;
       if (savedUrl.isNotEmpty) {
-        _connectRobotWithTransportSync(robot, savedUrl);
+        if (_connectionMode == ConnectionMode.direct) {
+          robot.connect(savedUrl);
+        } else {
+          // Relay mode - reconnect gRPC
+          final uri = Uri.tryParse(savedUrl);
+          final host = (uri != null && uri.host.isNotEmpty) ? uri.host : savedUrl;
+          context.read<UnifiedTransportManager>().connectToHost(host);
+        }
       }
     }
 
@@ -354,7 +361,13 @@ class _HudScreenState extends State<HudScreen>
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
             debugPrint('HUD: 🔄 Reconnecting to $savedUrl');
-            _connectRobotWithTransportSync(robot, savedUrl);
+            if (_connectionMode == ConnectionMode.direct) {
+              robot.connect(savedUrl);
+            } else {
+              final uri = Uri.tryParse(savedUrl);
+              final host = (uri != null && uri.host.isNotEmpty) ? uri.host : savedUrl;
+              context.read<UnifiedTransportManager>().connectToHost(host);
+            }
           }
         });
       }
