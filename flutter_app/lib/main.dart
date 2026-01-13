@@ -18,10 +18,8 @@ final unifiedTransportManager = UnifiedTransportManager(
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize the transport manager
-  await unifiedTransportManager.initialize();
-  await unifiedTransportManager.connect();
+
+  // Don't auto-connect - wait for user to provide the relay IP
 
   // Load other saved states
   await SequenceManager.instance.load();
