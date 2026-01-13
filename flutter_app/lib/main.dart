@@ -10,9 +10,8 @@ import 'screens/hud_screen.dart';
 // Global instance of the transport manager
 final unifiedTransportManager = UnifiedTransportManager(
   endpoints: const TransportEndpoints(
-    // NOTE: The gRPC host should be configured by the user in the UI.
-    // This is a placeholder for initialization.
-    grpcHost: '192.168.1.100', 
+    // gRPC host is set dynamically when user connects to a relay
+    grpcHost: null,
     robotId: 'robot-1',
   ),
 );

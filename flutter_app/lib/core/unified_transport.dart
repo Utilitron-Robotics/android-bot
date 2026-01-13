@@ -228,21 +228,56 @@ class UnifiedTransportManager extends ChangeNotifier {
   WebRtcTransport? get webrtc => _webrtc;
   MqttTransport? get mqtt => _mqtt;
 
-  /// Initialize all transports
-  Future<void> initialize() async {
-    debugPrint('$_tag: Initializing unified transport...');
+  /// Connect gRPC to a specific host (called when user selects a relay)
+  Future<void> connectToHost(String host, {int port = 50051}) async {
+    debugPrint('$_tag: Connecting gRPC to $host:$port');
 
-    // Initialize gRPC if endpoint provided
-    if (_endpoints.grpcHost != null) {
+    // Disconnect existing connections
+    await _grpc?.disconnect();
+    await _webrtc?.disconnect();
+
+    // Initialize gRPC if not already
+    if (_grpc == null) {
       _grpc = GrpcRobotClient();
       _setupGrpcListeners();
     }
 
-    // Initialize WebRTC for data channels (requires gRPC for signaling)
-    if (_grpc != null) {
-      _webrtc = WebRtcTransport(grpcClient: _grpc!);
-      // Listeners for WebRTC state are now handled internally or by consumers
+    // Connect gRPC first (needed for WebRTC signaling)
+    await _connectGrpcToHost(host, port);
+
+    // Connect WebRTC for map stream (uses gRPC for signaling)
+    if (_webrtc != null && _grpc!.isConnected) {
+      try {
+        debugPrint('$_tag: Connecting WebRTC for map...');
+        await _webrtc!.connect();
+      } catch (e) {
+        debugPrint('$_tag: WebRTC connection failed: $e');
+      }
     }
+
+    _updateStatus();
+  }
+
+  Future<void> _connectGrpcToHost(String host, int port) async {
+    try {
+      await _grpc!.connect(host, port: port);
+      debugPrint('$_tag: gRPC connected to $host:$port');
+    } catch (e) {
+      debugPrint('$_tag: gRPC connection to $host:$port failed: $e');
+    }
+  }
+
+  /// Initialize all transports
+  Future<void> initialize() async {
+    debugPrint('$_tag: Initializing unified transport...');
+
+    // Always initialize gRPC client (connection happens when user provides host)
+    _grpc = GrpcRobotClient();
+    _setupGrpcListeners();
+
+    // Initialize WebRTC for data channels (uses gRPC for signaling)
+    _webrtc = WebRtcTransport(grpcClient: _grpc!);
+    // Listeners for WebRTC state are now handled internally or by consumers
 
     // Initialize MQTT if broker URL provided
     if (_endpoints.mqttBrokerUrl != null) {
@@ -273,19 +308,14 @@ class UnifiedTransportManager extends ChangeNotifier {
 
     final futures = <Future>[];
 
-    // Connect gRPC
+    // Connect gRPC only if host is configured
     if (_grpc != null && _endpoints.grpcHost != null) {
       futures.add(_connectGrpc());
     }
 
-    // Connect MQTT
+    // Connect MQTT if configured
     if (_mqtt != null && _endpoints.mqttBrokerUrl != null) {
       futures.add(_connectMqtt());
-    }
-
-    // Connect adaptive (WebSocket/HTTP)
-    if (_adaptive != null) {
-      futures.add(_connectAdaptive());
     }
 
     // Wait for all connection attempts

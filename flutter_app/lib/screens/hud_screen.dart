@@ -25,8 +25,7 @@ import '../widgets/mode_editor.dart';
 /// Connection mode options for HUD
 enum ConnectionMode {
   direct('Direct WiFi', 'ws://10.42.0.1:9090', Icons.wifi),
-  relayWs('Relay WS', 'ws://192.168.1.100:8766', Icons.router),
-  relayHttp('Relay HTTP', 'http://192.168.1.100:8765', Icons.http);
+  relay('Relay (gRPC)', '', Icons.router);
 
   final String label;
   final String defaultUrl;
@@ -702,13 +701,11 @@ class _HudScreenState extends State<HudScreen>
                         // Preserve IP, update protocol/port to match mode
                         if (mode == ConnectionMode.direct) {
                           _urlController.text = 'ws://$host:9090';
-                        } else if (mode == ConnectionMode.relayWs) {
-                          _urlController.text = 'ws://$host:8766';
                         } else {
-                          _urlController.text = 'http://$host:8765';
+                          // Relay mode - just need the host for gRPC
+                          _urlController.text = host;
                         }
                       }
-                      // If host is empty, leave URL as-is (don't replace with hardcoded)
                     }
                   },
                 ),
@@ -2316,19 +2313,24 @@ class _HudScreenState extends State<HudScreen>
     final userUrl = _urlController.text.trim();
     if (userUrl.isEmpty) return;
 
-    // Determine the actual WebSocket URL for rosbridge connection
-    // HTTP mode uses the same WebSocket connection, but we preserve the HTTP URL for display
-    String connectUrl = userUrl;
-    if (userUrl.startsWith('http://')) {
+    if (_connectionMode == ConnectionMode.direct) {
+      // Direct mode: WebSocket to robot's rosbridge
+      robot.connectWithDisplayUrl(userUrl, userUrl);
+    } else {
+      // Relay mode: gRPC to relay tablet
+      // Extract host - handle both bare IP and URLs with scheme
+      String host = userUrl;
       final uri = Uri.tryParse(userUrl);
-      if (uri != null) {
-        connectUrl = 'ws://${uri.host}:8766';
-        debugPrint('HUD: Using WebSocket URL for rosbridge: $connectUrl');
+      if (uri != null && uri.host.isNotEmpty) {
+        host = uri.host;
       }
-    }
 
-    // Connect using the WebSocket URL but preserve the user's original URL
-    robot.connectWithDisplayUrl(connectUrl, userUrl);
+      final transport = context.read<UnifiedTransportManager>();
+      transport.connectToHost(host);
+      debugPrint('HUD: Connecting gRPC to $host:50051');
+      // Save the URL for display purposes
+      robot.setDisplayUrl(userUrl);
+    }
   }
 
   /// Open fleet picker to switch robots
@@ -2340,12 +2342,10 @@ class _HudScreenState extends State<HudScreen>
   }
 
   void _detectModeFromUrl(String url) {
-    if (url.contains(':8766')) {
-      setState(() => _connectionMode = ConnectionMode.relayWs);
-    } else if (url.contains(':8765') || url.startsWith('http')) {
-      setState(() => _connectionMode = ConnectionMode.relayHttp);
-    } else {
+    if (url.contains(':9090') || url.contains('10.42.0.')) {
       setState(() => _connectionMode = ConnectionMode.direct);
+    } else {
+      setState(() => _connectionMode = ConnectionMode.relay);
     }
   }
 

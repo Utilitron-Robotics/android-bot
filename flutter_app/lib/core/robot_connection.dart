@@ -179,6 +179,13 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
     }
   }
 
+  /// Set display URL without connecting (for gRPC relay mode)
+  Future<void> setDisplayUrl(String url) async {
+    _robotUrl = url;
+    await _saveUrl(url);
+    notifyListeners();
+  }
+
   /// Refresh capabilities (re-run discovery)
   Future<void> refreshCapabilities() async {
     if (_introspection != null && isConnected) {
