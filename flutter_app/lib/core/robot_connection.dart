@@ -118,7 +118,23 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
   }
 
   /// Connect to robot and discover capabilities
+  /// Automatically handles HTTP→WebSocket conversion for relay mode
   Future<void> connect(String url) async {
+    // If URL is HTTP, convert to WebSocket for rosbridge but keep HTTP for display
+    String connectUrl = url;
+    if (url.startsWith('http://')) {
+      final uri = Uri.tryParse(url);
+      if (uri != null) {
+        connectUrl = 'ws://${uri.host}:8766';
+        debugPrint('RobotConnection: Converting HTTP to WS for rosbridge: $connectUrl');
+      }
+    }
+    return connectWithDisplayUrl(connectUrl, url);
+  }
+
+  /// Connect to robot using connectUrl, but save displayUrl for the UI
+  /// This allows HTTP mode to connect via WebSocket but show HTTP URL to user
+  Future<void> connectWithDisplayUrl(String connectUrl, String displayUrl) async {
     if (_state == RobotConnectionState.connecting) return;
 
     // CRITICAL: Disconnect from any existing robot first!
@@ -128,18 +144,18 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
     _state = RobotConnectionState.connecting;
     _errorMessage = null;
-    _robotUrl = url;
+    _robotUrl = displayUrl; // Save the display URL for the UI
     notifyListeners();
 
-    // Save URL immediately so user doesn't have to retype on failure
-    await _saveUrl(url);
+    // Save display URL so user sees what they entered
+    await _saveUrl(displayUrl);
 
     // Set up reconnect callbacks
     _client.onDisconnect = _onClientDisconnect;
     _client.onReconnect = _onClientReconnect;
 
     try {
-      await _client.connect(url);
+      await _client.connect(connectUrl);
 
       // Inject dependency for audio announcements
       AudioAnnouncer().setRobotConnection(this);

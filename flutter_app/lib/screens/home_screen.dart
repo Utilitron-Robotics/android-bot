@@ -351,21 +351,23 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _connect(RobotConnection robot) {
-    var url = _urlController.text.trim();
-    if (url.isEmpty) return;
+    final userUrl = _urlController.text.trim();
+    if (userUrl.isEmpty) return;
 
-    // Convert HTTP URL to WebSocket URL for rosbridge connection
-    // HTTP is only for REST API calls (tablet tasks), not for rosbridge protocol
-    if (url.startsWith('http://')) {
-      final uri = Uri.tryParse(url);
+    // Determine the actual WebSocket URL for rosbridge connection
+    // HTTP mode uses the same WebSocket connection, but we preserve the HTTP URL for display
+    String connectUrl = userUrl;
+    if (userUrl.startsWith('http://')) {
+      final uri = Uri.tryParse(userUrl);
       if (uri != null) {
         // Use WebSocket on port 8766 for rosbridge
-        url = 'ws://${uri.host}:8766';
-        debugPrint('HomeScreen: Converted HTTP URL to WebSocket: $url');
+        connectUrl = 'ws://${uri.host}:8766';
+        debugPrint('HomeScreen: Using WebSocket URL for rosbridge: $connectUrl');
       }
     }
 
-    robot.connect(url);
+    // Connect using the WebSocket URL but preserve the user's original URL
+    robot.connectWithDisplayUrl(connectUrl, userUrl);
   }
 
   /// Get the HTTP relay URL for tablet tasks (if using relay mode)
