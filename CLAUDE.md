@@ -239,3 +239,13 @@ When starting a new session:
 The user debugs with:
 - Flutter: `flutter run -d chrome`
 - Relay: Android Studio - open relay_app and hit Run (droids are in wifi debug mode)
+
+---
+
+## AI Instructions
+
+- Never suggest workarounds that disable required functionality
+- If a build/tool error occurs, the solution must preserve all features
+- Think through consequences before suggesting fixes
+- When in doubt, ask what features are required
+- Don't repeat suggestions that have already been tried
