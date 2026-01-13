@@ -2313,17 +2313,22 @@ class _HudScreenState extends State<HudScreen>
   }
 
   void _connect(RobotConnection robot) {
-    var url = _urlController.text.trim();
-    if (url.isEmpty) return;
+    final userUrl = _urlController.text.trim();
+    if (userUrl.isEmpty) return;
 
-    // Convert HTTP to WS for rosbridge
-    if (url.startsWith('http://')) {
-      final uri = Uri.tryParse(url);
+    // Determine the actual WebSocket URL for rosbridge connection
+    // HTTP mode uses the same WebSocket connection, but we preserve the HTTP URL for display
+    String connectUrl = userUrl;
+    if (userUrl.startsWith('http://')) {
+      final uri = Uri.tryParse(userUrl);
       if (uri != null) {
-        url = 'ws://${uri.host}:8766';
+        connectUrl = 'ws://${uri.host}:8766';
+        debugPrint('HUD: Using WebSocket URL for rosbridge: $connectUrl');
       }
     }
-    robot.connect(url);
+
+    // Connect using the WebSocket URL but preserve the user's original URL
+    robot.connectWithDisplayUrl(connectUrl, userUrl);
   }
 
   /// Open fleet picker to switch robots
