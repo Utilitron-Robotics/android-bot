@@ -43,14 +43,12 @@ class WebRtcMapClient {
     }, {});
 
     _peerConnection!.onIceCandidate = (candidate) {
-      if (candidate != null) {
-        debugPrint('WebRtcMapClient: Got ICE candidate, sending to server...');
-        final signal = WebRTCSignal()
-          ..candidate = candidate.candidate!
-          ..candidateMid = candidate.sdpMid!
-          ..candidateMlineIndex = candidate.sdpMLineIndex!;
-        _grpcClient.sendWebRtcSignal(signal);
-      }
+      debugPrint('WebRtcMapClient: Got ICE candidate, sending to server...');
+      final signal = WebRTCSignal()
+        ..candidate = candidate.candidate!
+        ..candidateMid = candidate.sdpMid!
+        ..candidateMlineIndex = candidate.sdpMLineIndex!;
+      _grpcClient.sendWebRtcSignal(signal);
     };
 
     _peerConnection!.onDataChannel = (channel) {
@@ -73,7 +71,8 @@ class WebRtcMapClient {
   void _handleServerSignal(WebRTCSignal signal) {
     if (signal.hasSdp()) {
       final sdp = RTCSessionDescription(signal.sdp, 'offer');
-      debugPrint('WebRtcMapClient: Received SDP offer, setting remote description...');
+      debugPrint(
+          'WebRtcMapClient: Received SDP offer, setting remote description...');
       _peerConnection?.setRemoteDescription(sdp).then((_) async {
         debugPrint('WebRtcMapClient: Creating SDP answer...');
         final answer = await _peerConnection!.createAnswer({});
@@ -97,14 +96,15 @@ class WebRtcMapClient {
     try {
       // Decompress the data (assuming ZLIB/Deflate)
       final decompressed = Inflate(compressedData).getBytes();
-      
+
       // TODO: Here you would parse the binary data into the OccupancyGrid model.
       // This is a placeholder as the exact binary format would need to be defined.
       // For now, we'll assume it's just the raw grid data.
       final gridData = decompressed.map((byte) => byte.toInt()).toList();
 
       final map = model.OccupancyGrid(
-        info: model.MapInfo( // Using placeholder info for now
+        info: model.MapInfo(
+          // Using placeholder info for now
           resolution: 0.05,
           width: 384,
           height: 384,
@@ -116,7 +116,6 @@ class WebRtcMapClient {
         data: gridData,
       );
       _mapStreamController.add(map);
-
     } catch (e) {
       debugPrint('WebRtcMapClient: Failed to decompress or parse map data: $e');
     }

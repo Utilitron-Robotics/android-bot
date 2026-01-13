@@ -24,19 +24,25 @@ class WebRtcTransport extends ChangeNotifier {
   WebRtcState get state => _state;
   bool get isConnected => _state == WebRtcState.connected;
 
-  final _mapStreamController = StreamController<model.OccupancyGrid>.broadcast();
+  final _mapStreamController =
+      StreamController<model.OccupancyGrid>.broadcast();
   Stream<model.OccupancyGrid> get mapStream => _mapStreamController.stream;
 
   // Additional streams and getters for unified_transport.dart compatibility
   final _stateStreamController = StreamController<WebRtcState>.broadcast();
   Stream<WebRtcState> get stateStream => _stateStreamController.stream;
 
-  final _dataMessagesController = StreamController<Map<String, dynamic>>.broadcast();
-  Stream<Map<String, dynamic>> get dataMessages => _dataMessagesController.stream;
+  final _dataMessagesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get dataMessages =>
+      _dataMessagesController.stream;
 
-  bool get hasDataChannel => _dataChannel != null && _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
+  bool get hasDataChannel =>
+      _dataChannel != null &&
+      _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
 
-  WebRtcTransport({required GrpcRobotClient grpcClient}) : _grpcClient = grpcClient;
+  WebRtcTransport({required GrpcRobotClient grpcClient})
+      : _grpcClient = grpcClient;
 
   Future<void> connect() async {
     if (_state == WebRtcState.connecting || _state == WebRtcState.connected) {
@@ -47,7 +53,8 @@ class WebRtcTransport extends ChangeNotifier {
     debugPrint('$_tag: Starting WebRTC connection for map stream...');
 
     // 1. Listen for signaling messages from the gRPC stream
-    _grpcSignalSubscription = _grpcClient.webrtcSignalStream.listen(_handleServerSignal);
+    _grpcSignalSubscription =
+        _grpcClient.webrtcSignalStream.listen(_handleServerSignal);
 
     // 2. Create PeerConnection
     _peerConnection = await createPeerConnection({
@@ -57,14 +64,12 @@ class WebRtcTransport extends ChangeNotifier {
     });
 
     _peerConnection!.onIceCandidate = (candidate) {
-      if (candidate != null) {
-        debugPrint('$_tag: Got ICE candidate, sending to server...');
-        final signal = WebRTCSignal()
-          ..candidate = candidate.candidate!
-          ..candidateMid = candidate.sdpMid!
-          ..candidateMlineIndex = candidate.sdpMLineIndex!;
-        _grpcClient.sendWebRtcSignal(signal);
-      }
+      debugPrint('$_tag: Got ICE candidate, sending to server...');
+      final signal = WebRTCSignal()
+        ..candidate = candidate.candidate!
+        ..candidateMid = candidate.sdpMid!
+        ..candidateMlineIndex = candidate.sdpMLineIndex!;
+      _grpcClient.sendWebRtcSignal(signal);
     };
 
     _peerConnection!.onDataChannel = (channel) {
@@ -86,12 +91,13 @@ class WebRtcTransport extends ChangeNotifier {
         };
       }
     };
-    
+
     _peerConnection!.onConnectionState = (state) {
-        debugPrint('$_tag: PeerConnection state: $state');
-         if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed || state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
-             disconnect();
-         }
+      debugPrint('$_tag: PeerConnection state: $state');
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
+          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        disconnect();
+      }
     };
 
     // 3. Send request to start the stream
@@ -113,7 +119,8 @@ class WebRtcTransport extends ChangeNotifier {
         final responseSignal = WebRTCSignal()..sdp = answer.sdp!;
         _grpcClient.sendWebRtcSignal(responseSignal);
       }).catchError((e) {
-        debugPrint('$_tag: Failed to set remote description or create answer: $e');
+        debugPrint(
+            '$_tag: Failed to set remote description or create answer: $e');
       });
     } else if (signal.hasCandidate()) {
       debugPrint('$_tag: Received ICE candidate, adding...');
@@ -200,7 +207,8 @@ class WebRtcTransport extends ChangeNotifier {
 
   /// Send arbitrary data over the data channel
   void sendData(Map<String, dynamic> data) {
-    if (_dataChannel == null || _dataChannel!.state != RTCDataChannelState.RTCDataChannelOpen) {
+    if (_dataChannel == null ||
+        _dataChannel!.state != RTCDataChannelState.RTCDataChannelOpen) {
       debugPrint('$_tag: Cannot send data - data channel not open');
       return;
     }
