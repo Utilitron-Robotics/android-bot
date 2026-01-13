@@ -1614,7 +1614,13 @@ class _HudScreenState extends State<HudScreen>
             icon: const Icon(Icons.power_settings_new),
             color: _dangerColor,
             tooltip: 'Disconnect',
-            onPressed: robot.disconnect,
+            onPressed: () {
+              // Disconnect both robot connection AND unified transport (gRPC)
+              robot.disconnect();
+              context.read<UnifiedTransportManager>().disconnect();
+              // Navigate back to login screen
+              Navigator.of(context).pushReplacementNamed('/');
+            },
           ),
         ],
       ),

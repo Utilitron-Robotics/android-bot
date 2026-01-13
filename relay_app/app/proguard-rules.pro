@@ -17,6 +17,14 @@
 -keep class * extends io.grpc.BindableService { *; }
 -keep class * extends io.grpc.ServerServiceDefinition { *; }
 
+# gRPC Netty transport (shaded) - REQUIRED for server to work
+-keep class io.grpc.netty.** { *; }
+-dontwarn io.grpc.netty.**
+
+# Shaded Netty classes (relocated by grpc-netty-shaded)
+-keep class io.grpc.netty.shaded.** { *; }
+-dontwarn io.grpc.netty.shaded.**
+
 # Keep gRPC generated code
 -keep class ** extends io.grpc.stub.AbstractStub { *; }
 -keep class **Grpc { *; }

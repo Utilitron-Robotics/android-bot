@@ -109,7 +109,15 @@ class GrpcRobotClient extends ChangeNotifier {
         debugPrint('$_tag: Unary call succeeded - connection verified!');
       } catch (e) {
         debugPrint('$_tag: Unary call failed: $e');
-        // Don't fail the connection - the unary endpoint might not exist
+        // Check if this is a connection refused error - server isn't running
+        final errorStr = e.toString().toLowerCase();
+        if (errorStr.contains('connection refused') ||
+            errorStr.contains('unavailable') ||
+            errorStr.contains('errno = 61')) {
+          debugPrint('$_tag: Server unreachable - will retry');
+          throw e; // Re-throw to trigger reconnect logic
+        }
+        // For other errors (e.g., method not found), continue - server might be running but missing endpoint
       }
 
       // Create bidirectional stream
