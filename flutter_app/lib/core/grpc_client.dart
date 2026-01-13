@@ -119,7 +119,8 @@ class GrpcRobotClient extends ChangeNotifier {
 
       _isConnected = true;
       _lastError = null;
-      _reconnectAttempts = 0;
+      // Don't reset _reconnectAttempts here - only reset on successful heartbeat
+      // This prevents infinite reconnect loops when connection succeeds but stream fails
       _connectionStateController.add(true);
       notifyListeners();
 
