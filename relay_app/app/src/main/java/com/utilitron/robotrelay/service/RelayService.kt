@@ -15,6 +15,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.utilitron.robotrelay.R
 import com.utilitron.robotrelay.cloud.FleetApiClient
 import com.utilitron.robotrelay.protocol.ChassisProtocol
 import com.utilitron.robotrelay.ui.MainActivity
@@ -54,10 +55,9 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         private const val CONFIG_PREFS = "task_config"
         private const val CONFIG_KEY = "waypoint_modes"
         private const val TTS_API_KEY = "google_tts_api_key"
-
-        // Robot IP via WIRED USB connection (tablet is physically connected to robot)
-        // See NETWORKING.md for architecture details
-        private const val ROBOT_WIRED_IP = "192.168.20.22"
+        private const val PREF_ROBOT_IP = "robot_ip"
+        private const val PREF_ROBOT_PORT = "robot_port"
+        private const val PREF_RELAY_PORT = "relay_port"
 
         // Broadcast actions for UI updates
         const val ACTION_DISPLAY = "com.utilitron.robotrelay.DISPLAY"
@@ -132,7 +132,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private var pendingSoundRunnables = mutableListOf<Runnable>()
 
     // Robot connection settings - tablet is WIRED to robot base
-    private var robotIp = ROBOT_WIRED_IP
+    // Defaults loaded from strings.xml, can be overridden via SharedPreferences
+    private var robotIp = ""
     private var robotPort = 9090
     private var relayPort = 8765
 
@@ -258,12 +259,19 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.i(TAG, "Service starting")
 
-        // Get config from intent
-        intent?.let {
-            robotIp = it.getStringExtra("robot_ip") ?: robotIp
-            robotPort = it.getIntExtra("robot_port", robotPort)
-            relayPort = it.getIntExtra("relay_port", relayPort)
-        }
+        // Load connection config: Intent > SharedPreferences > strings.xml defaults
+        val prefs = getSharedPreferences(CONFIG_PREFS, Context.MODE_PRIVATE)
+        val defaultIp = getString(R.string.default_robot_ip)
+        val defaultRobotPort = getString(R.string.default_robot_port).toIntOrNull() ?: 9090
+        val defaultRelayPort = getString(R.string.default_relay_port).toIntOrNull() ?: 8765
+
+        robotIp = intent?.getStringExtra("robot_ip")
+            ?: prefs.getString(PREF_ROBOT_IP, defaultIp)
+            ?: defaultIp
+        robotPort = intent?.getIntExtra("robot_port", -1)?.takeIf { it > 0 }
+            ?: prefs.getInt(PREF_ROBOT_PORT, defaultRobotPort)
+        relayPort = intent?.getIntExtra("relay_port", -1)?.takeIf { it > 0 }
+            ?: prefs.getInt(PREF_RELAY_PORT, defaultRelayPort)
 
         // Log available networks for debugging
         findUsbNetworkSocketFactory() // Just for logging
@@ -476,6 +484,39 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         robotClient.disconnect()
         robotClient.connect()
     }
+
+    /**
+     * Update robot connection settings and save to SharedPreferences.
+     * Call reconnectRobot() after changing to apply new settings.
+     */
+    fun updateRobotConnection(ip: String?, port: Int?, relayPortOverride: Int?) {
+        val prefs = getSharedPreferences(CONFIG_PREFS, Context.MODE_PRIVATE)
+        prefs.edit().apply {
+            ip?.let {
+                putString(PREF_ROBOT_IP, it)
+                robotIp = it
+            }
+            port?.let {
+                putInt(PREF_ROBOT_PORT, it)
+                robotPort = it
+            }
+            relayPortOverride?.let {
+                putInt(PREF_RELAY_PORT, it)
+                relayPort = it
+            }
+            apply()
+        }
+        Log.i(TAG, "Robot connection settings updated: ip=$robotIp, port=$robotPort, relay=$relayPort")
+    }
+
+    /**
+     * Get current robot connection settings
+     */
+    fun getRobotConnectionSettings(): Map<String, Any> = mapOf(
+        "robot_ip" to robotIp,
+        "robot_port" to robotPort,
+        "relay_port" to relayPort
+    )
 
     fun sendVelocity(linear: Double, angular: Double) {
         robotClient.sendVelocity(linear, angular)
