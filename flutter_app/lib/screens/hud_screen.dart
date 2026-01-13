@@ -2337,8 +2337,20 @@ class _HudScreenState extends State<HudScreen>
   Future<void> _showFleetPicker(RobotConnection robot) async {
     final selected = await FleetPicker.show(context);
     if (selected != null && mounted) {
-      // Fleet picker returns wsUrl - use it for direct mode
-      robot.connect(selected.wsUrl);
+      // Check if relay mode (ssid starts with RELAY:)
+      if (selected.ssid.startsWith('RELAY:')) {
+        // Relay mode - use gRPC
+        setState(() => _connectionMode = ConnectionMode.relay);
+        _urlController.text = selected.ip;
+        final transport = context.read<UnifiedTransportManager>();
+        transport.connectToHost(selected.ip);
+        robot.setDisplayUrl(selected.ip);
+      } else {
+        // Direct mode - use WebSocket
+        setState(() => _connectionMode = ConnectionMode.direct);
+        _urlController.text = selected.wsUrl;
+        robot.connect(selected.wsUrl);
+      }
     }
   }
 
