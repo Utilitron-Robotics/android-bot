@@ -25,6 +25,7 @@ class GrpcRobotClient extends ChangeNotifier {
   static const Duration _minReconnectDelay = Duration(seconds: 1);
   static const Duration _maxReconnectDelay = Duration(minutes: 1);
   static const double _backoffMultiplier = 1.5;
+  static const int _maxReconnectAttempts = 10;
 
   // State
   ClientChannel? _channel;
@@ -33,6 +34,7 @@ class GrpcRobotClient extends ChangeNotifier {
   StreamSubscription<ServerMessage>? _statusStream;
 
   bool _isConnected = false;
+  bool _isReconnecting = false; // Track reconnection state separately from UI-visible connection state
   String _currentHost = '';
   int _currentPort = _defaultPort;
   String? _lastError;
@@ -166,21 +168,47 @@ class GrpcRobotClient extends ChangeNotifier {
     _reconnectAttempts = 0;
   }
 
-  /// Handle stream errors
+  /// Handle stream errors - soft reset without changing connection state
   void _handleStreamError(error) {
     debugPrint('$_tag: Stream error: $error');
     _lastError = error.toString();
-    _disconnect();
+
+    // Check if we've exceeded max reconnect attempts
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      debugPrint('$_tag: Max reconnect attempts reached, giving up');
+      _disconnect();
+      return;
+    }
+
+    // Don't change _isConnected state - just clean up streams and reconnect
+    // This prevents UI from flashing between login and HUD
+    _isReconnecting = true;
+    _softReset();
     _scheduleReconnect();
   }
 
   /// Handle stream closure
   void _handleStreamDone() {
     debugPrint('$_tag: Stream closed');
-    if (_isConnected) {
-      _disconnect();
+    if (_isConnected && !_isReconnecting) {
+      _isReconnecting = true;
+      _softReset();
       _scheduleReconnect();
     }
+  }
+
+  /// Soft reset - clean up streams but keep connection state
+  /// Used during reconnection to avoid UI flashing
+  Future<void> _softReset() async {
+    _heartbeatTimer?.cancel();
+    await _statusStream?.cancel();
+    await _commandStream?.close();
+    await _channel?.shutdown();
+    _statusStream = null;
+    _commandStream = null;
+    _channel = null;
+    _client = null;
+    // Note: deliberately NOT changing _isConnected or notifying listeners
   }
 
   /// Start periodic heartbeat
@@ -220,7 +248,9 @@ class GrpcRobotClient extends ChangeNotifier {
         '$_tag: Reconnecting in ${delay.inSeconds}s (attempt $_reconnectAttempts)');
 
     _reconnectTimer = Timer(delay, () async {
-      if (!_isConnected && _currentHost.isNotEmpty) {
+      // Check if we should reconnect (either not connected or actively reconnecting)
+      if (_currentHost.isNotEmpty && (_isReconnecting || !_isConnected)) {
+        _isReconnecting = false; // Clear flag before attempting
         await _establishConnection();
       }
     });
@@ -339,6 +369,7 @@ class GrpcRobotClient extends ChangeNotifier {
   /// Internal disconnect
   Future<void> _disconnect() async {
     _isConnected = false;
+    _isReconnecting = false;
     _connectionStateController.add(false);
 
     _heartbeatTimer?.cancel();

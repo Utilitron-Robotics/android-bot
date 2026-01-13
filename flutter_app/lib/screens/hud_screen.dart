@@ -291,13 +291,18 @@ class _HudScreenState extends State<HudScreen>
   /// Called when app returns from background/lock screen
   void _onAppResumed() {
     final robot = context.read<RobotConnection>();
+    final transport = context.read<UnifiedTransportManager>();
 
-    if (robot.state == RobotConnectionState.connected) {
+    // Check connection based on mode
+    final isConnected = _connectionMode == ConnectionMode.direct
+        ? robot.state == RobotConnectionState.connected
+        : transport.status.grpcConnected;
+
+    if (isConnected) {
       // Use shared health check for staleness detection
       debugPrint('HUD: App resumed - running SINC health check');
       _checkConnectionHealth(robot);
-    } else if (robot.state == RobotConnectionState.disconnected ||
-        robot.state == RobotConnectionState.error) {
+    } else {
       // Connection was lost during background - auto-reconnect
       debugPrint(
           'HUD: Connection lost during background, attempting reconnect');
@@ -308,7 +313,7 @@ class _HudScreenState extends State<HudScreen>
         } else {
           // Relay mode - reconnect gRPC
           final host = _extractHost(savedUrl);
-          context.read<UnifiedTransportManager>().connectToHost(host);
+          transport.connectToHost(host);
         }
       }
     }
@@ -323,7 +328,12 @@ class _HudScreenState extends State<HudScreen>
   /// Check connection health and reconnect if stale
   /// Called from: app resume, tour start (SINC seeding)
   void _checkConnectionHealth(RobotConnection robot) {
-    if (robot.state != RobotConnectionState.connected) {
+    final transport = context.read<UnifiedTransportManager>();
+    final isConnected = _connectionMode == ConnectionMode.direct
+        ? robot.state == RobotConnectionState.connected
+        : transport.status.grpcConnected;
+
+    if (!isConnected) {
       debugPrint('HUD: _checkConnectionHealth - not connected, skipping');
       return;
     }
@@ -467,13 +477,23 @@ class _HudScreenState extends State<HudScreen>
                 'HUD: Sequence status=${tourManager.status}, tourRunning=$tourRunning, phase=${tourManager.currentPhase}, countdown=${tourManager.countdownSeconds}');
           }
 
-          if (robot.state == RobotConnectionState.disconnected ||
-              robot.state == RobotConnectionState.error) {
-            return _buildConnectionScreen(robot);
-          }
+          // Check connection based on mode:
+          // - Direct mode: check RobotConnection (WebSocket)
+          // - Relay mode: check UnifiedTransportManager (gRPC)
+          final transport = context.watch<UnifiedTransportManager>();
+          final isConnected = _connectionMode == ConnectionMode.direct
+              ? robot.state == RobotConnectionState.connected
+              : transport.status.grpcConnected;
 
-          if (robot.state == RobotConnectionState.connecting) {
-            return _buildConnectingScreen();
+          if (!isConnected) {
+            // Check if we're in connecting state
+            final isConnecting = _connectionMode == ConnectionMode.direct
+                ? robot.state == RobotConnectionState.connecting
+                : false; // gRPC connection is fast, no need for connecting screen
+            if (isConnecting) {
+              return _buildConnectingScreen();
+            }
+            return _buildConnectionScreen(robot);
           }
 
           // Main HUD layout - Map is FULL SCREEN background, panels float on top
@@ -2326,13 +2346,22 @@ class _HudScreenState extends State<HudScreen>
 
     if (_connectionMode == ConnectionMode.direct) {
       // Direct mode: WebSocket to robot's rosbridge
+      // Skip if already connected
+      if (robot.state == RobotConnectionState.connected) {
+        debugPrint('HUD: Direct mode - already connected, skipping');
+        return;
+      }
       robot.connectWithDisplayUrl(userUrl, userUrl);
     } else {
       // Relay mode: gRPC to relay tablet
+      final transport = context.read<UnifiedTransportManager>();
+      // Skip if already connected to gRPC
+      if (transport.status.grpcConnected) {
+        debugPrint('HUD: Relay mode - gRPC already connected, skipping');
+        return;
+      }
       // Extract host - strip any port or scheme
       String host = _extractHost(userUrl);
-
-      final transport = context.read<UnifiedTransportManager>();
       transport.connectToHost(host);
       debugPrint('HUD: Connecting gRPC to $host:50051');
       // Save just the host for relay mode
