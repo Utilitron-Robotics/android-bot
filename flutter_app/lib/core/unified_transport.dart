@@ -232,16 +232,17 @@ class UnifiedTransportManager extends ChangeNotifier {
   Future<void> initialize() async {
     debugPrint('$_tag: Initializing unified transport...');
 
-    // Initialize gRPC if endpoint provided
-    if (_endpoints.grpcHost != null) {
+    // gRPC doesn't work on web (no raw sockets in browsers)
+    if (!kIsWeb && _endpoints.grpcHost != null) {
       _grpc = GrpcRobotClient();
       _setupGrpcListeners();
+    } else if (kIsWeb) {
+      debugPrint('$_tag: Skipping gRPC on web platform (no socket support)');
     }
 
-    // Initialize WebRTC for data channels (requires gRPC for signaling)
+    // Initialize WebRTC for data channels (requires gRPC for signaling on native)
     if (_grpc != null) {
       _webrtc = WebRtcTransport(grpcClient: _grpc!);
-      // Listeners for WebRTC state are now handled internally or by consumers
     }
 
     // Initialize MQTT if broker URL provided
@@ -254,6 +255,7 @@ class UnifiedTransportManager extends ChangeNotifier {
     }
 
     // Initialize adaptive transport (WebSocket + HTTP fallback)
+    // This ALWAYS works, including on web
     if (_endpoints.websocketUrl != null || _endpoints.httpBaseUrl != null) {
       _adaptive = AdaptiveTransport();
       _adaptive!.initialize(
@@ -273,8 +275,8 @@ class UnifiedTransportManager extends ChangeNotifier {
 
     final futures = <Future>[];
 
-    // Connect gRPC
-    if (_grpc != null && _endpoints.grpcHost != null) {
+    // Connect gRPC (not on web - no socket support)
+    if (!kIsWeb && _grpc != null && _endpoints.grpcHost != null) {
       futures.add(_connectGrpc());
     }
 
@@ -283,7 +285,7 @@ class UnifiedTransportManager extends ChangeNotifier {
       futures.add(_connectMqtt());
     }
 
-    // Connect adaptive (WebSocket/HTTP)
+    // Connect adaptive (WebSocket/HTTP) - this works everywhere including web
     if (_adaptive != null) {
       futures.add(_connectAdaptive());
     }
