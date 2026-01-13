@@ -8,11 +8,10 @@ import 'core/task_engine.dart';
 import 'screens/hud_screen.dart';
 
 // Global instance of the transport manager
-// NOTE: Do NOT connect at startup - the relay tablet IP is dynamic
-// Connection happens when the user enters the actual relay IP in the HUD
 final unifiedTransportManager = UnifiedTransportManager(
   endpoints: const TransportEndpoints(
-    grpcHost: null, // Will be configured when user connects
+    // gRPC host is set dynamically when user connects to a relay
+    grpcHost: null,
     robotId: 'robot-1',
   ),
 );
