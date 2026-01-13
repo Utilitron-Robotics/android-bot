@@ -245,6 +245,11 @@ class UnifiedTransportManager extends ChangeNotifier {
     // Connect gRPC first (needed for WebRTC signaling)
     await _connectGrpcToHost(host, port);
 
+    // Initialize WebRTC if not already (uses gRPC for signaling)
+    if (_webrtc == null && _grpc != null) {
+      _webrtc = WebRtcTransport(grpcClient: _grpc!);
+    }
+
     // Connect WebRTC for map stream (uses gRPC for signaling)
     if (_webrtc != null && _grpc!.isConnected) {
       try {
