@@ -99,23 +99,45 @@ class GrpcRobotClient extends ChangeNotifier {
 
       _client = RobotControlClient(_channel!);
 
+      // Test connection with a simple unary call first
+      try {
+        debugPrint('$_tag: Testing connection with unary sendCommand...');
+        final testCmd = Command()
+          ..id = 'test_${DateTime.now().millisecondsSinceEpoch}'
+          ..type = 'ping';
+        await _client!.sendCommand(testCmd).timeout(const Duration(seconds: 5));
+        debugPrint('$_tag: Unary call succeeded - connection verified!');
+      } catch (e) {
+        debugPrint('$_tag: Unary call failed: $e');
+        // Don't fail the connection - the unary endpoint might not exist
+      }
+
       // Create bidirectional stream
       _commandStream = StreamController<ClientMessage>();
 
       // Start the stream
-      final responseStream = _client!.controlStream(_commandStream!.stream);
+      try {
+        debugPrint('$_tag: Starting bidirectional stream...');
+        final responseStream = _client!.controlStream(_commandStream!.stream);
 
-      _statusStream = responseStream.listen(
-        _handleServerMessage,
-        onError: _handleStreamError,
-        onDone: _handleStreamDone,
-      );
+        _statusStream = responseStream.listen(
+          _handleServerMessage,
+          onError: _handleStreamError,
+          onDone: _handleStreamDone,
+        );
 
-      // Send initial heartbeat request
-      _sendHeartbeatRequest();
+        // Wait a moment for stream to establish
+        await Future.delayed(const Duration(milliseconds: 100));
 
-      // Start periodic heartbeat
-      _startHeartbeat();
+        // Send initial heartbeat request
+        _sendHeartbeatRequest();
+
+        // Start periodic heartbeat
+        _startHeartbeat();
+        debugPrint('$_tag: Bidirectional stream started');
+      } catch (e) {
+        debugPrint('$_tag: Stream setup failed: $e');
+      }
 
       _isConnected = true;
       _lastError = null;
