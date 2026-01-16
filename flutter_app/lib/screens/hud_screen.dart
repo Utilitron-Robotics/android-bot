@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -22,15 +23,20 @@ import '../widgets/crowd_logic_settings.dart';
 import '../widgets/announcement_presets.dart';
 import '../widgets/mode_editor.dart';
 
-/// Connection mode options for HUD
-enum ConnectionMode {
-  direct('Direct WiFi', 'ws://10.42.0.1:9090', Icons.wifi),
-  relay('Relay (gRPC)', '', Icons.router);
+/// Transport type - auto-selected based on platform
+/// Chrome/Web → WebSocket (gRPC doesn't work in browsers)
+/// Native (macOS, iOS, Android) → gRPC (binary, reliable)
+enum TransportType {
+  websocket('WebSocket', Icons.language, ':8766'),
+  grpc('gRPC', Icons.cable, ':50051');
 
   final String label;
-  final String defaultUrl;
   final IconData icon;
-  const ConnectionMode(this.label, this.defaultUrl, this.icon);
+  final String port;
+  const TransportType(this.label, this.icon, this.port);
+
+  /// Auto-detect transport based on platform
+  static TransportType get auto => kIsWeb ? websocket : grpc;
 }
 
 /// HUD-style cockpit layout for landscape tablet control
@@ -64,8 +70,8 @@ class _HudScreenState extends State<HudScreen>
   double _robotX = 0;
   double _robotY = 0;
 
-  // Connection mode
-  ConnectionMode _connectionMode = ConnectionMode.direct;
+  // Transport type (auto-detected from platform)
+  late final TransportType _transportType = TransportType.auto;
 
   // Task engine integration
   final _taskEngine = TaskEngine.instance;
@@ -130,20 +136,10 @@ class _HudScreenState extends State<HudScreen>
 
       _urlController.text = savedUrl;
 
-      // Load saved connection mode
-      final hadSavedMode = await _loadConnectionMode();
-      debugPrint(
-          'Had saved mode: $hadSavedMode, Current mode: ${_connectionMode.name}');
-
-      // ONLY detect mode from URL if there was NO saved mode
-      if (!hadSavedMode) {
-        debugPrint('HUD: No saved mode found, detecting from URL: $savedUrl');
-        _detectModeFromUrl(savedUrl);
-      } else {
-        debugPrint('HUD: Using saved mode: ${_connectionMode.name}');
-      }
-      debugPrint(
-          'Final state - URL: ${_urlController.text}, Mode: ${_connectionMode.name}');
+      // Transport is auto-detected based on platform
+      await _loadConnectionMode();
+      debugPrint('HUD: Platform: ${kIsWeb ? "Web" : "Native"}, Transport: ${_transportType.label}');
+      debugPrint('Final state - URL: ${_urlController.text}');
       debugPrint('=== END HUD INIT ===');
     });
   }
@@ -294,7 +290,7 @@ class _HudScreenState extends State<HudScreen>
     final transport = context.read<UnifiedTransportManager>();
 
     // Check connection based on mode
-    final isConnected = _connectionMode == ConnectionMode.direct
+    final isConnected = kIsWeb
         ? robot.state == RobotConnectionState.connected
         : transport.status.grpcConnected;
 
@@ -308,7 +304,7 @@ class _HudScreenState extends State<HudScreen>
           'HUD: Connection lost during background, attempting reconnect');
       final savedUrl = robot.robotUrl;
       if (savedUrl.isNotEmpty) {
-        if (_connectionMode == ConnectionMode.direct) {
+        if (kIsWeb) {
           robot.connect(savedUrl);
         } else {
           // Relay mode - reconnect gRPC
@@ -329,7 +325,7 @@ class _HudScreenState extends State<HudScreen>
   /// Called from: app resume, tour start (SINC seeding)
   void _checkConnectionHealth(RobotConnection robot) {
     final transport = context.read<UnifiedTransportManager>();
-    final isConnected = _connectionMode == ConnectionMode.direct
+    final isConnected = kIsWeb
         ? robot.state == RobotConnectionState.connected
         : transport.status.grpcConnected;
 
@@ -370,7 +366,7 @@ class _HudScreenState extends State<HudScreen>
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
             debugPrint('HUD: 🔄 Reconnecting to $savedUrl');
-            if (_connectionMode == ConnectionMode.direct) {
+            if (kIsWeb) {
               robot.connect(savedUrl);
             } else {
               final host = _extractHost(savedUrl);
@@ -481,13 +477,13 @@ class _HudScreenState extends State<HudScreen>
           // - Direct mode: check RobotConnection (WebSocket)
           // - Relay mode: check UnifiedTransportManager (gRPC)
           final transport = context.watch<UnifiedTransportManager>();
-          final isConnected = _connectionMode == ConnectionMode.direct
+          final isConnected = kIsWeb
               ? robot.state == RobotConnectionState.connected
               : transport.status.grpcConnected;
 
           if (!isConnected) {
             // Check if we're in connecting state
-            final isConnecting = _connectionMode == ConnectionMode.direct
+            final isConnecting = kIsWeb
                 ? robot.state == RobotConnectionState.connecting
                 : false; // gRPC connection is fast, no need for connecting screen
             if (isConnecting) {
@@ -685,61 +681,36 @@ class _HudScreenState extends State<HudScreen>
               ),
             ],
             const SizedBox(height: 24),
-            // Connection mode selector
+            // Transport type indicator (auto-detected from platform)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 border: Border.all(color: _accentColor.withValues(alpha: 0.3)),
                 borderRadius: BorderRadius.circular(8),
+                color: _accentColor.withValues(alpha: 0.1),
               ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<ConnectionMode>(
-                  value: _connectionMode,
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF1A1F28),
-                  icon: const Icon(Icons.arrow_drop_down, color: _accentColor),
-                  items: ConnectionMode.values.map((mode) {
-                    return DropdownMenuItem(
-                      value: mode,
-                      child: Row(
-                        children: [
-                          Icon(mode.icon, size: 18, color: _accentColor),
-                          const SizedBox(width: 10),
-                          Text(mode.label,
-                              style: const TextStyle(color: _accentColor)),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (mode) {
-                    if (mode != null) {
-                      setState(() => _connectionMode = mode);
-
-                      // Save the connection mode immediately
-                      _saveConnectionMode(mode);
-
-                      // Preserve the current IP, just update protocol/port
-                      // NEVER use hardcoded default IPs!
-                      final currentUrl = _urlController.text.trim();
-                      if (currentUrl.isEmpty) {
-                        // Leave empty - user must enter their IP
-                        return;
-                      }
-
-                      final uri = Uri.tryParse(currentUrl);
-                      final host = uri?.host ?? '';
-                      if (host.isNotEmpty) {
-                        // Preserve IP, update protocol/port to match mode
-                        if (mode == ConnectionMode.direct) {
-                          _urlController.text = 'ws://$host:9090';
-                        } else {
-                          // Relay mode - just need the host for gRPC
-                          _urlController.text = host;
-                        }
-                      }
-                    }
-                  },
-                ),
+              child: Row(
+                children: [
+                  Icon(_transportType.icon, color: _accentColor, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Transport: ${_transportType.label}',
+                          style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          kIsWeb
+                              ? 'WebSocket:8766 (Chrome requires WS)'
+                              : 'gRPC:50051 (native binary protocol)',
+                          style: TextStyle(color: Colors.grey.shade400, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 16),
@@ -749,8 +720,8 @@ class _HudScreenState extends State<HudScreen>
                   child: TextField(
                     controller: _urlController,
                     decoration: InputDecoration(
-                      labelText: 'Robot URL',
-                      hintText: 'Enter robot IP (e.g., 192.168.x.x)',
+                      labelText: 'Relay IP Address',
+                      hintText: 'e.g., 192.168.88.37',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
                         borderSide: BorderSide(
@@ -1429,8 +1400,8 @@ class _HudScreenState extends State<HudScreen>
           GestureDetector(
             onTap: () => _showFleetPicker(robot),
             child: _HudChip(
-              icon: Icons.router,
-              label: robot.robotUrl.contains('10.42.0.1') ? 'DIRECT' : 'RELAY',
+              icon: _transportType.icon,
+              label: _transportType.label.toUpperCase(),
               color: _accentSecondary,
             ),
           ),
@@ -2347,30 +2318,34 @@ class _HudScreenState extends State<HudScreen>
   }
 
   void _connect(RobotConnection robot) {
-    final userUrl = _urlController.text.trim();
-    if (userUrl.isEmpty) return;
+    final userInput = _urlController.text.trim();
+    if (userInput.isEmpty) return;
 
-    if (_connectionMode == ConnectionMode.direct) {
-      // Direct mode: WebSocket to robot's rosbridge
-      // Skip if already connected
+    // Extract just the IP/host from user input (strip any scheme/port)
+    final host = _extractHost(userInput);
+    if (host.isEmpty) return;
+
+    if (kIsWeb) {
+      // Web/Chrome: WebSocket to relay:8766 (gRPC doesn't work in browsers)
+      final wsUrl = 'ws://$host:8766';
+      debugPrint('HUD: [Web/${_transportType.label}] Connecting to $wsUrl');
+
       if (robot.state == RobotConnectionState.connected) {
-        debugPrint('HUD: Direct mode - already connected, skipping');
+        debugPrint('HUD: Already connected, skipping');
         return;
       }
-      robot.connectWithDisplayUrl(userUrl, userUrl);
+      robot.connectWithDisplayUrl(wsUrl, host);
     } else {
-      // Relay mode: gRPC to relay tablet
+      // Native (macOS/iOS/Android): gRPC to relay:50051
       final transport = context.read<UnifiedTransportManager>();
-      // Skip if already connected to gRPC
+
       if (transport.status.grpcConnected) {
-        debugPrint('HUD: Relay mode - gRPC already connected, skipping');
+        debugPrint('HUD: gRPC already connected, skipping');
         return;
       }
-      // Extract host - strip any port or scheme
-      String host = _extractHost(userUrl);
+
+      debugPrint('HUD: [Native/${_transportType.label}] Connecting to $host:50051');
       transport.connectToHost(host);
-      debugPrint('HUD: Connecting gRPC to $host:50051');
-      // Save just the host for relay mode
       robot.setDisplayUrl(host);
     }
   }
@@ -2379,29 +2354,15 @@ class _HudScreenState extends State<HudScreen>
   Future<void> _showFleetPicker(RobotConnection robot) async {
     final selected = await FleetPicker.show(context);
     if (selected != null && mounted) {
-      // Check if relay mode (ssid starts with RELAY:)
-      if (selected.ssid.startsWith('RELAY:')) {
-        // Relay mode - use gRPC
-        setState(() => _connectionMode = ConnectionMode.relay);
-        _urlController.text = selected.ip;
-        final transport = context.read<UnifiedTransportManager>();
-        transport.connectToHost(selected.ip);
-        robot.setDisplayUrl(selected.ip);
-      } else {
-        // Direct mode - use WebSocket
-        setState(() => _connectionMode = ConnectionMode.direct);
-        _urlController.text = selected.wsUrl;
-        robot.connect(selected.wsUrl);
-      }
+      // Use the IP from the selected robot, transport auto-selected by platform
+      _urlController.text = selected.ip;
+      _connect(robot);
     }
   }
 
   void _detectModeFromUrl(String url) {
-    if (url.contains(':9090') || url.contains('10.42.0.')) {
-      setState(() => _connectionMode = ConnectionMode.direct);
-    } else {
-      setState(() => _connectionMode = ConnectionMode.relay);
-    }
+    // Transport is now auto-detected based on platform (kIsWeb)
+    // This method is kept for compatibility but does nothing
   }
 
   /// Extract just the host/IP from a URL, stripping scheme and port
@@ -2423,29 +2384,13 @@ class _HudScreenState extends State<HudScreen>
     return url;
   }
 
-  /// Save connection mode to SharedPreferences
-  Future<void> _saveConnectionMode(ConnectionMode mode) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('connection_mode', mode.name);
-    debugPrint('HUD: Saved connection mode: ${mode.name}');
-  }
-
-  /// Load connection mode from SharedPreferences
-  /// Returns true if a saved mode was found, false otherwise
+  /// Load saved relay IP from SharedPreferences
+  /// Returns true if a saved IP was found (for compat - transport is auto-detected now)
   Future<bool> _loadConnectionMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedMode = prefs.getString('connection_mode');
-    if (savedMode != null) {
-      final mode = ConnectionMode.values.firstWhere(
-        (m) => m.name == savedMode,
-        orElse: () => ConnectionMode.direct,
-      );
-      setState(() => _connectionMode = mode);
-      debugPrint('HUD: Loaded connection mode: ${mode.name}');
-      return true;
-    }
-    debugPrint('HUD: No saved connection mode found');
-    return false;
+    // Transport is now auto-detected based on platform (kIsWeb)
+    // Just return true to indicate we checked
+    debugPrint('HUD: Transport auto-detected: ${_transportType.label}');
+    return true;
   }
 
   /// Write log data to file for debugging large datasets
