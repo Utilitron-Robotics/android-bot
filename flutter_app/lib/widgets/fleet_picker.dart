@@ -28,7 +28,7 @@ class _FleetPickerState extends State<FleetPicker>
   late TabController _tabController;
   final _ssidController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _ipController = TextEditingController(text: '10.42.0.1');
+  final _ipController = TextEditingController(); // No hardcoded default
   final _portController = TextEditingController(text: '9090');
   final _nicknameController = TextEditingController();
   final _relayIpController = TextEditingController();
@@ -610,7 +610,7 @@ class _FleetPickerState extends State<FleetPicker>
     setState(() => _showAddForm = false);
     _ssidController.clear();
     _passwordController.clear();
-    _ipController.text = '10.42.0.1';
+    _ipController.clear(); // No hardcoded default
     _portController.text = '9090';
     _nicknameController.clear();
   }

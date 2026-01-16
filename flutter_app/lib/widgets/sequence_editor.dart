@@ -1020,26 +1020,39 @@ class _SequenceEditorState extends State<SequenceEditor> {
             Row(
               children: [
                 Expanded(
-                  child: DropdownButton<String>(
-                    value: _selectedSequence?.id,
-                    hint: const Text('Select Sequence',
-                        style: TextStyle(fontSize: 13)),
-                    isExpanded: true,
-                    isDense: true,
-                    items: sequences
-                        .map((t) => DropdownMenuItem(
-                              value: t.id,
-                              child:
-                                  Text(t.name, overflow: TextOverflow.ellipsis),
-                            ))
-                        .toList(),
-                    onChanged: (id) {
-                      if (id != null) {
-                        _selectSequence(
-                            sequences.firstWhere((t) => t.id == id));
-                      }
-                    },
-                  ),
+                  child: Builder(builder: (context) {
+                    // Validate that _selectedSequence exists in current sequences list
+                    final validValue = _selectedSequence != null &&
+                        sequences.any((t) => t.id == _selectedSequence!.id)
+                        ? _selectedSequence!.id
+                        : null;
+                    // Auto-clear stale selection
+                    if (_selectedSequence != null && validValue == null) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) setState(() => _selectedSequence = null);
+                      });
+                    }
+                    return DropdownButton<String>(
+                      value: validValue,
+                      hint: const Text('Select Sequence',
+                          style: TextStyle(fontSize: 13)),
+                      isExpanded: true,
+                      isDense: true,
+                      items: sequences
+                          .map((t) => DropdownMenuItem(
+                                value: t.id,
+                                child:
+                                    Text(t.name, overflow: TextOverflow.ellipsis),
+                              ))
+                          .toList(),
+                      onChanged: (id) {
+                        if (id != null) {
+                          final seq = sequences.firstWhere((t) => t.id == id, orElse: () => sequences.first);
+                          _selectSequence(seq);
+                        }
+                      },
+                    );
+                  }),
                 ),
                 if (_selectedSequence != null)
                   IconButton(
