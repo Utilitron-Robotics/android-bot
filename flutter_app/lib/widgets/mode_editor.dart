@@ -339,6 +339,32 @@ class _ModeEditorState extends State<ModeEditor> {
   Widget _buildHeader(List<WaypointTask> modes) {
     final sequences = SequenceManager.instance.sequences;
 
+    // Compute valid dropdown value - must exist in items list
+    String? dropdownValue;
+    if (_selectedSequence != null) {
+      // Check if sequence still exists
+      final seqExists = sequences.any((t) => t.id == _selectedSequence!.id);
+      if (seqExists) {
+        dropdownValue = 'seq:${_selectedSequence!.id}';
+      } else {
+        // Sequence was deleted, clear selection
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _selectedSequence = null);
+        });
+      }
+    } else if (_selectedMode != null) {
+      // Check if mode still exists
+      final modeExists = modes.any((m) => m.id == _selectedMode!.id);
+      if (modeExists) {
+        dropdownValue = _selectedMode!.id;
+      } else {
+        // Mode was deleted, clear selection
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _selectedMode = null);
+        });
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -358,9 +384,7 @@ class _ModeEditorState extends State<ModeEditor> {
           const Spacer(),
           // Combined Mode selector dropdown
           DropdownButton<String>(
-            value: _selectedSequence != null
-                ? 'seq:${_selectedSequence!.id}'
-                : _selectedMode?.id,
+            value: dropdownValue,
             hint: const Text('Select Mode'),
             items: [
               // Task modes
@@ -376,14 +400,7 @@ class _ModeEditorState extends State<ModeEditor> {
                       ],
                     ),
                   )),
-              // Divider
-              if (sequences.isNotEmpty)
-                const DropdownMenuItem(
-                  enabled: false,
-                  value: '_divider',
-                  child: Divider(),
-                ),
-              // Sequence modes (multi-waypoint)
+              // Sequence modes (multi-waypoint) - no divider to avoid value conflicts
               ...sequences.map((t) => DropdownMenuItem(
                     value: 'seq:${t.id}',
                     child: Row(
@@ -397,16 +414,17 @@ class _ModeEditorState extends State<ModeEditor> {
                   )),
             ],
             onChanged: (id) {
-              if (id == null || id == '_divider') return;
+              if (id == null) return;
               if (id.startsWith('seq:')) {
                 final seqId = id.substring(4);
-                final seq = sequences.firstWhere((t) => t.id == seqId);
+                final seq = sequences.firstWhere((t) => t.id == seqId, orElse: () => sequences.first);
                 setState(() {
                   _selectedSequence = seq;
                   _selectedMode = null;
                 });
               } else {
-                _selectMode(modes.firstWhere((m) => m.id == id));
+                final mode = modes.firstWhere((m) => m.id == id, orElse: () => modes.first);
+                _selectMode(mode);
                 setState(() => _selectedSequence = null);
               }
             },
@@ -795,29 +813,36 @@ class _ModeEditorState extends State<ModeEditor> {
                     ),
                   )
                 else if (step.action == TaskAction.navigate)
-                  DropdownButtonFormField<String>(
-                    initialValue: step.data.isEmpty ? null : step.data,
-                    decoration: const InputDecoration(
-                      labelText: 'Navigate to',
-                      prefixIcon: Icon(Icons.navigation),
-                      border: OutlineInputBorder(),
-                      isDense: true,
-                    ),
-                    items: widget.availableWaypoints.map((wp) => DropdownMenuItem(
-                      value: wp,
-                      child: Text(wp),
-                    )).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        _getStepController('${mode.id}_${index}_data', step.data).text = value;
-                        setState(() {
-                          final newSteps = [..._selectedMode!.steps];
-                          newSteps[index] = newSteps[index].copyWith(data: value);
-                          _selectedMode = _selectedMode!.copyWith(steps: newSteps);
-                        });
-                      }
-                    },
-                  ),
+                  Builder(builder: (context) {
+                    // Validate that step.data exists in available waypoints
+                    final validValue = step.data.isNotEmpty &&
+                        widget.availableWaypoints.contains(step.data)
+                        ? step.data
+                        : null;
+                    return DropdownButtonFormField<String>(
+                      value: validValue,
+                      decoration: const InputDecoration(
+                        labelText: 'Navigate to',
+                        prefixIcon: Icon(Icons.navigation),
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: widget.availableWaypoints.map((wp) => DropdownMenuItem(
+                        value: wp,
+                        child: Text(wp),
+                      )).toList(),
+                      onChanged: (value) {
+                        if (value != null) {
+                          _getStepController('${mode.id}_${index}_data', step.data).text = value;
+                          setState(() {
+                            final newSteps = [..._selectedMode!.steps];
+                            newSteps[index] = newSteps[index].copyWith(data: value);
+                            _selectedMode = _selectedMode!.copyWith(steps: newSteps);
+                          });
+                        }
+                      },
+                    );
+                  }),
 
                 // Duration field for wait/display
                 if (step.action == TaskAction.wait || step.action == TaskAction.display) ...[
@@ -924,25 +949,33 @@ class _ModeEditorState extends State<ModeEditor> {
                           style: const TextStyle(color: Colors.green),
                         )
                       : const Text('No mode assigned', style: TextStyle(color: Colors.grey)),
-                  trailing: DropdownButton<String?>(
-                    value: currentModeId,
-                    hint: const Text('Select Mode'),
-                    items: [
-                      const DropdownMenuItem(
-                        value: null,
-                        child: Text('(None)', style: TextStyle(color: Colors.grey)),
-                      ),
-                      ...TaskEngine.instance.allModes.map((m) => DropdownMenuItem(
-                        value: m.id,
-                        child: Text(m.name),
-                      )),
-                    ],
-                    onChanged: (modeId) {
-                      TaskEngine.instance.assignMode(waypoint, modeId);
-                      widget.onAssignMode?.call(waypoint, modeId);
-                      setState(() {});
-                    },
-                  ),
+                  trailing: Builder(builder: (context) {
+                    final allModes = TaskEngine.instance.allModes;
+                    // Validate currentModeId exists in modes list
+                    final validModeId = currentModeId != null &&
+                        allModes.any((m) => m.id == currentModeId)
+                        ? currentModeId
+                        : null;
+                    return DropdownButton<String?>(
+                      value: validModeId,
+                      hint: const Text('Select Mode'),
+                      items: [
+                        const DropdownMenuItem(
+                          value: null,
+                          child: Text('(None)', style: TextStyle(color: Colors.grey)),
+                        ),
+                        ...allModes.map((m) => DropdownMenuItem(
+                          value: m.id,
+                          child: Text(m.name),
+                        )),
+                      ],
+                      onChanged: (modeId) {
+                        TaskEngine.instance.assignMode(waypoint, modeId);
+                        widget.onAssignMode?.call(waypoint, modeId);
+                        setState(() {});
+                      },
+                    );
+                  }),
                 ),
               );
             },

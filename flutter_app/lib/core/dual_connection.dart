@@ -26,7 +26,7 @@ enum DualConnectionState {
 class DualConnectionManager extends ChangeNotifier {
   // Connection config
   ConnectionMode _mode = ConnectionMode.direct;
-  String _directIp = '10.42.0.1';  // Robot's own WiFi hotspot
+  String _directIp = '';  // No hardcoded default - user must configure
   int _directPort = 9090;
   String _relayIp = '';
   int _relayHttpPort = 8765;

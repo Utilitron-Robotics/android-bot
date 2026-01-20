@@ -108,7 +108,8 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   Future<void> _loadSavedUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    _robotUrl = prefs.getString('robot_url') ?? 'ws://10.42.0.1:9090';
+    // No hardcoded default - user must enter relay IP
+    _robotUrl = prefs.getString('robot_url') ?? '';
     notifyListeners();
   }
 

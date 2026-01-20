@@ -32,7 +32,7 @@ class RobotBase {
 
   RobotBase({
     required this.ssid,
-    this.ip = '10.42.0.1',  // Direct WiFi default (robot's own hotspot)
+    required this.ip,  // No hardcoded default - must be provided
     this.port = 9090,
     this.nickname,
     this.password,
@@ -54,7 +54,7 @@ class RobotBase {
 
   factory RobotBase.fromJson(Map<String, dynamic> json) => RobotBase(
     ssid: json['ssid'] as String,
-    ip: json['ip'] as String? ?? '10.42.0.1',
+    ip: json['ip'] as String? ?? '', // Empty if not provided (user must enter)
     port: json['port'] as int? ?? 9090,
     nickname: json['nickname'] as String?,
     password: json['password'] as String?,
@@ -105,9 +105,11 @@ class FleetDiscovery extends ChangeNotifier {
         final map = Map<String, dynamic>.from(
           Uri.splitQueryString(json).map((k, v) => MapEntry(k, v))
         );
+        final ip = map['ip'] ?? '';
+        if (ip.isEmpty) continue; // Skip entries without IP
         final robot = RobotBase(
           ssid: map['ssid'] ?? 'Unknown',
-          ip: map['ip'] ?? '192.168.20.22',
+          ip: ip, // No hardcoded default
           port: int.tryParse(map['port'] ?? '9090') ?? 9090,
           nickname: map['nickname']?.isNotEmpty == true ? map['nickname'] : null,
           password: map['password']?.isNotEmpty == true ? map['password'] : null,
