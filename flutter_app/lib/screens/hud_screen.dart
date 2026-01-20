@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/robot_connection.dart';
 import '../core/unified_transport.dart' show UnifiedTransportManager;
@@ -138,7 +137,8 @@ class _HudScreenState extends State<HudScreen>
 
       // Transport is auto-detected based on platform
       await _loadConnectionMode();
-      debugPrint('HUD: Platform: ${kIsWeb ? "Web" : "Native"}, Transport: ${_transportType.label}');
+      debugPrint(
+          'HUD: Platform: ${kIsWeb ? "Web" : "Native"}, Transport: ${_transportType.label}');
       debugPrint('Final state - URL: ${_urlController.text}');
       debugPrint('=== END HUD INIT ===');
     });
@@ -525,7 +525,8 @@ class _HudScreenState extends State<HudScreen>
                           children: [
                             MapView(
                               fullscreen: true,
-                              mapStream: manager.mapStream, // <-- PASS THE STREAM
+                              mapStream:
+                                  manager.mapStream, // <-- PASS THE STREAM
                               onMapUpdate: (info, x, y) {
                                 if (mounted &&
                                     (info != _mapInfo ||
@@ -699,13 +700,15 @@ class _HudScreenState extends State<HudScreen>
                       children: [
                         Text(
                           'Transport: ${_transportType.label}',
-                          style: const TextStyle(color: _accentColor, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              color: _accentColor, fontWeight: FontWeight.bold),
                         ),
                         Text(
                           kIsWeb
                               ? 'WebSocket:8766 (Chrome requires WS)'
                               : 'gRPC:50051 (native binary protocol)',
-                          style: TextStyle(color: Colors.grey.shade400, fontSize: 11),
+                          style: TextStyle(
+                              color: Colors.grey.shade400, fontSize: 11),
                         ),
                       ],
                     ),
@@ -1038,12 +1041,14 @@ class _HudScreenState extends State<HudScreen>
                     const SizedBox(width: 4),
                   ],
                   // SKIP WAIT button - only shows when awaiting visitor
-                  if (tourManager.currentPhase == SequencePhase.awaitingVisitor) ...[
+                  if (tourManager.currentPhase ==
+                      SequencePhase.awaitingVisitor) ...[
                     _MiniControlButton(
                       icon: Icons.fast_forward,
                       color: Colors.amber,
                       onTap: () {
-                        debugPrint('HUD: SKIP WAIT pressed - resuming tour without visitor');
+                        debugPrint(
+                            'HUD: SKIP WAIT pressed - resuming tour without visitor');
                         tourManager.resumeFromVisitor();
                       },
                       tooltip: 'Skip Wait',
@@ -2344,7 +2349,8 @@ class _HudScreenState extends State<HudScreen>
         return;
       }
 
-      debugPrint('HUD: [Native/${_transportType.label}] Connecting to $host:50051');
+      debugPrint(
+          'HUD: [Native/${_transportType.label}] Connecting to $host:50051');
       transport.connectToHost(host);
 
       // ALSO connect RobotConnection via WebSocket for capability discovery (waypoints!)
@@ -2352,7 +2358,8 @@ class _HudScreenState extends State<HudScreen>
       if (robot.state != RobotConnectionState.connected) {
         final wsUrl = 'ws://$host:8766';
         robot.connectWithDisplayUrl(wsUrl, host);
-        debugPrint('HUD: Connecting WebSocket to $wsUrl for capability discovery');
+        debugPrint(
+            'HUD: Connecting WebSocket to $wsUrl for capability discovery');
       }
     }
   }

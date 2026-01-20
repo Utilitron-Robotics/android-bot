@@ -7,7 +7,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 /// Represents a scanned WiFi network
 class ScannedNetwork {
   final String ssid;
-  final int rssi;  // Signal strength
+  final int rssi; // Signal strength
   final bool isSecured;
 
   ScannedNetwork({
@@ -22,17 +22,17 @@ class ScannedNetwork {
 
 /// Represents a discovered or known Pudu robot base
 class RobotBase {
-  final String ssid;        // WiFi SSID (e.g., "PUDU_ABC123")
-  final String ip;          // Robot IP when connected to its network
-  final int port;           // Rosbridge port (default 9090)
-  final String? nickname;   // User-friendly name
-  final String? password;   // WiFi password (if known)
+  final String ssid; // WiFi SSID (e.g., "PUDU_ABC123")
+  final String ip; // Robot IP when connected to its network
+  final int port; // Rosbridge port (default 9090)
+  final String? nickname; // User-friendly name
+  final String? password; // WiFi password (if known)
   final DateTime? lastSeen; // Last successful connection
-  bool isOnline;            // Currently reachable
+  bool isOnline; // Currently reachable
 
   RobotBase({
     required this.ssid,
-    required this.ip,  // No hardcoded default - must be provided
+    required this.ip, // No hardcoded default - must be provided
     this.port = 9090,
     this.nickname,
     this.password,
@@ -44,24 +44,25 @@ class RobotBase {
   String get displayName => nickname ?? ssid;
 
   Map<String, dynamic> toJson() => {
-    'ssid': ssid,
-    'ip': ip,
-    'port': port,
-    'nickname': nickname,
-    'password': password,
-    'lastSeen': lastSeen?.toIso8601String(),
-  };
+        'ssid': ssid,
+        'ip': ip,
+        'port': port,
+        'nickname': nickname,
+        'password': password,
+        'lastSeen': lastSeen?.toIso8601String(),
+      };
 
   factory RobotBase.fromJson(Map<String, dynamic> json) => RobotBase(
-    ssid: json['ssid'] as String,
-    ip: json['ip'] as String? ?? '', // Empty if not provided (user must enter)
-    port: json['port'] as int? ?? 9090,
-    nickname: json['nickname'] as String?,
-    password: json['password'] as String?,
-    lastSeen: json['lastSeen'] != null
-        ? DateTime.tryParse(json['lastSeen'] as String)
-        : null,
-  );
+        ssid: json['ssid'] as String,
+        ip: json['ip'] as String? ??
+            '', // Empty if not provided (user must enter)
+        port: json['port'] as int? ?? 9090,
+        nickname: json['nickname'] as String?,
+        password: json['password'] as String?,
+        lastSeen: json['lastSeen'] != null
+            ? DateTime.tryParse(json['lastSeen'] as String)
+            : null,
+      );
 }
 
 /// WiFi connection result
@@ -82,7 +83,8 @@ class FleetDiscovery extends ChangeNotifier {
   String? _lastError;
 
   List<RobotBase> get knownRobots => List.unmodifiable(_knownRobots);
-  List<ScannedNetwork> get scannedNetworks => List.unmodifiable(_scannedNetworks);
+  List<ScannedNetwork> get scannedNetworks =>
+      List.unmodifiable(_scannedNetworks);
   bool get isScanning => _isScanning;
   bool get isConnecting => _isConnecting;
   String? get currentSsid => _currentSsid;
@@ -103,16 +105,17 @@ class FleetDiscovery extends ChangeNotifier {
     for (final json in robotsJson) {
       try {
         final map = Map<String, dynamic>.from(
-          Uri.splitQueryString(json).map((k, v) => MapEntry(k, v))
-        );
+            Uri.splitQueryString(json).map((k, v) => MapEntry(k, v)));
         final ip = map['ip'] ?? '';
         if (ip.isEmpty) continue; // Skip entries without IP
         final robot = RobotBase(
           ssid: map['ssid'] ?? 'Unknown',
           ip: ip, // No hardcoded default
           port: int.tryParse(map['port'] ?? '9090') ?? 9090,
-          nickname: map['nickname']?.isNotEmpty == true ? map['nickname'] : null,
-          password: map['password']?.isNotEmpty == true ? map['password'] : null,
+          nickname:
+              map['nickname']?.isNotEmpty == true ? map['nickname'] : null,
+          password:
+              map['password']?.isNotEmpty == true ? map['password'] : null,
         );
         _knownRobots.add(robot);
       } catch (e) {
@@ -129,9 +132,10 @@ class FleetDiscovery extends ChangeNotifier {
   /// Save known robots to storage
   Future<void> _saveKnownRobots() async {
     final prefs = await SharedPreferences.getInstance();
-    final robotsJson = _knownRobots.map((r) =>
-      'ssid=${r.ssid}&ip=${r.ip}&port=${r.port}&nickname=${r.nickname ?? ""}&password=${r.password ?? ""}'
-    ).toList();
+    final robotsJson = _knownRobots
+        .map((r) =>
+            'ssid=${r.ssid}&ip=${r.ip}&port=${r.port}&nickname=${r.nickname ?? ""}&password=${r.password ?? ""}')
+        .toList();
     await prefs.setStringList('known_robots', robotsJson);
   }
 
@@ -185,7 +189,8 @@ class FleetDiscovery extends ChangeNotifier {
   }
 
   /// Scan for nearby WiFi networks
-  Future<List<ScannedNetwork>> scanWifiNetworks({bool filterRobots = false}) async {
+  Future<List<ScannedNetwork>> scanWifiNetworks(
+      {bool filterRobots = false}) async {
     _isScanning = true;
     _scannedNetworks.clear();
     _lastError = null;
@@ -215,8 +220,9 @@ class FleetDiscovery extends ChangeNotifier {
   Future<void> _scanMacOsWifi({bool filterRobots = false}) async {
     // WiFi scanning requires native CoreWLAN on newer macOS
     // For now, show message to use System Settings
-    _lastError = 'WiFi scanning not available. Use System Settings > Wi-Fi to connect, then enter relay IP manually.';
-    debugPrint('macOS WiFi scan: ${_lastError}');
+    _lastError =
+        'WiFi scanning not available. Use System Settings > Wi-Fi to connect, then enter relay IP manually.';
+    debugPrint('macOS WiFi scan: $_lastError');
   }
 
   /// Get current WiFi SSID
@@ -234,8 +240,9 @@ class FleetDiscovery extends ChangeNotifier {
         if (result.exitCode == 0) {
           final output = result.stdout as String;
           // Format: "Current Wi-Fi Network: SSID_NAME"
-          final match = RegExp(r'Current Wi-Fi Network:\s*(.+)$', multiLine: true)
-              .firstMatch(output);
+          final match =
+              RegExp(r'Current Wi-Fi Network:\s*(.+)$', multiLine: true)
+                  .firstMatch(output);
           _currentSsid = match?.group(1)?.trim();
           notifyListeners();
           return _currentSsid;
@@ -248,7 +255,8 @@ class FleetDiscovery extends ChangeNotifier {
   }
 
   /// Connect to a WiFi network (macOS)
-  Future<WifiConnectResult> connectToWifi(String ssid, {String? password}) async {
+  Future<WifiConnectResult> connectToWifi(String ssid,
+      {String? password}) async {
     if (kIsWeb) {
       return WifiConnectResult(
         success: false,
@@ -276,9 +284,11 @@ class FleetDiscovery extends ChangeNotifier {
   }
 
   /// Connect to WiFi on macOS using networksetup
-  Future<WifiConnectResult> _connectMacOsWifi(String ssid, {String? password}) async {
+  Future<WifiConnectResult> _connectMacOsWifi(String ssid,
+      {String? password}) async {
     // Get WiFi interface name (usually en0 or en1)
-    final interfaceResult = await Process.run('networksetup', ['-listallhardwareports']);
+    final interfaceResult =
+        await Process.run('networksetup', ['-listallhardwareports']);
     String wifiInterface = 'en1'; // Default
 
     if (interfaceResult.exitCode == 0) {
@@ -326,7 +336,8 @@ class FleetDiscovery extends ChangeNotifier {
       } else {
         return WifiConnectResult(
           success: false,
-          message: 'Connection attempt completed but not connected to $ssid (current: $currentSsid)',
+          message:
+              'Connection attempt completed but not connected to $ssid (current: $currentSsid)',
         );
       }
     } else {

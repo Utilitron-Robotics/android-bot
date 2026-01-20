@@ -34,7 +34,8 @@ class GrpcRobotClient extends ChangeNotifier {
   StreamSubscription<ServerMessage>? _statusStream;
 
   bool _isConnected = false;
-  bool _isReconnecting = false; // Track reconnection state separately from UI-visible connection state
+  bool _isReconnecting =
+      false; // Track reconnection state separately from UI-visible connection state
   String _currentHost = '';
   int _currentPort = _defaultPort;
   String? _lastError;
@@ -115,7 +116,7 @@ class GrpcRobotClient extends ChangeNotifier {
             errorStr.contains('unavailable') ||
             errorStr.contains('errno = 61')) {
           debugPrint('$_tag: Server unreachable - will retry');
-          throw e; // Re-throw to trigger reconnect logic
+          rethrow; // Re-throw to trigger reconnect logic
         }
         // For other errors (e.g., method not found), continue - server might be running but missing endpoint
       }

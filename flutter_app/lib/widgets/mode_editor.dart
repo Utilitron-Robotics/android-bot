@@ -124,8 +124,12 @@ class _ModeEditorState extends State<ModeEditor> {
       steps.add(TaskStep(
         id: oldStep.id,
         action: oldStep.action,
-        data: _stepControllers['${_selectedMode!.id}_${i}_data']?.text ?? oldStep.data,
-        durationSeconds: int.tryParse(_stepControllers['${_selectedMode!.id}_${i}_duration']?.text ?? '') ?? oldStep.durationSeconds,
+        data: _stepControllers['${_selectedMode!.id}_${i}_data']?.text ??
+            oldStep.data,
+        durationSeconds: int.tryParse(
+                _stepControllers['${_selectedMode!.id}_${i}_duration']?.text ??
+                    '') ??
+            oldStep.durationSeconds,
         parallel: oldStep.parallel,
       ));
     }
@@ -161,7 +165,9 @@ class _ModeEditorState extends State<ModeEditor> {
   void _removeStep(int index) {
     if (_selectedMode == null) return;
     _stepControllers.remove('${_selectedMode!.id}_${index}_data')?.dispose();
-    _stepControllers.remove('${_selectedMode!.id}_${index}_duration')?.dispose();
+    _stepControllers
+        .remove('${_selectedMode!.id}_${index}_duration')
+        ?.dispose();
     setState(() {
       final newSteps = [..._selectedMode!.steps]..removeAt(index);
       _selectedMode = _selectedMode!.copyWith(steps: newSteps);
@@ -172,7 +178,8 @@ class _ModeEditorState extends State<ModeEditor> {
     if (_selectedMode == null) return;
     setState(() {
       final newSteps = [..._selectedMode!.steps];
-      newSteps[index] = newSteps[index].copyWith(parallel: !newSteps[index].parallel);
+      newSteps[index] =
+          newSteps[index].copyWith(parallel: !newSteps[index].parallel);
       _selectedMode = _selectedMode!.copyWith(steps: newSteps);
     });
   }
@@ -406,7 +413,8 @@ class _ModeEditorState extends State<ModeEditor> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.route, size: 14, color: Colors.blue.shade400),
+                        Icon(Icons.route,
+                            size: 14, color: Colors.blue.shade400),
                         const SizedBox(width: 4),
                         Text(t.name),
                       ],
@@ -417,13 +425,15 @@ class _ModeEditorState extends State<ModeEditor> {
               if (id == null) return;
               if (id.startsWith('seq:')) {
                 final seqId = id.substring(4);
-                final seq = sequences.firstWhere((t) => t.id == seqId, orElse: () => sequences.first);
+                final seq = sequences.firstWhere((t) => t.id == seqId,
+                    orElse: () => sequences.first);
                 setState(() {
                   _selectedSequence = seq;
                   _selectedMode = null;
                 });
               } else {
-                final mode = modes.firstWhere((m) => m.id == id, orElse: () => modes.first);
+                final mode = modes.firstWhere((m) => m.id == id,
+                    orElse: () => modes.first);
                 _selectMode(mode);
                 setState(() => _selectedSequence = null);
               }
@@ -489,17 +499,20 @@ class _ModeEditorState extends State<ModeEditor> {
                       children: [
                         Text(
                           mode.name,
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              fontSize: 20, fontWeight: FontWeight.bold),
                         ),
                         if (mode.isBuiltIn) ...[
                           const SizedBox(width: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
                               color: Colors.blue.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(4),
                             ),
-                            child: const Text('Built-in', style: TextStyle(fontSize: 10)),
+                            child: const Text('Built-in',
+                                style: TextStyle(fontSize: 10)),
                           ),
                         ],
                       ],
@@ -546,7 +559,8 @@ class _ModeEditorState extends State<ModeEditor> {
                   itemCount: mode.steps.length,
                   itemBuilder: (ctx, index) {
                     final step = mode.steps[index];
-                    return _buildStepPreviewCard(step, index, mode.steps.length);
+                    return _buildStepPreviewCard(
+                        step, index, mode.steps.length);
                   },
                 ),
         ),
@@ -562,7 +576,8 @@ class _ModeEditorState extends State<ModeEditor> {
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: _getActionColor(step.action),
-          child: Icon(_getActionIcon(step.action), size: 18, color: Colors.white),
+          child:
+              Icon(_getActionIcon(step.action), size: 18, color: Colors.white),
         ),
         title: Text(step.action.label),
         subtitle: Column(
@@ -589,7 +604,9 @@ class _ModeEditorState extends State<ModeEditor> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: step.parallel ? Colors.orange.withValues(alpha: 0.3) : Colors.blue.withValues(alpha: 0.3),
+                  color: step.parallel
+                      ? Colors.orange.withValues(alpha: 0.3)
+                      : Colors.blue.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
@@ -670,13 +687,16 @@ class _ModeEditorState extends State<ModeEditor> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: CheckboxListTile(
-            title: const Text('Announce Arrival', style: TextStyle(fontSize: 14)),
-            subtitle: const Text('Say "Arrived at [waypoint]" first', style: TextStyle(fontSize: 11)),
+            title:
+                const Text('Announce Arrival', style: TextStyle(fontSize: 14)),
+            subtitle: const Text('Say "Arrived at [waypoint]" first',
+                style: TextStyle(fontSize: 11)),
             value: mode.announceArrival,
             dense: true,
             onChanged: (v) {
               setState(() {
-                _selectedMode = _selectedMode!.copyWith(announceArrival: v ?? true);
+                _selectedMode =
+                    _selectedMode!.copyWith(announceArrival: v ?? true);
               });
             },
           ),
@@ -690,17 +710,23 @@ class _ModeEditorState extends State<ModeEditor> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Steps', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('Steps',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _buildAddStepButton(TaskAction.speak, Icons.volume_up, Colors.blue),
-                  _buildAddStepButton(TaskAction.display, Icons.web, Colors.purple),
-                  _buildAddStepButton(TaskAction.wait, Icons.timer, Colors.orange),
-                  _buildAddStepButton(TaskAction.navigate, Icons.navigation, Colors.green),
-                  _buildAddStepButton(TaskAction.returnOrigin, Icons.home, Colors.teal),
+                  _buildAddStepButton(
+                      TaskAction.speak, Icons.volume_up, Colors.blue),
+                  _buildAddStepButton(
+                      TaskAction.display, Icons.web, Colors.purple),
+                  _buildAddStepButton(
+                      TaskAction.wait, Icons.timer, Colors.orange),
+                  _buildAddStepButton(
+                      TaskAction.navigate, Icons.navigation, Colors.green),
+                  _buildAddStepButton(
+                      TaskAction.returnOrigin, Icons.home, Colors.teal),
                 ],
               ),
             ],
@@ -759,7 +785,8 @@ class _ModeEditorState extends State<ModeEditor> {
             CircleAvatar(
               radius: 14,
               backgroundColor: _getActionColor(step.action),
-              child: Icon(_getActionIcon(step.action), size: 14, color: Colors.white),
+              child: Icon(_getActionIcon(step.action),
+                  size: 14, color: Colors.white),
             ),
             const SizedBox(width: 8),
             Expanded(child: Text(step.action.label)),
@@ -776,7 +803,10 @@ class _ModeEditorState extends State<ModeEditor> {
           ],
         ),
         subtitle: step.data.isNotEmpty
-            ? Text(step.data, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11))
+            ? Text(step.data,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11))
             : null,
         trailing: IconButton(
           icon: const Icon(Icons.delete, size: 20),
@@ -791,7 +821,8 @@ class _ModeEditorState extends State<ModeEditor> {
                 // Data field - varies by action type
                 if (step.action == TaskAction.speak)
                   TextField(
-                    controller: _getStepController('${mode.id}_${index}_data', step.data),
+                    controller: _getStepController(
+                        '${mode.id}_${index}_data', step.data),
                     decoration: const InputDecoration(
                       labelText: 'Text to speak',
                       hintText: 'What the robot should say...',
@@ -803,7 +834,8 @@ class _ModeEditorState extends State<ModeEditor> {
                   )
                 else if (step.action == TaskAction.display)
                   TextField(
-                    controller: _getStepController('${mode.id}_${index}_data', step.data),
+                    controller: _getStepController(
+                        '${mode.id}_${index}_data', step.data),
                     decoration: const InputDecoration(
                       labelText: 'Display URL',
                       hintText: 'https://...',
@@ -816,28 +848,34 @@ class _ModeEditorState extends State<ModeEditor> {
                   Builder(builder: (context) {
                     // Validate that step.data exists in available waypoints
                     final validValue = step.data.isNotEmpty &&
-                        widget.availableWaypoints.contains(step.data)
+                            widget.availableWaypoints.contains(step.data)
                         ? step.data
                         : null;
                     return DropdownButtonFormField<String>(
-                      value: validValue,
+                      initialValue: validValue,
                       decoration: const InputDecoration(
                         labelText: 'Navigate to',
                         prefixIcon: Icon(Icons.navigation),
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
-                      items: widget.availableWaypoints.map((wp) => DropdownMenuItem(
-                        value: wp,
-                        child: Text(wp),
-                      )).toList(),
+                      items: widget.availableWaypoints
+                          .map((wp) => DropdownMenuItem(
+                                value: wp,
+                                child: Text(wp),
+                              ))
+                          .toList(),
                       onChanged: (value) {
                         if (value != null) {
-                          _getStepController('${mode.id}_${index}_data', step.data).text = value;
+                          _getStepController(
+                                  '${mode.id}_${index}_data', step.data)
+                              .text = value;
                           setState(() {
                             final newSteps = [..._selectedMode!.steps];
-                            newSteps[index] = newSteps[index].copyWith(data: value);
-                            _selectedMode = _selectedMode!.copyWith(steps: newSteps);
+                            newSteps[index] =
+                                newSteps[index].copyWith(data: value);
+                            _selectedMode =
+                                _selectedMode!.copyWith(steps: newSteps);
                           });
                         }
                       },
@@ -845,12 +883,17 @@ class _ModeEditorState extends State<ModeEditor> {
                   }),
 
                 // Duration field for wait/display
-                if (step.action == TaskAction.wait || step.action == TaskAction.display) ...[
+                if (step.action == TaskAction.wait ||
+                    step.action == TaskAction.display) ...[
                   const SizedBox(height: 12),
                   TextField(
-                    controller: _getStepController('${mode.id}_${index}_duration', step.durationSeconds.toString()),
+                    controller: _getStepController(
+                        '${mode.id}_${index}_duration',
+                        step.durationSeconds.toString()),
                     decoration: InputDecoration(
-                      labelText: step.action == TaskAction.wait ? 'Wait duration (seconds)' : 'Display duration (seconds)',
+                      labelText: step.action == TaskAction.wait
+                          ? 'Wait duration (seconds)'
+                          : 'Display duration (seconds)',
                       prefixIcon: const Icon(Icons.timer),
                       border: const OutlineInputBorder(),
                       isDense: true,
@@ -865,13 +908,16 @@ class _ModeEditorState extends State<ModeEditor> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: (step.parallel ? Colors.orange : Colors.blue).withValues(alpha: 0.1),
+                      color: (step.parallel ? Colors.orange : Colors.blue)
+                          .withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       children: [
                         Icon(
-                          step.parallel ? Icons.call_split : Icons.arrow_downward,
+                          step.parallel
+                              ? Icons.call_split
+                              : Icons.arrow_downward,
                           color: step.parallel ? Colors.orange : Colors.blue,
                         ),
                         const SizedBox(width: 8),
@@ -881,13 +927,15 @@ class _ModeEditorState extends State<ModeEditor> {
                                 ? 'Runs IN PARALLEL with next step'
                                 : 'Runs BEFORE next step (serial)',
                             style: TextStyle(
-                              color: step.parallel ? Colors.orange : Colors.blue,
+                              color:
+                                  step.parallel ? Colors.orange : Colors.blue,
                             ),
                           ),
                         ),
                         TextButton(
                           onPressed: () => _toggleParallel(index),
-                          child: Text(step.parallel ? 'Make Serial' : 'Make Parallel'),
+                          child: Text(
+                              step.parallel ? 'Make Serial' : 'Make Parallel'),
                         ),
                       ],
                     ),
@@ -945,15 +993,17 @@ class _ModeEditorState extends State<ModeEditor> {
                   title: Text(waypoint),
                   subtitle: currentModeId != null
                       ? Text(
-                          TaskEngine.instance.getMode(currentModeId)?.name ?? currentModeId,
+                          TaskEngine.instance.getMode(currentModeId)?.name ??
+                              currentModeId,
                           style: const TextStyle(color: Colors.green),
                         )
-                      : const Text('No mode assigned', style: TextStyle(color: Colors.grey)),
+                      : const Text('No mode assigned',
+                          style: TextStyle(color: Colors.grey)),
                   trailing: Builder(builder: (context) {
                     final allModes = TaskEngine.instance.allModes;
                     // Validate currentModeId exists in modes list
                     final validModeId = currentModeId != null &&
-                        allModes.any((m) => m.id == currentModeId)
+                            allModes.any((m) => m.id == currentModeId)
                         ? currentModeId
                         : null;
                     return DropdownButton<String?>(
@@ -962,12 +1012,13 @@ class _ModeEditorState extends State<ModeEditor> {
                       items: [
                         const DropdownMenuItem(
                           value: null,
-                          child: Text('(None)', style: TextStyle(color: Colors.grey)),
+                          child: Text('(None)',
+                              style: TextStyle(color: Colors.grey)),
                         ),
                         ...allModes.map((m) => DropdownMenuItem(
-                          value: m.id,
-                          child: Text(m.name),
-                        )),
+                              value: m.id,
+                              child: Text(m.name),
+                            )),
                       ],
                       onChanged: (modeId) {
                         TaskEngine.instance.assignMode(waypoint, modeId);
