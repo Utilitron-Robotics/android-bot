@@ -56,7 +56,7 @@ lib/
 ├── services/
 │   └── robot_introspection.dart # Capability discovery
 ├── screens/
-│   └── home_screen.dart         # Main dynamic screen
+│   └── hud_screen.dart          # Main HUD screen
 └── widgets/
     ├── widget_factory.dart      # Maps discoveries → UI
     ├── waypoint_grid.dart       # Navigation buttons

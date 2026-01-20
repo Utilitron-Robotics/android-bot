@@ -1,6 +1,11 @@
 # Mobile Robot Communication Protocol
 ## WebSocket API Documentation
 
+> **Related Documentation:**
+> - [`../ROBOT_PROTOCOL.md`](../ROBOT_PROTOCOL.md) - Field-tested implementation with real-world notes and gotchas
+> - [`chassis_specification.md`](chassis_specification.md) - Hardware specifications
+> - [`../NETWORKING.md`](../NETWORKING.md) - Network topology and connection types
+
 ---
 
 # Protocol Overview

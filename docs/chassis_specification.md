@@ -1,6 +1,11 @@
 # Mobile Robot Chassis Specification
 ## Intelligent Mobile Robot Platform
 
+> **Related Documentation:**
+> - [`chassis_protocol.md`](chassis_protocol.md) - WebSocket API protocol specification
+> - [`../ROBOT_PROTOCOL.md`](../ROBOT_PROTOCOL.md) - Field-tested implementation notes
+> - [`../NETWORKING.md`](../NETWORKING.md) - Network topology and connection types
+
 ## 1. Product Overview
 This intelligent mobile robot platform serves as the core structure for robotic solutions. Designed for durability, adaptability, and precision, this chassis features advanced mobility systems, modular compatibility, and robust materials. It seamlessly integrates multi-sensor fusion, SLAM-based positioning and mapping, multiple operational modes, and coordinated multi-robot operation. Enhanced by cloud-based management, IoT control systems, automated charging, and flexible motion control.
 

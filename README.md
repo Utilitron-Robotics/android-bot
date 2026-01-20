@@ -219,12 +219,12 @@ flutter run -d [platform]  # ios, android, chrome, macos
 
 ### Current Status
 - ✅ **Tour Mode** - Fully implemented with cloud sync
-- 🔧 **Delivery Mode** - In development (Q1 2026)
-- 🔧 **Busser Mode** - In development (Q1 2026)
-- 🔧 **Emergency Mode** - In development (Q2 2026)
-- 🔧 **Patrol Mode** - In development (Q2 2026)
-- 🔧 **Greeter Mode** - In development (Q1 2026)
-- 🔧 **Comic Mode** - In development (Q1 2026)
+- 🔧 **Delivery Mode** - In development
+- 🔧 **Busser Mode** - In development
+- 🔧 **Emergency Mode** - Planned
+- 🔧 **Patrol Mode** - Planned
+- 🔧 **Greeter Mode** - In development
+- 🔧 **Comic Mode** - In development
 
 ## Recent Updates (January 2026)
 
@@ -382,23 +382,23 @@ await cloud.pushWaypoints(waypoints, mapId: 'building_floor_4');
 
 ### Future: Map Modification (Roadmap)
 
-#### Phase 1: Position Correction (Q1 2026)
+#### Phase 1: Position Correction
 - Manually adjust robot position when SLAM drifts
 - Use `/initialpose` topic to reset localization
 - Critical for multi-floor operations
 
-#### Phase 2: Waypoint Management (Q2 2026)
+#### Phase 2: Waypoint Management
 - Add/rename/delete waypoints from app
 - Requires custom service on relay or base
 - Cloud sync for fleet-wide updates
 
-#### Phase 3: Zone Definition (Q3 2026)
+#### Phase 3: Zone Definition
 - Define no-go zones in app
 - Restricted areas for safety
 - Speed limit zones
 - Relay-enforced (intercept navigation commands)
 
-#### Phase 4: Dynamic Mapping (Future)
+#### Phase 4: Dynamic Mapping
 - Auto-adjust to venue changes
 - Crowd-pushed position recovery
 - Real-time obstacle integration

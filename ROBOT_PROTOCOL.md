@@ -5,6 +5,11 @@
 **Based On:** Robot MobileBase robots running chassis firmware
 **Protocol:** WebSocket (`ws://10.42.0.1:9090`) with JSON messages
 
+> **Related Documentation:**
+> - [`docs/chassis_protocol.md`](docs/chassis_protocol.md) - Original vendor protocol specification
+> - [`docs/chassis_specification.md`](docs/chassis_specification.md) - Hardware specifications
+> - [`NETWORKING.md`](NETWORKING.md) - Network topology and connection types
+
 This document describes the **actual working protocol** as implemented and tested in our Frontier Tower deployment. Unlike the vendor manual, this reflects real-world behavior, including undocumented quirks and field-tested solutions.
 
 ---
