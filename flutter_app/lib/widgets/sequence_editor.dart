@@ -1155,9 +1155,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                           debugPrint(
                               'Starting tour with startWaypoint: ${seq.startWaypoint}');
                           widget.onStartSequence?.call(seq);
-                          // Start immediately - operator is pressing start in Flutter app
-                          final immediate = seq.copyWith(awaitVisitorAtStart: false);
-                          SequenceManager.instance.startSequence(immediate);
+                          SequenceManager.instance.startSequence(seq);
                         }
                       : null,
                 )
@@ -1173,9 +1171,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
                   onPressed: seq.stops.isNotEmpty
                       ? () {
                           widget.onStartSequence?.call(seq);
-                          // Start immediately - operator is pressing start in Flutter app
-                          final immediate = seq.copyWith(awaitVisitorAtStart: false);
-                          SequenceManager.instance.startSequence(immediate);
+                          SequenceManager.instance.startSequence(seq);
                         }
                       : null,
                 ),

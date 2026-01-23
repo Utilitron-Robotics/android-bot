@@ -171,6 +171,36 @@ class BufferSequenceExecutor extends ChangeNotifier {
         resumeFromVisitor();
         return;
       }
+
+      // RECONNECT FIX: If buffer is empty and we're running, the final command's
+      // completion event was lost during gRPC reconnect. Handle loop/complete.
+      if (!_awaitingVisitorAtStart &&
+          _status == SequenceExecutorStatus.running &&
+          _currentSequence != null &&
+          state.pendingCount == 0) {
+        // Don't trigger within 5s of a reconnect (state may be stale)
+        final timeSinceReconnect =
+            DateTime.now().millisecondsSinceEpoch - _reconnectTimestamp;
+        if (_reconnectTimestamp > 0 && timeSinceReconnect < 5000) {
+          return;
+        }
+        // Require we've completed at least some commands (not a fresh start)
+        if (_completedCommandCount > 0 || _totalCommandCount == 0) {
+          if (_currentSequence!.loop) {
+            debugPrint('BufferSequenceExecutor: Buffer empty during running tour (loop) - restarting');
+            final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0, skipNavToStart: true);
+            _totalCommandCount = commands.length;
+            _completedCommandCount = 0;
+            _currentStopIndex = -1;
+            _bufferClient.loadCommands(commands, clearExisting: true);
+            notifyListeners();
+          } else {
+            debugPrint('BufferSequenceExecutor: Buffer empty during running tour - completing');
+            _completeSequence();
+          }
+          return;
+        }
+      }
     }
 
     // Check for paused state
@@ -357,8 +387,8 @@ class BufferSequenceExecutor extends ChangeNotifier {
       if (result.isSuccess && _currentSequence != null && _currentSequence!.loop) {
         debugPrint('BufferSequenceExecutor: Loop command completed - restarting tour immediately');
 
-        // Restart tour immediately - no waiting for visitors
-        final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0);
+        // Restart tour immediately - skip nav to start (loop already navigated there)
+        final commands = _buildSequenceCommands(_currentSequence!, startIndex: 0, skipNavToStart: true);
         _totalCommandCount = commands.length;
         _completedCommandCount = 0;
         _currentStopIndex = -1;
@@ -496,8 +526,16 @@ class BufferSequenceExecutor extends ChangeNotifier {
       return;
     }
 
-    // Method 1: Check heartbeat state (may be stale)
+    // Method 1: Check heartbeat state (may be stale after reconnect)
     if (state.pendingCount == 0 && state.current == null && !state.paused) {
+      // Don't trigger within 5s of a reconnect - state may be stale
+      final timeSinceReconnect =
+          DateTime.now().millisecondsSinceEpoch - _reconnectTimestamp;
+      if (_reconnectTimestamp > 0 && timeSinceReconnect < 5000) {
+        debugPrint(
+            'BufferSequenceExecutor: Skipping heartbeat completion - within ${timeSinceReconnect}ms of reconnect');
+        return;
+      }
       if (_status == SequenceExecutorStatus.running) {
         debugPrint(
             'BufferSequenceExecutor: Completing via heartbeat state (pending=0, current=null)');
@@ -666,7 +704,19 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     try {
-      final loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
+      var loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
+      if (!loaded && _bufferClient.isStale) {
+        // Connection stale (app was in background) - wait for reconnect and retry
+        debugPrint('BufferSequenceExecutor: Load failed (stale connection), waiting for reconnect...');
+        for (int i = 0; i < 30; i++) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (!_bufferClient.isStale) {
+            debugPrint('BufferSequenceExecutor: Connection restored! Retrying load...');
+            loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
+            break;
+          }
+        }
+      }
       if (!loaded) {
         debugPrint('BufferSequenceExecutor: ✗ FAILED to load tour commands');
         _status = SequenceExecutorStatus.failed;

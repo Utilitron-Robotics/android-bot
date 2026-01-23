@@ -203,8 +203,6 @@ class PredictiveController extends ChangeNotifier {
     // Calculate how stale the state is (server delay)
     final stateAge = now.difference(state.timestamp);
 
-    debugPrint('$_tag: Received state (age: ${stateAge.inMilliseconds}ms)');
-
     _lastKnownState = state;
     _lastStateUpdate = now;
     _stateController.add(state);

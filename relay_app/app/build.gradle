@@ -14,6 +14,15 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
+
+        // Build version stamp - unique per compile, visible in logs
+        buildConfigField "String", "BUILD_TIMESTAMP", "\"${new Date().format('yyyyMMdd_HHmmss')}\""
+        buildConfigField "String", "BUILD_HASH", "\"${['git', 'rev-parse', '--short', 'HEAD'].execute().text.trim()}\""
+    }
+
+    buildFeatures {
+        viewBinding true
+        buildConfig true
     }
 
     buildTypes {
@@ -34,10 +43,6 @@ android {
 
     kotlinOptions {
         jvmTarget = '17'
-    }
-
-    buildFeatures {
-        viewBinding true
     }
 
     sourceSets {

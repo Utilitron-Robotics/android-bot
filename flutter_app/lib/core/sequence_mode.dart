@@ -1300,9 +1300,10 @@ class SequenceManager extends ChangeNotifier {
       case SequenceTaskPhase.waiting:
         return SequencePhase.waiting;
       case SequenceTaskPhase.outro:
-      case SequenceTaskPhase.ending:
       case SequenceTaskPhase.complete:
         return SequencePhase.waiting;
+      case SequenceTaskPhase.ending:
+        return SequencePhase.navigating;
     }
   }
 

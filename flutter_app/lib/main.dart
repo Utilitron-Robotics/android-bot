@@ -16,8 +16,19 @@ final unifiedTransportManager = UnifiedTransportManager(
   ),
 );
 
+// Build version - pass via: --dart-define=BUILD_TIME=... --dart-define=BUILD_HASH=...
+const kBuildTime = String.fromEnvironment('BUILD_TIME', defaultValue: 'dev');
+const kBuildHash = String.fromEnvironment('BUILD_HASH', defaultValue: 'dev');
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Version stamp - correlate with relay build to catch stale APKs
+  final sessionStart = DateTime.now().toIso8601String();
+  debugPrint('══════════════════════════════════════════════');
+  debugPrint('  FLUTTER BUILD: $kBuildHash @ $kBuildTime');
+  debugPrint('  SESSION: $sessionStart');
+  debugPrint('══════════════════════════════════════════════');
 
   // Don't auto-connect - wait for user to provide the relay IP
 

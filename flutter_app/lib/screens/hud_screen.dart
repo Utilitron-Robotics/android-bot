@@ -1049,6 +1049,16 @@ class _HudScreenState extends State<HudScreen>
                       onTap: () {
                         debugPrint(
                             'HUD: SKIP WAIT pressed - resuming tour without visitor');
+                        // If connection is stale (app was backgrounded), reconnect first
+                        final bc = tourManager.bufferExecutor?.bufferClient;
+                        if (bc != null && bc.isStale) {
+                          debugPrint('HUD: Connection stale - triggering reconnect before resume');
+                          final r = context.read<RobotConnection>();
+                          final host = _extractHost(r.robotUrl);
+                          if (host.isNotEmpty) {
+                            context.read<UnifiedTransportManager>().connectToHost(host);
+                          }
+                        }
                         tourManager.resumeFromVisitor();
                       },
                       tooltip: 'Skip Wait',

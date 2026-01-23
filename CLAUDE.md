@@ -252,8 +252,9 @@ The user debugs with:
 
 ### CRITICAL - READ EVERY SESSION:
 - **MAKE IT WORK MODE** - Demo today. Fix it, ship it, no debates. Priority is working software.
-- **User ALWAYS does clean rebuild** - NEVER suggest "try rebuilding" or "did you rebuild"
+- **AUTOMATIC BUILDS** - Alan has a script that runs a clean build every time the droid project changes (both relay APK and Flutter APK). NEVER say "rebuild", "redeploy", or tell user what to build. It happens automatically.
 - **Fix ONLY what is asked** - Do NOT rewrite surrounding code, add "improvements", or assume you know better
+- **Trace the ACTIVE code path first** - Before changing code, verify it's actually being USED. Check logs/callers. Don't fix fallback paths when the primary path is active.
 - **Listen to the user** - When they say "fix X", fix X. Nothing else.
 - **No over-engineering** - Simple targeted fixes, not architectural rewrites
 - **Arrogance without competence is unacceptable** - If you don't understand, ask. Don't pretend.

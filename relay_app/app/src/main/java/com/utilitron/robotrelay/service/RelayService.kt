@@ -149,7 +149,9 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
     override fun onCreate() {
         super.onCreate()
-        Log.i(TAG, "Service created")
+        Log.i(TAG, "══════════════════════════════════════════════")
+        Log.i(TAG, "  RELAY BUILD: ${com.utilitron.robotrelay.BuildConfig.BUILD_HASH} @ ${com.utilitron.robotrelay.BuildConfig.BUILD_TIMESTAMP}")
+        Log.i(TAG, "══════════════════════════════════════════════")
         createNotificationChannel()
 
         // Initialize AWS Fleet API client

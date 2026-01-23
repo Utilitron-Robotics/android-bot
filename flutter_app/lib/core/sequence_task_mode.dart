@@ -92,6 +92,8 @@ class SequenceTaskMode extends TaskMode {
 
   bool _hasStartedMoving =
       false; // Track if robot actually started moving (601)
+  bool _navigatingToStart =
+      false; // Track if navigating to start waypoint before tour begins
 
   SequenceTaskMode({
     required this.sequence,
@@ -180,20 +182,42 @@ class SequenceTaskMode extends TaskMode {
         'SequenceTaskMode: Starting sequence "${sequence.name}" with ${sequence.stops.length} stops');
     _currentStopIndex = -1;
     _waitingForArrival = false;
-    _hasStartedMoving = false; // Reset moving state
+    _hasStartedMoving = false;
+    _navigatingToStart = false;
 
-    _setPhase(SequenceTaskPhase.starting, 2);
+    _setPhase(SequenceTaskPhase.starting, 0);
     callback.onSequenceStarted(sequence);
 
+    // Navigate to start waypoint first if configured
+    if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
+      debugPrint(
+          'SequenceTaskMode: Navigating to start waypoint "${sequence.startWaypoint}"');
+      _navigatingToStart = true;
+      _setPhase(SequenceTaskPhase.navigating, 0);
+      _pendingWaypoint = sequence.startWaypoint;
+      _waitingForArrival = true;
+      _hasStartedMoving = false;
+      await callback.onNavigate(sequence.startWaypoint!);
+      notifyListeners();
+      // onArrived() will continue with intro + first stop
+      return true;
+    }
+
+    // No start waypoint - play intro and go to first stop
+    await _startIntroAndFirstStop();
+    return true;
+  }
+
+  /// Play intro text and navigate to first stop
+  Future<void> _startIntroAndFirstStop() async {
     // Play intro if configured - await actual TTS completion
     if (sequence.introText != null && sequence.introText!.isNotEmpty) {
-      _setPhase(SequenceTaskPhase.intro, 0); // Duration unknown until complete
+      _setPhase(SequenceTaskPhase.intro, 0);
       await callback.onSpeak(sequence.introText!);
     }
 
     // Navigate to first stop (fromStart=true since we're still in 'starting' status)
     _navigateToNextStop(fromStart: true);
-    return true;
   }
 
   @override
@@ -253,6 +277,44 @@ class SequenceTaskMode extends TaskMode {
       return;
     }
 
+    final waypointNorm = waypoint.toLowerCase().trim();
+
+    // Check if this is the start waypoint arrival (before tour begins)
+    if (_navigatingToStart &&
+        _pendingWaypoint?.toLowerCase().trim() == waypointNorm) {
+      debugPrint(
+          'SequenceTaskMode: Arrived at start waypoint "$waypoint" - starting tour');
+      _waitingForArrival = false;
+      _pendingWaypoint = null;
+      _hasStartedMoving = false;
+      _navigatingToStart = false;
+
+      if (currentCommand != null) {
+        commandManager?.commandCompleted(currentCommand!.id);
+      }
+
+      // Continue with intro + first stop
+      _startIntroAndFirstStop();
+      return;
+    }
+
+    // Check if this is the end waypoint arrival (after all stops are done)
+    if (_phase == SequenceTaskPhase.ending &&
+        _pendingWaypoint?.toLowerCase().trim() == waypointNorm) {
+      debugPrint(
+          'SequenceTaskMode: Arrived at end waypoint "$waypoint" - completing sequence');
+      _waitingForArrival = false;
+      _pendingWaypoint = null;
+      _hasStartedMoving = false;
+
+      if (currentCommand != null) {
+        commandManager?.commandCompleted(currentCommand!.id);
+      }
+
+      complete();
+      return;
+    }
+
     final stop = currentStop;
     if (stop == null) {
       debugPrint(
@@ -260,7 +322,6 @@ class SequenceTaskMode extends TaskMode {
       return;
     }
 
-    final waypointNorm = waypoint.toLowerCase().trim();
     if (stop.waypoint.toLowerCase().trim() == waypointNorm ||
         _pendingWaypoint?.toLowerCase().trim() == waypointNorm) {
       debugPrint(
@@ -302,9 +363,10 @@ class SequenceTaskMode extends TaskMode {
     // This prevents stale events (e.g., from a previous task cancellation) from
     // impacting the current task state.
     if (_phase != SequenceTaskPhase.navigating &&
-        _phase != SequenceTaskPhase.starting) {
+        _phase != SequenceTaskPhase.starting &&
+        _phase != SequenceTaskPhase.ending) {
       debugPrint(
-          'SequenceTaskMode: Ignoring nav status $status - not in navigating/starting phase (current: $_phase)');
+          'SequenceTaskMode: Ignoring nav status $status - not in navigating/starting/ending phase (current: $_phase)');
       return;
     }
 
@@ -500,7 +562,7 @@ class SequenceTaskMode extends TaskMode {
   /// Complete the sequence (works for any mode: Tour, Delivery, Patrol, etc.)
   ///
   /// EVENT-DRIVEN: Awaits outro TTS completion before marking complete.
-  /// End waypoint navigation is fire-and-forget (robot continues on its own).
+  /// End waypoint navigation waits for arrival before completing.
   Future<void> _completeSequence() async {
     _stopCountdown();
 
@@ -510,13 +572,19 @@ class SequenceTaskMode extends TaskMode {
       await callback.onSpeak(sequence.outroText!);
     }
 
-    // Navigate to end waypoint (fire-and-forget - we don't wait for arrival)
+    // Navigate to end waypoint and wait for arrival
     if (sequence.endWaypoint != null && sequence.endWaypoint!.isNotEmpty) {
       _setPhase(SequenceTaskPhase.ending, 0);
+      _pendingWaypoint = sequence.endWaypoint;
+      _waitingForArrival = true;
+      _hasStartedMoving = false;
       await callback.onNavigate(sequence.endWaypoint!);
+      // Don't complete yet - onArrived() will call complete() when we arrive
+      notifyListeners();
+      return;
     }
 
-    // Mark complete immediately - TTS is done, navigation is dispatched
+    // No end waypoint - complete immediately
     complete();
   }
 

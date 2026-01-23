@@ -139,6 +139,33 @@ class RobotWebSocketClient(
                 return
             }
 
+            // Handle /static_map service response (fallback for latched topic)
+            if (text.contains("\"service_response\"") && text.contains("static_map")) {
+                try {
+                    val obj = com.google.gson.JsonParser.parseString(text).asJsonObject
+                    if (obj.get("result")?.asBoolean == true) {
+                        val values = obj.getAsJsonObject("values")
+                        val mapData = values?.getAsJsonObject("map")
+                        if (mapData != null) {
+                            // Convert service response to topic message format for Flutter
+                            val topicMsg = com.google.gson.JsonObject().apply {
+                                addProperty("op", "publish")
+                                addProperty("topic", "/map")
+                                add("msg", mapData)
+                            }
+                            val converted = topicMsg.toString()
+                            Log.i(TAG, ">>> RECEIVED /static_map service response (${converted.length} bytes)")
+                            _cachedMapMessage = converted
+                            _mapLastUpdated = System.currentTimeMillis()
+                            Log.i(TAG, ">>> Map cached from service call")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse static_map response: ${e.message}")
+                }
+                return
+            }
+
             // Handle complete map message (non-fragmented or after reassembly)
             val isMapMsg = text.contains("\"topic\":\"/map\"") || text.contains("\"topic\": \"/map\"")
             if (isMapMsg) {
@@ -327,8 +354,16 @@ class RobotWebSocketClient(
 
             delay(2000)
             if (_connectionState.value == ConnectionState.CONNECTED && _cachedMapMessage == null) {
-                Log.i(TAG, ">>> MAP REFRESH: No map yet, retrying")
+                Log.i(TAG, ">>> MAP REFRESH: No map from subscription, retrying...")
                 send(subMsg)
+
+                delay(2000)
+                if (_connectionState.value == ConnectionState.CONNECTED && _cachedMapMessage == null) {
+                    // Fallback: call /static_map service (works for latched topics)
+                    Log.i(TAG, ">>> MAP REFRESH: Subscription failed, calling /static_map service")
+                    val serviceCall = """{"op":"call_service","id":"get_static_map","service":"/static_map","type":"nav_msgs/GetMap"}"""
+                    send(serviceCall)
+                }
             }
         }
     }

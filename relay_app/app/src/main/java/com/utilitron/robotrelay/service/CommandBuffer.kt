@@ -40,6 +40,7 @@ class CommandBuffer(
 
     // Command queue
     private val pendingQueue = ConcurrentLinkedQueue<BufferCommand>()
+    @Volatile
     private var currentCommand: BufferCommand? = null
     private val completedHistory = mutableListOf<CompletedCommand>()
     private val maxHistory = 10
@@ -57,6 +58,8 @@ class CommandBuffer(
     private var waitingForNavArrival = false
     private var pendingNavWaypoint: String? = null
     private var navArrivalPending = false  // 603 received, waiting for robot to actually stop
+    private var hasStartedMoving = false   // Robot confirmed 601 for OUR goal (not previous one)
+    private var navCommandSentAt = 0L      // Timestamp when we sent the POI command
 
     // Recovery state (accessible from onNavStatus callback)
     private var recoveryAttempts = 0
@@ -125,7 +128,14 @@ class CommandBuffer(
     fun loadCommands(commands: List<BufferCommand>, clearExisting: Boolean = false) {
         if (clearExisting) {
             pendingQueue.clear()
-            Log.i(TAG, "Cleared existing commands")
+            // Also cancel the current running command so it exits its loop
+            // (e.g., button_standby waits on currentCommand != null)
+            currentCommand = null
+            waitingForNavArrival = false
+            navArrivalPending = false
+            pendingNavWaypoint = null
+            hasStartedMoving = false
+            Log.i(TAG, "Cleared existing commands + cancelled current")
         }
 
         commands.forEach { cmd ->
@@ -142,6 +152,10 @@ class CommandBuffer(
      */
     fun clear() {
         pendingQueue.clear()
+        waitingForNavArrival = false
+        navArrivalPending = false
+        pendingNavWaypoint = null
+        hasStartedMoving = false
 
         // CRITICAL: Also cancel the current command
         // This breaks out of while loops in commands like motion_standby and wait
@@ -184,6 +198,7 @@ class CommandBuffer(
         waitingForNavArrival = false
         navArrivalPending = false
         pendingNavWaypoint = null
+        hasStartedMoving = false
     }
 
     /**
@@ -210,6 +225,17 @@ class CommandBuffer(
         if (cmd.type != "navigate") return
 
         when (status) {
+            601 -> { // Moving
+                // Robot started moving - check if it's toward our goal
+                if (goalName == pendingNavWaypoint || (pendingNavWaypoint != null && goalName.isNullOrEmpty())) {
+                    if (!hasStartedMoving) {
+                        Log.i(TAG, "Robot started moving toward $pendingNavWaypoint")
+                        hasStartedMoving = true
+                    }
+                } else {
+                    Log.d(TAG, "Robot moving but goal='$goalName' doesn't match pending='$pendingNavWaypoint'")
+                }
+            }
             603 -> { // Arrived
                 // Log EVERYTHING to debug false arrivals
                 val currentPos = robotClient.robotStatus.value?.let { "(${it.x}, ${it.y})" } ?: "unknown"
@@ -251,7 +277,32 @@ class CommandBuffer(
                     Log.i(TAG, "Nav cancelled but recovery ${if (inRecovery) "in progress" else "pending"} - ignoring 602")
                     return
                 }
-                Log.i(TAG, "Nav cancelled to $pendingNavWaypoint")
+
+                // ROBUST 602 HANDLING: Multiple layers to avoid false cancellation
+                // Layer 1: Grace period - ignore 602 within 3s of sending POI command
+                //          (robot is still processing the new command, 602 is for old goal)
+                val timeSinceSend = System.currentTimeMillis() - navCommandSentAt
+                if (timeSinceSend < 3000 && !hasStartedMoving) {
+                    Log.i(TAG, "Ignoring 602 - within grace period (${timeSinceSend}ms since POI sent, goal='$goalName')")
+                    return
+                }
+
+                // Layer 2: GoalName mismatch - if 602 reports a different goal than ours,
+                //          it's cancelling a previous nav, not ours
+                if (goalName.isNotEmpty() && goalName != pendingNavWaypoint) {
+                    Log.i(TAG, "Ignoring 602 - goalName '$goalName' != pending '$pendingNavWaypoint' (previous nav cancellation)")
+                    return
+                }
+
+                // Layer 3: Movement check - if robot never started moving toward our goal,
+                //          this 602 is from the old nav being cancelled
+                if (!hasStartedMoving) {
+                    Log.i(TAG, "Ignoring 602 - robot hasn't started moving toward $pendingNavWaypoint yet")
+                    return
+                }
+
+                // All checks passed - this is a real cancellation of our current navigation
+                Log.i(TAG, "Nav cancelled to $pendingNavWaypoint (confirmed: robot was moving, goal matches)")
                 waitingForNavArrival = false
                 navArrivalPending = false
                 pendingNavWaypoint = null
@@ -380,6 +431,8 @@ class CommandBuffer(
                 val waypoint = cmd.data["waypoint"] as? String ?: return
                 pendingNavWaypoint = waypoint
                 waitingForNavArrival = true
+                hasStartedMoving = false  // Reset - first 602 is expected (cancels previous goal)
+                navCommandSentAt = System.currentTimeMillis()  // Grace period starts now
 
                 // Reset recovery state for this navigation
                 recoveryAttempts = 0
