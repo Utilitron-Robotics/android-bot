@@ -423,8 +423,15 @@ class ObstacleClassifier(
         val totalWidth = clusters.sumOf { it.width }
         val clusterCount = clusters.size
 
-        // Determine type based on movement and size
+        // Check if obstacles are known walls/mapped features
+        val allOnKnownWalls = clusters.all { isClusterOnKnownWall(it) }
+        val anyOnKnownWalls = clusters.any { isClusterOnKnownWall(it) }
+
+        // Determine type based on movement, map data, and size
         val type = when {
+            // Known wall/mapped obstacle - definitely reroute, don't push
+            allOnKnownWalls && !movement.isMoving -> ObstacleType.STATIC_EXPECTED
+
             // Multiple moving entities = crowd
             movement.isMoving && movement.movingCount > 1 -> ObstacleType.CROWD
 
@@ -441,8 +448,8 @@ class ObstacleClassifier(
                 it.width in HUMAN_MIN_WIDTH..HUMAN_MAX_WIDTH
             } -> ObstacleType.STATIC_PERSON
 
-            // Static, large = unexpected obstacle (crate, fallen object)
-            !movement.isMoving && totalWidth > 0.5 -> ObstacleType.STATIC_UNEXPECTED
+            // Static, NOT on map, large = unexpected obstacle (crate, fallen object)
+            !movement.isMoving && !anyOnKnownWalls && totalWidth > 0.5 -> ObstacleType.STATIC_UNEXPECTED
 
             // Can't determine
             else -> ObstacleType.UNKNOWN
@@ -479,6 +486,7 @@ class ObstacleClassifier(
             ObstacleType.MOVING_PERSON -> SuggestedAction.WAIT_PATIENTLY
             ObstacleType.CROWD -> SuggestedAction.ANNOUNCE_CROWD
             ObstacleType.STATIC_PERSON -> SuggestedAction.POLITE_REQUEST
+            ObstacleType.STATIC_EXPECTED -> SuggestedAction.HARD_STOP
             ObstacleType.STATIC_UNEXPECTED -> SuggestedAction.REQUEST_HELP
             ObstacleType.MOVING_UNKNOWN -> SuggestedAction.WAIT_AND_OBSERVE
             ObstacleType.UNKNOWN -> SuggestedAction.ESCALATE_NORMALLY
@@ -534,6 +542,7 @@ enum class ObstacleType {
     MOVING_PERSON,      // Single moving human-sized entity
     CROWD,              // Multiple moving entities
     STATIC_PERSON,      // Person standing still
+    STATIC_EXPECTED,    // Wall or mapped obstacle (reroute, don't push)
     STATIC_UNEXPECTED,  // Object not on map (crate, fallen trash)
     MOVING_UNKNOWN,     // Moving but can't classify (robot?)
     UNKNOWN             // Can't determine
@@ -545,6 +554,7 @@ enum class SuggestedAction {
     WAIT_AND_OBSERVE,   // Unknown moving thing - wait and see
     POLITE_REQUEST,     // Person standing still - ask politely
     ANNOUNCE_CROWD,     // Crowd blocking - louder announcement
+    HARD_STOP,          // Wall or mapped obstacle - stop and reroute
     REQUEST_HELP,       // Static unexpected obstacle - need human intervention
     ESCALATE_NORMALLY   // Can't determine - use time-based escalation
 }
