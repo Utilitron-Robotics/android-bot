@@ -854,7 +854,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
         }
 
         // When a tour is running, show prominent status and collapse editor
-        if (status == SequenceStatus.running && runningSequence != null) {
+        if ((status == SequenceStatus.running || status == SequenceStatus.paused) && runningSequence != null) {
           return Column(
             children: [
               // Running sequence takes center stage
@@ -1814,9 +1814,11 @@ class SequenceRunnerWidget extends StatelessWidget {
         final countdown = SequenceManager.instance.countdownSeconds;
         final phaseDuration = SequenceManager.instance.phaseDurationSeconds;
 
-        if (status != SequenceStatus.running || seq == null) {
+        if ((status != SequenceStatus.running && status != SequenceStatus.paused) || seq == null) {
           return const SizedBox.shrink();
         }
+
+        final isPaused = status == SequenceStatus.paused;
 
         return Container(
           margin: const EdgeInsets.all(12),
@@ -1838,8 +1840,8 @@ class SequenceRunnerWidget extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.play_circle,
-                        color: Colors.green, size: 28),
+                    Icon(isPaused ? Icons.pause_circle : Icons.play_circle,
+                        color: isPaused ? Colors.orange : Colors.green, size: 28),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -1859,8 +1861,16 @@ class SequenceRunnerWidget extends StatelessWidget {
                       ),
                     ),
                     IconButton(
+                      icon: Icon(isPaused ? Icons.play_arrow : Icons.pause, size: 28),
+                      onPressed: isPaused
+                          ? SequenceManager.instance.resumeSequence
+                          : SequenceManager.instance.pauseSequence,
+                      tooltip: isPaused ? 'Resume tour' : 'Pause tour',
+                      color: isPaused ? Colors.green : Colors.orange,
+                    ),
+                    IconButton(
                       icon: const Icon(Icons.skip_next, size: 28),
-                      onPressed: SequenceManager.instance.skipToNextStop,
+                      onPressed: isPaused ? null : SequenceManager.instance.skipToNextStop,
                       tooltip: 'Skip to next stop',
                     ),
                     const SizedBox(width: 8),
