@@ -77,6 +77,19 @@ class RobotWebSocketClient(
 
     private val safetyZone = AtomicReference(SafetyZone.CLEAR)
 
+    // Detach mode: relaxed safety for pile/charger proximity
+    // When true, STOP distance is reduced to allow close-quarters docking
+    private val _detachMode = MutableStateFlow(false)
+    val detachMode: StateFlow<Boolean> = _detachMode
+
+    // Crowd control: minimum front LIDAR distance for gradient speed ramping
+    @Volatile
+    private var minFrontDistance: Float = Float.MAX_VALUE
+
+    // Crowd control config: distance-proportional speed limiting
+    private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here
+    private var crowdRampRate: Double = 0.5      // 0.1=gentle, 1.0=aggressive
+
     // Obstacle classifier for intelligent crowd handling
     private var obstacleClassifier: ObstacleClassifier? = null
     private var onObstacleClassification: ((ObstacleClassification) -> Unit)? = null
@@ -329,14 +342,19 @@ class RobotWebSocketClient(
                                   currentGoal.contains("Dock", ignoreCase = true)
 
                     if (bumper > 0 || cliff > 0) {
-                        if (!isDocking) {
-                            // Normal collision - stop!
-                            safetyZone.set(SafetyZone.STOP)
-                            Log.w(TAG, "SAFETY STOP: Bumper or Cliff detected!")
-                            stop()
-                        } else {
+                        if (isDocking) {
                             // Docking with charger - this is expected! The tongs snap in!
                             Log.i(TAG, "Bumper contact during docking - charging tongs engaging!")
+                        } else {
+                            // Physical collision - always stop. Bumper = real contact,
+                            // not a false reading like LIDAR. Cancel nav if active.
+                            safetyZone.set(SafetyZone.STOP)
+                            Log.w(TAG, "SAFETY STOP: Bumper or Cliff detected! (physical contact)")
+                            stop()
+                            if (_robotStatus.value?.navStatus == 601) {
+                                cancelNavigation()
+                                Log.w(TAG, "Navigation cancelled due to physical collision")
+                            }
                         }
                     }
                     _robotStatus.value = current.copy(
@@ -361,14 +379,15 @@ class RobotWebSocketClient(
                         obstacleClassifier?.processLidarScan(px, py)
 
                         // Convert to distances for safety zone check
+                        // Filter > 0.05m to eliminate ground reflections and sensor noise
                         val distances = px.zip(py).map { (x, y) ->
                             kotlin.math.sqrt(x * x + y * y).toFloat()
-                        }.filter { it > 0.01f }
+                        }.filter { it > 0.05f }
                         checkLaserData(distances)
                     } else {
                         // Fallback to points array (distance format)
                         val points = msg.get("points")?.asJsonArray?.mapNotNull {
-                            it.asFloat.takeIf { f -> f > 0.01 }
+                            it.asFloat.takeIf { f -> f > 0.05 }
                         } ?: emptyList()
                         checkLaserData(points)
                     }
@@ -403,30 +422,43 @@ class RobotWebSocketClient(
         val frontStartIndex = (points.size * 0.4).toInt()
         val frontEndIndex = (points.size * 0.6).toInt()
         val frontPoints = points.subList(frontStartIndex, frontEndIndex)
-        val minFront = frontPoints.minOrNull() ?: Float.MAX_VALUE
+        // Filter out likely ground reflections / noise (readings under 5cm are not real obstacles)
+        val validFrontPoints = frontPoints.filter { it > 0.05f }
+        val minFront = validFrontPoints.minOrNull() ?: Float.MAX_VALUE
+
+        // Track for crowd control gradient speed ramping
+        minFrontDistance = minFront
+
+        // Detach mode: pile/charger is physically close, relax thresholds
+        val stopDist = if (_detachMode.value) 0.08f else STOP_DISTANCE   // 8cm vs 20cm
+        val creepDist = if (_detachMode.value) 0.20f else CREEP_DISTANCE // 20cm vs 50cm
+        val warnDist = if (_detachMode.value) 0.40f else WARN_DISTANCE   // 40cm vs 80cm
 
         val newZone = when {
-            minFront < STOP_DISTANCE -> SafetyZone.STOP
-            minFront < CREEP_DISTANCE -> SafetyZone.CREEP
-            minFront < WARN_DISTANCE -> SafetyZone.WARN
+            minFront < stopDist -> SafetyZone.STOP
+            minFront < creepDist -> SafetyZone.CREEP
+            minFront < warnDist -> SafetyZone.WARN
             else -> SafetyZone.CLEAR
         }
 
         val oldZone = safetyZone.getAndSet(newZone)
         if (newZone != oldZone) {
-            Log.i(TAG, "LIDAR Safety Zone changed: $newZone (was $oldZone) at ${minFront}m")
-            if (newZone == SafetyZone.STOP) {
-                // Only stop during manual control - robot's move_base handles
-                // its own obstacle avoidance during autonomous navigation
-                val isNavigating = _robotStatus.value?.navStatus == 601
-                if (!isNavigating) {
-                    stop()
-                } else {
-                    Log.i(TAG, "LIDAR STOP zone ignored - move_base navigating (status 601)")
-                }
-            }
+            val obstacleType = _robotStatus.value?.obstacleType ?: "UNKNOWN"
+            Log.i(TAG, "Safety zone: $newZone (was $oldZone) at ${minFront}m, obstacle=$obstacleType" +
+                    if (_detachMode.value) " [DETACH]" else "")
         }
         _robotStatus.value = _robotStatus.value?.copy(safetyZone = newZone)
+    }
+
+    /**
+     * Set detach mode for close-quarters operation near pile/charger.
+     * Relaxes LIDAR safety thresholds to allow docking/undocking.
+     */
+    fun setDetachMode(enabled: Boolean) {
+        if (_detachMode.value != enabled) {
+            _detachMode.value = enabled
+            Log.i(TAG, "Detach mode: ${if (enabled) "ON" else "OFF"} - safety thresholds ${if (enabled) "relaxed" else "normal"}")
+        }
     }
 
     private fun scheduleReconnect() {
@@ -448,23 +480,60 @@ class RobotWebSocketClient(
     // === Control Methods ===
 
     fun sendVelocity(linearX: Double, angularZ: Double) {
+        // During autonomous navigation, move_base controls velocity via its own
+        // costmaps and local planner. Don't interfere with teleop overrides.
+        val isNavigating = _robotStatus.value?.navStatus == 601
+        if (isNavigating) {
+            // Don't send teleop velocity during autonomous nav - it overrides move_base
+            return
+        }
+
         var adjustedLinear = linearX
-        when (safetyZone.get()) {
-            SafetyZone.STOP -> {
-                if (linearX > 0) {
-                    Log.d(TAG, "Forward velocity blocked by STOP zone.")
+
+        if (linearX > 0) {
+            val distance = minFrontDistance.toDouble()
+            val obstacleType = _robotStatus.value?.obstacleType ?: "CLEAR"
+            val peopleNearby = _peopleDetected.value
+
+            // Use classifier + human detector to determine response:
+            // - Wall/mapped obstacle: hard stop
+            // - Human/crowd: gradient push-through (they'll move)
+            // - Unknown + people detected: treat as crowd
+            // - Unknown + no people: cautious gradient (might be furniture)
+            val isWall = obstacleType == "STATIC_EXPECTED"
+            val isHuman = obstacleType in listOf("MOVING_PERSON", "CROWD", "STATIC_PERSON")
+            val treatAsCrowd = isHuman || (peopleNearby && obstacleType == "UNKNOWN")
+
+            if (distance < crowdSafeDistance) {
+                if (isWall && !_detachMode.value) {
+                    // Known wall: hard stop (don't push through walls)
                     adjustedLinear = 0.0
+                    Log.d(TAG, "Wall detected - hard stop")
+                } else {
+                    // Human/crowd/unknown: gradient speed ramp, push through
+                    val fraction = (distance / crowdSafeDistance).coerceIn(0.0, 1.0)
+                    val rampedFraction = Math.pow(fraction, crowdRampRate)
+                    // Minimum push speed: always keep moving through crowds
+                    val minFraction = CREEP_SPEED / linearX.coerceAtLeast(CREEP_SPEED)
+                    adjustedLinear = linearX * rampedFraction.coerceAtLeast(minFraction)
+
+                    if (adjustedLinear != linearX) {
+                        Log.d(TAG, "Crowd ramp: ${String.format("%.2f", linearX)} → ${String.format("%.2f", adjustedLinear)} " +
+                                "(dist=${String.format("%.2f", distance)}m, type=$obstacleType, people=$peopleNearby)")
+                    }
                 }
             }
-            SafetyZone.CREEP -> {
-                if (linearX > CREEP_SPEED) {
-                    Log.d(TAG, "Forward velocity limited to CREEP speed.")
-                    adjustedLinear = CREEP_SPEED
-                }
-            }
-            else -> { /* WARN or CLEAR, no adjustment needed */ }
         }
         send(ChassisProtocol.publishVelocity(adjustedLinear, angularZ))
+    }
+
+    /**
+     * Update crowd control configuration for speed ramping.
+     */
+    fun setCrowdConfig(safeDistanceMeters: Double, rampRate: Double) {
+        crowdSafeDistance = safeDistanceMeters.coerceIn(0.3, 3.0)
+        crowdRampRate = rampRate.coerceIn(0.1, 1.0)
+        Log.i(TAG, "Crowd config: safeDistance=${crowdSafeDistance}m, rampRate=$crowdRampRate")
     }
 
     fun stop() {

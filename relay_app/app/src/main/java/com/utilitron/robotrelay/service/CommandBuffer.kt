@@ -393,10 +393,8 @@ class CommandBuffer(
                                        waypoint.contains("Charging", ignoreCase = true)
 
                 if (isChargingRelated) {
-                    Log.i(TAG, "Navigating to/from charger '$waypoint' - obstacle recovery disabled")
-                    // Also increase tolerance for "arrival" detection near charger
-                    // Robot WILL bump/push against charger contacts - the tongs snap in!
-                    // This is EXPECTED behavior, not a collision
+                    Log.i(TAG, "Navigating to/from charger '$waypoint' - detach mode ON")
+                    robotClient.setDetachMode(true)
                 }
 
                 robotClient.navigateToPoi(waypoint)
@@ -486,30 +484,39 @@ class CommandBuffer(
                     }
                     lastPosition = currentPos
 
-                    // Check if stuck and in obstacle zone, OR if 604 triggered recovery
+                    // Recovery triggers:
+                    // 1. Robot explicitly reports 604 (path failed) - immediate
+                    // 2. Timeout: no progress for extended period - fallback
+                    //    (Don't use relay LIDAR zone - move_base has its own costmaps
+                    //    and our LIDAR interpretation causes false positives)
                     val stuckTime = System.currentTimeMillis() - lastProgressTime
-                    val safetyZone = status?.safetyZone
-                    // Check if LIDAR blocked (STOP or CREEP zones)
-                    val isBlocked = safetyZone == SafetyZone.STOP || safetyZone == SafetyZone.CREEP
-
-                    // Smart recovery: push but if not moving, stop pushing and try something else
-                    // BUT: Skip recovery when dealing with charger (it's supposed to be tight!)
-                    val shouldRecover = if (isChargingRelated) {
-                        false  // Never recover when docking/undocking
+                    val stuckTimeout = if (isChargingRelated) {
+                        Long.MAX_VALUE  // Never time-out recover near charger (detach mode)
                     } else {
-                        triggerRecovery || (stuckTime > recoveryConfig.stuckThresholdMs && isBlocked)
+                        recoveryConfig.stuckThresholdMs * 4  // 60s default - genuine stuck only
+                    }
+                    val shouldRecover = if (isChargingRelated) {
+                        false  // Detach mode: never recover near pile/charger
+                    } else {
+                        triggerRecovery || (stuckTime > stuckTimeout)
                     }
 
                     if (shouldRecover && recoveryAttempts < recoveryConfig.maxRecoveryAttempts) {
-                        val wasTriggeredBy604 = triggerRecovery
+                        val reason = if (triggerRecovery) "nav failed (604)" else "stuck ${stuckTime/1000}s"
                         triggerRecovery = false
                         inRecovery = true  // Prevent 602 from cancelling during recovery
                         recoveryAttempts++
 
-                        Log.i(TAG, "Recovery #$recoveryAttempts/${recoveryConfig.maxRecoveryAttempts} - ${if (wasTriggeredBy604) "nav failed" else "stuck ${stuckTime/1000}s"}")
+                        Log.i(TAG, "Recovery #$recoveryAttempts/${recoveryConfig.maxRecoveryAttempts} - $reason")
 
                         robotClient.cancelNavigation()
-                        delay(300)
+                        // Wait for navStatus to leave 601 so sendVelocity won't be blocked
+                        var waitMs = 0
+                        while (robotClient.robotStatus.value?.navStatus == 601 && waitMs < 2000) {
+                            delay(100)
+                            waitMs += 100
+                        }
+                        delay(200)
 
                         if (recoveryConfig.announceRecovery) {
                             val ttsComplete = CompletableDeferred<Unit>()
@@ -607,7 +614,10 @@ class CommandBuffer(
                     Log.w(TAG, "Navigation to $waypoint timed out after $recoveryAttempts recovery attempts")
                     completeCommand(cmd.id, "timeout")
                 }
-                // Otherwise completed via arrival confirmation loop above
+                // Always deactivate detach mode when navigation ends
+                if (isChargingRelated) {
+                    robotClient.setDetachMode(false)
+                }
             }
 
             "speak" -> {
@@ -851,8 +861,8 @@ class CommandBuffer(
                     rampRate = rate.coerceIn(0.1, 1.0)
                 )
 
-                // TODO: Forward to robot client for velocity ramping in WARN zone
-                // robotClient.setCrowdConfig method doesn't exist yet
+                // Forward to robot client for LIDAR-based velocity ramping
+                robotClient.setCrowdConfig(crowdConfig.safeDistanceMeters, crowdConfig.rampRate)
 
                 Log.i(TAG, "Crowd config updated: safeDistance=${crowdConfig.safeDistanceMeters}m, rampRate=${crowdConfig.rampRate}")
                 completeCommand(cmd.id, "success")
