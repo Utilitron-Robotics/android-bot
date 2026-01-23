@@ -2,6 +2,7 @@ package com.utilitron.robotrelay.service
 
 import android.util.Log
 import com.utilitron.robotrelay.protocol.ChassisProtocol
+import com.utilitron.robotrelay.protocol.SubscribeMsg
 import org.json.JSONObject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -205,6 +206,14 @@ class RobotWebSocketClient(
         send(ChassisProtocol.subscribeNaviStatus())
         send(ChassisProtocol.subscribeSensorsCore())
         send(ChassisProtocol.subscribeLaserData())
+        // Also subscribe to /scan (sensor_msgs/LaserScan) - some robots publish this instead of /laser_data
+        send(ChassisProtocol.toJson(SubscribeMsg(
+            op = ChassisProtocol.OP_SUBSCRIBE,
+            id = "get_scan",
+            topic = "/scan",
+            type = "sensor_msgs/LaserScan",
+            throttleRate = 150
+        )))
         send(ChassisProtocol.subscribeGlobalPath())  // For obstacle path intersection
         send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection
         // Subscribe to /map with fragmentation+compression per chassis protocol docs
@@ -431,6 +440,18 @@ class RobotWebSocketClient(
                             it.asFloat.takeIf { f -> f > 0.05 }
                         } ?: emptyList()
                         checkLaserData(points)
+                    }
+                }
+                "/scan" -> {
+                    // sensor_msgs/LaserScan - ranges array of float distances
+                    val ranges = msg.get("ranges")?.asJsonArray?.mapNotNull { el ->
+                        try {
+                            val r = el.asFloat
+                            if (r > 0.05f && r < 30.0f) r else null
+                        } catch (e: Exception) { null }
+                    } ?: emptyList()
+                    if (ranges.isNotEmpty()) {
+                        checkLaserData(ranges)
                     }
                 }
                 ChassisProtocol.TOPIC_GLOBAL_PATH -> {
