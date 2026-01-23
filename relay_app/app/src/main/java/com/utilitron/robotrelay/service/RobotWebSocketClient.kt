@@ -89,6 +89,11 @@ class RobotWebSocketClient(
     var minFrontDistance: Float = Float.MAX_VALUE
         private set
 
+    // Track when LIDAR specifically last delivered data (separate from general robot data)
+    @Volatile
+    var lastLidarTime: Long = 0
+        private set
+
     // Crowd control config: distance-proportional speed limiting
     private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here
     private var crowdRampRate: Double = 0.5      // 0.1=gentle, 1.0=aggressive
@@ -480,6 +485,7 @@ class RobotWebSocketClient(
 
     private fun checkLaserData(points: List<Float>) {
         if (points.isEmpty()) return
+        lastLidarTime = System.currentTimeMillis()
 
         // Split into arcs as per Flutter app logic (Front: 40-60%)
         val frontStartIndex = (points.size * 0.4).toInt()

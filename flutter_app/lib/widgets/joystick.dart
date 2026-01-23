@@ -99,33 +99,18 @@ class _JoystickControlState extends State<JoystickControl> {
     _grpcStatusSubscription = transport.robotStatus.listen((status) {
       if (!mounted) return;
 
-      // Use actual min_range_meters from relay (real LIDAR distance)
+      // min_range_meters: >0 = real distance, -1 = LIDAR stale/dead
       final minRange = status['min_range_meters'] as double?;
-      final dataAgeMs = status['data_age_ms'] as int?;
 
       double distance;
-      if (minRange != null && minRange > 0 && minRange < 100) {
-        // Real LIDAR data from relay
+      if (minRange != null && minRange < 0) {
+        // Relay says LIDAR is stale (no /scan data for 3+ seconds)
+        distance = -1;
+      } else if (minRange != null && minRange > 0 && minRange < 100) {
+        // Real LIDAR distance from relay
         distance = minRange;
-      } else if (dataAgeMs != null && (dataAgeMs < 0 || dataAgeMs > 3000)) {
-        // Stale or never-received LIDAR data - signal it
-        distance = -1; // Sentinel: gauge shows "NO DATA"
       } else {
-        // Fallback: use safety zone name if min_range not populated
-        final safetyZone = status['safety_zone'] as String?;
-        switch (safetyZone?.toUpperCase()) {
-          case 'STOP':
-            distance = 0.15;
-            break;
-          case 'CREEP':
-            distance = 0.35;
-            break;
-          case 'WARN':
-            distance = 0.65;
-            break;
-          default:
-            distance = double.infinity;
-        }
+        distance = double.infinity;
       }
 
       setState(() {

@@ -76,8 +76,15 @@ class RobotControlServiceImpl(
         val statusJob = scope.launch {
             robotClient.robotStatus.collect { status ->
                 if (status != null) {
+                    val now = System.currentTimeMillis()
                     val dataAge = if (robotClient.lastRobotDataTime > 0)
-                        System.currentTimeMillis() - robotClient.lastRobotDataTime else -1L
+                        now - robotClient.lastRobotDataTime else -1L
+
+                    // LIDAR-specific staleness: if no /scan data for 3s, signal -1
+                    val lidarAge = if (robotClient.lastLidarTime > 0)
+                        now - robotClient.lastLidarTime else -1L
+                    val minRange = if (lidarAge < 0 || lidarAge > 3000)
+                        -1.0 else robotClient.minFrontDistance.toDouble()
 
                     val robotStatus = RobotStatus.newBuilder()
                         .setConnected(robotClient.connectionState.value == ConnectionState.CONNECTED)
@@ -93,7 +100,7 @@ class RobotControlServiceImpl(
                         .setLinearVelocity(status.velocity.getOrNull(0) ?: 0.0)
                         .setAngularVelocity(status.velocity.getOrNull(1) ?: 0.0)
                         .setDataAgeMs(dataAge)
-                        .setMinRangeMeters(robotClient.minFrontDistance.toDouble())
+                        .setMinRangeMeters(minRange)
                         .build()
 
                     val message = ServerMessage.newBuilder()
