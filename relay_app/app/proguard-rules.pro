@@ -46,6 +46,8 @@
 # ============================================
 -dontwarn okhttp3.**
 -dontwarn okio.**
+-dontwarn com.squareup.okhttp.**
+-dontwarn javax.naming.**
 -keep class okhttp3.** { *; }
 -keep interface okhttp3.** { *; }
 -keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
