@@ -110,40 +110,47 @@ class _MapViewState extends State<MapView> {
   }
 
   void _updateHttpBaseUrl() {
-    // Convert ws://host:port to http://host:(port-1) for HTTP API
-    // WS is on 8766, HTTP is on 8765
+    // Derive HTTP API URL (port 8765) from robot connection info
     final robot = _robot;
     if (robot == null) {
       debugPrint('MapView: _updateHttpBaseUrl - robot is null!');
       return;
     }
 
-    // Get the URL from the ACTUAL connection, not saved prefs
-    // This ensures we use the robot we're CURRENTLY connected to
-    final wsUrl = robot.robotUrl;
-    debugPrint('MapView: _updateHttpBaseUrl - robot.robotUrl = $wsUrl');
+    final robotUrl = robot.robotUrl;
+    debugPrint('MapView: _updateHttpBaseUrl - robot.robotUrl = $robotUrl');
 
-    if (wsUrl.isNotEmpty) {
+    if (robotUrl.isNotEmpty) {
       try {
-        final uri = Uri.parse(wsUrl);
-        // If connecting to relay WS (8766), HTTP is on 8765
-        // If connecting direct to robot (9090), no HTTP map endpoint available
-        if (uri.port == 8766) {
-          final newUrl = 'http://${uri.host}:8765';
+        final uri = Uri.parse(robotUrl);
+        String? host;
+
+        if (uri.host.isNotEmpty) {
+          // Full URL with scheme (e.g., ws://192.168.88.37:8766)
+          if (uri.port == 9090) {
+            // Direct robot connection - no HTTP map endpoint
+            debugPrint('MapView: Direct robot connection (port 9090), HTTP map not available');
+            _httpBaseUrl = null;
+            return;
+          }
+          host = uri.host;
+        } else {
+          // Bare IP/hostname (e.g., "192.168.88.37") - relay is at this host
+          host = robotUrl.trim();
+        }
+
+        if (host != null && host.isNotEmpty) {
+          final newUrl = 'http://$host:8765';
           if (newUrl != _httpBaseUrl) {
-            debugPrint('MapView: HTTP base URL changed: $_httpBaseUrl -> $newUrl');
+            debugPrint('MapView: HTTP base URL: $newUrl');
           }
           _httpBaseUrl = newUrl;
-          debugPrint('MapView: HTTP base URL: $_httpBaseUrl');
-        } else {
-          debugPrint('MapView: Direct robot connection (port ${uri.port}), HTTP map not available');
-          _httpBaseUrl = null;
         }
       } catch (e) {
-        debugPrint('MapView: Failed to parse WS URL: $e');
+        debugPrint('MapView: Failed to parse robot URL: $e');
       }
     } else {
-      debugPrint('MapView: _updateHttpBaseUrl - wsUrl is empty!');
+      debugPrint('MapView: _updateHttpBaseUrl - robotUrl is empty!');
     }
   }
 
