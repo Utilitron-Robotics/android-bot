@@ -661,7 +661,7 @@ class _FleetPickerState extends State<FleetPicker>
 
       if (result.success) {
         // Prompt to add as robot
-        _promptAddAsRobot(network.ssid, password);
+        _promptAddAsRobot(fleet, network.ssid, password);
       }
     }
   }
@@ -681,7 +681,7 @@ class _FleetPickerState extends State<FleetPicker>
     }
   }
 
-  void _promptAddAsRobot(String ssid, String? password) {
+  void _promptAddAsRobot(FleetDiscovery fleet, String ssid, String? password) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -691,15 +691,25 @@ class _FleetPickerState extends State<FleetPicker>
           TextButton(
               onPressed: () => Navigator.pop(context), child: const Text('No')),
           FilledButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              final fleet = context.read<FleetDiscovery>();
-              fleet.addRobot(RobotBase(
-                ssid: ssid,
-                password: password,
-              ));
-              // Switch to robots tab
-              _tabController.animateTo(0);
+              final ip = await fleet.getGatewayIp();
+              if (ip != null) {
+                fleet.addRobot(RobotBase(
+                  ssid: ssid,
+                  ip: ip,
+                  password: password,
+                ));
+                // Switch to robots tab
+                _tabController.animateTo(0);
+              } else {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Could not determine robot IP')),
+                  );
+                }
+              }
             },
             child: const Text('Add Robot'),
           ),

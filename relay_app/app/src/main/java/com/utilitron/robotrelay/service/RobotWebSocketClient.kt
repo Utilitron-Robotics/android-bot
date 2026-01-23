@@ -2,6 +2,7 @@ package com.utilitron.robotrelay.service
 
 import android.util.Log
 import com.utilitron.robotrelay.protocol.ChassisProtocol
+import org.json.JSONObject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,6 +91,10 @@ class RobotWebSocketClient(
     private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here
     private var crowdRampRate: Double = 0.5      // 0.1=gentle, 1.0=aggressive
 
+    // Fragment reassembly for map data (chassis sends fragmented PNG per protocol docs)
+    private val _mapFragments = mutableMapOf<Int, String>()  // num -> data chunk
+    private var _mapFragmentTotal = 0
+
     // Obstacle classifier for intelligent crowd handling
     private var obstacleClassifier: ObstacleClassifier? = null
     private var onObstacleClassification: ((ObstacleClassification) -> Unit)? = null
@@ -121,24 +126,26 @@ class RobotWebSocketClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            // Log map messages specially - they're huge and might be the issue
-            val isMapMsg = text.contains("\"/map\"") || text.contains("\"topic\":\"/map\"")
+            // Handle map fragments (chassis sends fragmented PNG per protocol docs)
+            if (text.contains("\"op\":\"fragment\"") || text.contains("\"op\": \"fragment\"")) {
+                handleMapFragment(text)
+                return
+            }
+
+            // Handle complete map message (non-fragmented or after reassembly)
+            val isMapMsg = text.contains("\"topic\":\"/map\"") || text.contains("\"topic\": \"/map\"")
             if (isMapMsg) {
                 Log.i(TAG, ">>> RECEIVED /map message (${text.length} bytes)")
-                // Cache the map for HTTP transport - more reliable than WS for big payloads
                 _cachedMapMessage = text
                 _mapLastUpdated = System.currentTimeMillis()
                 Log.i(TAG, ">>> Map cached for HTTP transport")
             } else {
-                Log.d(TAG, text.take(200)) // Truncate other messages
+                Log.d(TAG, text.take(200))
             }
 
-            // Use tryEmit (non-blocking) instead of emit (suspending)
             val emitted = _incomingMessages.tryEmit(text)
             if (!emitted) {
                 Log.w(TAG, "Message buffer full, dropped: ${if (isMapMsg) "/map" else text.take(50)}")
-            } else if (isMapMsg) {
-                Log.i(TAG, ">>> /map message emitted to SharedFlow")
             }
 
             scope.launch {
@@ -200,11 +207,10 @@ class RobotWebSocketClient(
         send(ChassisProtocol.subscribeLaserData())
         send(ChassisProtocol.subscribeGlobalPath())  // For obstacle path intersection
         send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection
-        // Subscribe to /map so it's always flowing to Flutter clients
-        // This ensures map works after Flutter hot restart
-        val mapSubMsg = ChassisProtocol.subscribeMapSimple()
+        // Subscribe to /map with fragmentation+compression per chassis protocol docs
+        val mapSubMsg = ChassisProtocol.subscribeMap()
         val mapSent = send(mapSubMsg)
-        Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
+        Log.i(TAG, ">>> Sending /map subscription (fragmented+png): $mapSubMsg")
         Log.i(TAG, ">>> /map subscription sent: $mapSent")
     }
 
@@ -241,9 +247,50 @@ class RobotWebSocketClient(
     }
 
     /**
+     * Handle a map fragment from the chassis (fragmented PNG per protocol docs).
+     * Collects all fragments and reassembles the complete map message.
+     */
+    private fun handleMapFragment(text: String) {
+        try {
+            val json = JSONObject(text)
+            val num = json.optInt("num", -1)
+            val total = json.optInt("total", -1)
+            val data = json.optString("data", "")
+            if (num < 0 || total <= 0 || data.isEmpty()) return
+
+            Log.i(TAG, ">>> Map fragment $num/$total (${data.length} bytes)")
+
+            synchronized(_mapFragments) {
+                _mapFragmentTotal = total
+                _mapFragments[num] = data
+
+                if (_mapFragments.size == total) {
+                    // All fragments received - reassemble
+                    val reassembled = StringBuilder()
+                    for (i in 0 until total) {
+                        reassembled.append(_mapFragments[i] ?: "")
+                    }
+                    _mapFragments.clear()
+
+                    val completeMessage = reassembled.toString()
+                    Log.i(TAG, ">>> Map reassembled: ${completeMessage.length} bytes from $total fragments")
+
+                    // Cache the reassembled map for HTTP transport
+                    _cachedMapMessage = completeMessage
+                    _mapLastUpdated = System.currentTimeMillis()
+
+                    // Emit to SharedFlow for WebSocket clients
+                    _incomingMessages.tryEmit(completeMessage)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling map fragment: ${e.message}")
+        }
+    }
+
+    /**
      * Force a map refresh by unsubscribing and resubscribing.
-     * This triggers the robot to resend the current map data.
-     * Uses a more aggressive retry pattern to ensure we get the map.
+     * Uses fragmented+compressed subscription per chassis protocol docs.
      */
     fun refreshMap() {
         if (_connectionState.value != ConnectionState.CONNECTED) {
@@ -252,29 +299,23 @@ class RobotWebSocketClient(
         }
 
         scope.launch {
-            Log.i(TAG, ">>> MAP REFRESH: Starting aggressive refresh sequence")
+            Log.i(TAG, ">>> MAP REFRESH: Starting refresh sequence")
 
-            // Step 1: Unsubscribe first to clear any stale state
-            val unsubMsg = ChassisProtocol.unsubscribe(ChassisProtocol.TOPIC_MAP, "get_map_simple")
+            synchronized(_mapFragments) { _mapFragments.clear() }
+
+            val unsubMsg = ChassisProtocol.unsubscribe(ChassisProtocol.TOPIC_MAP, "get_map")
             send(unsubMsg)
-            Log.i(TAG, ">>> MAP REFRESH: Sent unsubscribe")
-
-            // Wait for unsubscribe to process
             delay(300)
 
-            // Step 2: Subscribe again
-            val subMsg = ChassisProtocol.subscribeMapSimple()
+            val subMsg = ChassisProtocol.subscribeMap()
             val sent = send(subMsg)
             Log.i(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
 
-            // Step 3: If first subscribe didn't work, try again after a delay
             delay(2000)
-            if (_connectionState.value == ConnectionState.CONNECTED) {
-                Log.i(TAG, ">>> MAP REFRESH: Retry subscribe just in case")
+            if (_connectionState.value == ConnectionState.CONNECTED && _cachedMapMessage == null) {
+                Log.i(TAG, ">>> MAP REFRESH: No map yet, retrying")
                 send(subMsg)
             }
-
-            Log.i(TAG, ">>> MAP REFRESH: Sequence complete")
         }
     }
 

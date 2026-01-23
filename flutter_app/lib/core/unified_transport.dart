@@ -217,8 +217,8 @@ class UnifiedTransportManager extends ChangeNotifier {
       _statusController.stream;
   Stream<Map<String, dynamic>> get robotStatus => _robotStatusController.stream;
   Stream<CommandAck> get commandResults => _commandResultController.stream;
-  Stream<model.OccupancyGrid> get mapStream =>
-      _webrtc?.mapStream ?? const Stream.empty();
+  Stream<model.OccupancyGrid>? get mapStream =>
+      (_webrtc != null && _webrtc!.isConnected) ? _webrtc!.mapStream : null;
   bool get isConnected => _status.hasAnyConnection;
   String? get lastError => _lastError;
   PredictiveController get predictiveController => _predictiveController;
@@ -522,6 +522,8 @@ class UnifiedTransportManager extends ChangeNotifier {
         'safety_zone': status.safetyZone,
         'linear_velocity': status.linearVelocity,
         'angular_velocity': status.angularVelocity,
+        'data_age_ms': status.dataAgeMs.toInt(),
+        'min_range_meters': status.minRangeMeters,
         'pose': {
           'x': status.pose.x,
           'y': status.pose.y,

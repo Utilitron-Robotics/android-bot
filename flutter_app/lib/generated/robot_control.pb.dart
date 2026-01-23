@@ -17,7 +17,14 @@ import 'package:protobuf/protobuf.dart' as $pb;
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
-enum ClientMessage_Message { command, heartbeatRequest, bufferControl, webrtcSignal, requestMapStream, notSet }
+enum ClientMessage_Message {
+  command,
+  heartbeatRequest,
+  bufferControl,
+  webrtcSignal,
+  requestMapStream,
+  notSet
+}
 
 /// Client messages (Flutter → Relay)
 class ClientMessage extends $pb.GeneratedMessage {
@@ -73,7 +80,7 @@ class ClientMessage extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  ClientMessage clone() => ClientMessage()..mergeFromMessage(this);
+  ClientMessage clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   ClientMessage copyWith(void Function(ClientMessage) updates) =>
       super.copyWith((message) => updates(message as ClientMessage))
@@ -91,62 +98,72 @@ class ClientMessage extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<ClientMessage>(create);
   static ClientMessage? _defaultInstance;
 
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
   ClientMessage_Message whichMessage() =>
       _ClientMessage_MessageByTag[$_whichOneof(0)]!;
-  void clearMessage() => clearField($_whichOneof(0));
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
+  void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
   Command get command => $_getN(0);
   @$pb.TagNumber(1)
-  set command(Command value) => setField(1, value);
+  set command(Command value) => $_setField(1, value);
   @$pb.TagNumber(1)
   $core.bool hasCommand() => $_has(0);
   @$pb.TagNumber(1)
-  void clearCommand() => clearField(1);
+  void clearCommand() => $_clearField(1);
   @$pb.TagNumber(1)
   Command ensureCommand() => $_ensure(0);
 
   @$pb.TagNumber(2)
   HeartbeatRequest get heartbeatRequest => $_getN(1);
   @$pb.TagNumber(2)
-  set heartbeatRequest(HeartbeatRequest value) => setField(2, value);
+  set heartbeatRequest(HeartbeatRequest value) => $_setField(2, value);
   @$pb.TagNumber(2)
   $core.bool hasHeartbeatRequest() => $_has(1);
   @$pb.TagNumber(2)
-  void clearHeartbeatRequest() => clearField(2);
+  void clearHeartbeatRequest() => $_clearField(2);
   @$pb.TagNumber(2)
   HeartbeatRequest ensureHeartbeatRequest() => $_ensure(1);
 
   @$pb.TagNumber(3)
   BufferControl get bufferControl => $_getN(2);
   @$pb.TagNumber(3)
-  set bufferControl(BufferControl value) => setField(3, value);
+  set bufferControl(BufferControl value) => $_setField(3, value);
   @$pb.TagNumber(3)
   $core.bool hasBufferControl() => $_has(2);
   @$pb.TagNumber(3)
-  void clearBufferControl() => clearField(3);
+  void clearBufferControl() => $_clearField(3);
   @$pb.TagNumber(3)
   BufferControl ensureBufferControl() => $_ensure(2);
 
   @$pb.TagNumber(4)
   WebRTCSignal get webrtcSignal => $_getN(3);
   @$pb.TagNumber(4)
-  set webrtcSignal(WebRTCSignal value) => setField(4, value);
+  set webrtcSignal(WebRTCSignal value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasWebrtcSignal() => $_has(3);
   @$pb.TagNumber(4)
-  void clearWebrtcSignal() => clearField(4);
+  void clearWebrtcSignal() => $_clearField(4);
   @$pb.TagNumber(4)
   WebRTCSignal ensureWebrtcSignal() => $_ensure(3);
 
   @$pb.TagNumber(5)
   RequestMapStream get requestMapStream => $_getN(4);
   @$pb.TagNumber(5)
-  set requestMapStream(RequestMapStream value) => setField(5, value);
+  set requestMapStream(RequestMapStream value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasRequestMapStream() => $_has(4);
   @$pb.TagNumber(5)
-  void clearRequestMapStream() => clearField(5);
+  void clearRequestMapStream() => $_clearField(5);
   @$pb.TagNumber(5)
   RequestMapStream ensureRequestMapStream() => $_ensure(4);
 }
@@ -214,7 +231,7 @@ class ServerMessage extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  ServerMessage clone() => ServerMessage()..mergeFromMessage(this);
+  ServerMessage clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   ServerMessage copyWith(void Function(ServerMessage) updates) =>
       super.copyWith((message) => updates(message as ServerMessage))
@@ -232,67 +249,83 @@ class ServerMessage extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<ServerMessage>(create);
   static ServerMessage? _defaultInstance;
 
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
   ServerMessage_Message whichMessage() =>
       _ServerMessage_MessageByTag[$_whichOneof(0)]!;
-  void clearMessage() => clearField($_whichOneof(0));
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
+  void clearMessage() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
   Heartbeat get heartbeat => $_getN(0);
   @$pb.TagNumber(1)
-  set heartbeat(Heartbeat value) => setField(1, value);
+  set heartbeat(Heartbeat value) => $_setField(1, value);
   @$pb.TagNumber(1)
   $core.bool hasHeartbeat() => $_has(0);
   @$pb.TagNumber(1)
-  void clearHeartbeat() => clearField(1);
+  void clearHeartbeat() => $_clearField(1);
   @$pb.TagNumber(1)
   Heartbeat ensureHeartbeat() => $_ensure(0);
 
   @$pb.TagNumber(2)
   CommandResult get commandResult => $_getN(1);
   @$pb.TagNumber(2)
-  set commandResult(CommandResult value) => setField(2, value);
+  set commandResult(CommandResult value) => $_setField(2, value);
   @$pb.TagNumber(2)
   $core.bool hasCommandResult() => $_has(1);
   @$pb.TagNumber(2)
-  void clearCommandResult() => clearField(2);
+  void clearCommandResult() => $_clearField(2);
   @$pb.TagNumber(2)
   CommandResult ensureCommandResult() => $_ensure(1);
 
   @$pb.TagNumber(3)
   RobotStatus get robotStatus => $_getN(2);
   @$pb.TagNumber(3)
-  set robotStatus(RobotStatus value) => setField(3, value);
+  set robotStatus(RobotStatus value) => $_setField(3, value);
   @$pb.TagNumber(3)
   $core.bool hasRobotStatus() => $_has(2);
   @$pb.TagNumber(3)
-  void clearRobotStatus() => clearField(3);
+  void clearRobotStatus() => $_clearField(3);
   @$pb.TagNumber(3)
   RobotStatus ensureRobotStatus() => $_ensure(2);
 
   @$pb.TagNumber(4)
   BufferState get bufferState => $_getN(3);
   @$pb.TagNumber(4)
-  set bufferState(BufferState value) => setField(4, value);
+  set bufferState(BufferState value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasBufferState() => $_has(3);
   @$pb.TagNumber(4)
-  void clearBufferState() => clearField(4);
+  void clearBufferState() => $_clearField(4);
   @$pb.TagNumber(4)
   BufferState ensureBufferState() => $_ensure(3);
 
   @$pb.TagNumber(5)
   WebRTCSignal get webrtcSignal => $_getN(4);
   @$pb.TagNumber(5)
-  set webrtcSignal(WebRTCSignal value) => setField(5, value);
+  set webrtcSignal(WebRTCSignal value) => $_setField(5, value);
   @$pb.TagNumber(5)
   $core.bool hasWebrtcSignal() => $_has(4);
   @$pb.TagNumber(5)
-  void clearWebrtcSignal() => clearField(5);
+  void clearWebrtcSignal() => $_clearField(5);
   @$pb.TagNumber(5)
   WebRTCSignal ensureWebrtcSignal() => $_ensure(4);
 }
 
-enum WebRTCSignal_Signal { sdp, candidate, candidateMid, candidateMlineIndex, notSet }
+enum WebRTCSignal_Signal {
+  sdp,
+  candidate,
+  candidateMid,
+  candidateMlineIndex,
+  notSet
+}
 
 /// WebRTC Signaling Message
 class WebRTCSignal extends $pb.GeneratedMessage {
@@ -306,7 +339,8 @@ class WebRTCSignal extends $pb.GeneratedMessage {
     if (sdp != null) result.sdp = sdp;
     if (candidate != null) result.candidate = candidate;
     if (candidateMid != null) result.candidateMid = candidateMid;
-    if (candidateMlineIndex != null) result.candidateMlineIndex = candidateMlineIndex;
+    if (candidateMlineIndex != null)
+      result.candidateMlineIndex = candidateMlineIndex;
     return result;
   }
 
@@ -335,11 +369,11 @@ class WebRTCSignal extends $pb.GeneratedMessage {
     ..aOS(1, _omitFieldNames ? '' : 'sdp')
     ..aOS(2, _omitFieldNames ? '' : 'candidate')
     ..aOS(3, _omitFieldNames ? '' : 'candidateMid')
-    ..a<$core.int>(4, _omitFieldNames ? '' : 'candidateMlineIndex', $pb.PbFieldType.O3)
+    ..aI(4, _omitFieldNames ? '' : 'candidateMlineIndex')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  WebRTCSignal clone() => WebRTCSignal()..mergeFromMessage(this);
+  WebRTCSignal clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   WebRTCSignal copyWith(void Function(WebRTCSignal) updates) =>
       super.copyWith((message) => updates(message as WebRTCSignal))
@@ -357,9 +391,17 @@ class WebRTCSignal extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<WebRTCSignal>(create);
   static WebRTCSignal? _defaultInstance;
 
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
   WebRTCSignal_Signal whichSignal() =>
       _WebRTCSignal_SignalByTag[$_whichOneof(0)]!;
-  void clearSignal() => clearField($_whichOneof(0));
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
+  void clearSignal() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
   $core.String get sdp => $_getSZ(0);
@@ -368,7 +410,7 @@ class WebRTCSignal extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasSdp() => $_has(0);
   @$pb.TagNumber(1)
-  void clearSdp() => clearField(1);
+  void clearSdp() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get candidate => $_getSZ(1);
@@ -377,7 +419,7 @@ class WebRTCSignal extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasCandidate() => $_has(1);
   @$pb.TagNumber(2)
-  void clearCandidate() => clearField(2);
+  void clearCandidate() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $core.String get candidateMid => $_getSZ(2);
@@ -386,7 +428,7 @@ class WebRTCSignal extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasCandidateMid() => $_has(2);
   @$pb.TagNumber(3)
-  void clearCandidateMid() => clearField(3);
+  void clearCandidateMid() => $_clearField(3);
 
   @$pb.TagNumber(4)
   $core.int get candidateMlineIndex => $_getIZ(3);
@@ -395,7 +437,7 @@ class WebRTCSignal extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $core.bool hasCandidateMlineIndex() => $_has(3);
   @$pb.TagNumber(4)
-  void clearCandidateMlineIndex() => clearField(4);
+  void clearCandidateMlineIndex() => $_clearField(4);
 }
 
 /// Message to request the WebRTC map stream
@@ -418,7 +460,7 @@ class RequestMapStream extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  RequestMapStream clone() => RequestMapStream()..mergeFromMessage(this);
+  RequestMapStream clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   RequestMapStream copyWith(void Function(RequestMapStream) updates) =>
       super.copyWith((message) => updates(message as RequestMapStream))
@@ -442,12 +484,12 @@ class Command extends $pb.GeneratedMessage {
   factory Command({
     $core.String? id,
     $core.String? type,
-    $core.Map<$core.String, $core.String>? data,
+    $core.Iterable<$core.MapEntry<$core.String, $core.String>>? data,
   }) {
     final result = create();
     if (id != null) result.id = id;
     if (type != null) result.type = type;
-    if (data != null) result.data.addAll(data);
+    if (data != null) result.data.addEntries(data);
     return result;
   }
 
@@ -474,7 +516,7 @@ class Command extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  Command clone() => Command()..mergeFromMessage(this);
+  Command clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   Command copyWith(void Function(Command) updates) =>
       super.copyWith((message) => updates(message as Command)) as Command;
@@ -498,7 +540,7 @@ class Command extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearId() => clearField(1);
+  void clearId() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get type => $_getSZ(1);
@@ -507,10 +549,10 @@ class Command extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasType() => $_has(1);
   @$pb.TagNumber(2)
-  void clearType() => clearField(2);
+  void clearType() => $_clearField(2);
 
   @$pb.TagNumber(3)
-  $core.Map<$core.String, $core.String> get data => $_getMap(2);
+  $pb.PbMap<$core.String, $core.String> get data => $_getMap(2);
 }
 
 class CommandResponse extends $pb.GeneratedMessage {
@@ -545,7 +587,7 @@ class CommandResponse extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  CommandResponse clone() => CommandResponse()..mergeFromMessage(this);
+  CommandResponse clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   CommandResponse copyWith(void Function(CommandResponse) updates) =>
       super.copyWith((message) => updates(message as CommandResponse))
@@ -570,7 +612,7 @@ class CommandResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasSuccess() => $_has(0);
   @$pb.TagNumber(1)
-  void clearSuccess() => clearField(1);
+  void clearSuccess() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get message => $_getSZ(1);
@@ -579,7 +621,7 @@ class CommandResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasMessage() => $_has(1);
   @$pb.TagNumber(2)
-  void clearMessage() => clearField(2);
+  void clearMessage() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $core.String get commandId => $_getSZ(2);
@@ -588,7 +630,7 @@ class CommandResponse extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasCommandId() => $_has(2);
   @$pb.TagNumber(3)
-  void clearCommandId() => clearField(3);
+  void clearCommandId() => $_clearField(3);
 }
 
 class CommandResult extends $pb.GeneratedMessage {
@@ -623,7 +665,7 @@ class CommandResult extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  CommandResult clone() => CommandResult()..mergeFromMessage(this);
+  CommandResult clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   CommandResult copyWith(void Function(CommandResult) updates) =>
       super.copyWith((message) => updates(message as CommandResult))
@@ -648,7 +690,7 @@ class CommandResult extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasCommandId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearCommandId() => clearField(1);
+  void clearCommandId() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get status => $_getSZ(1);
@@ -657,7 +699,7 @@ class CommandResult extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasStatus() => $_has(1);
   @$pb.TagNumber(2)
-  void clearStatus() => clearField(2);
+  void clearStatus() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $core.String get message => $_getSZ(2);
@@ -666,7 +708,7 @@ class CommandResult extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasMessage() => $_has(2);
   @$pb.TagNumber(3)
-  void clearMessage() => clearField(3);
+  void clearMessage() => $_clearField(3);
 }
 
 /// Heartbeat with full system state
@@ -708,7 +750,7 @@ class Heartbeat extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  Heartbeat clone() => Heartbeat()..mergeFromMessage(this);
+  Heartbeat clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   Heartbeat copyWith(void Function(Heartbeat) updates) =>
       super.copyWith((message) => updates(message as Heartbeat)) as Heartbeat;
@@ -732,38 +774,38 @@ class Heartbeat extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasTimestamp() => $_has(0);
   @$pb.TagNumber(1)
-  void clearTimestamp() => clearField(1);
+  void clearTimestamp() => $_clearField(1);
 
   @$pb.TagNumber(2)
   RobotStatus get robot => $_getN(1);
   @$pb.TagNumber(2)
-  set robot(RobotStatus value) => setField(2, value);
+  set robot(RobotStatus value) => $_setField(2, value);
   @$pb.TagNumber(2)
   $core.bool hasRobot() => $_has(1);
   @$pb.TagNumber(2)
-  void clearRobot() => clearField(2);
+  void clearRobot() => $_clearField(2);
   @$pb.TagNumber(2)
   RobotStatus ensureRobot() => $_ensure(1);
 
   @$pb.TagNumber(3)
   BufferState get buffer => $_getN(2);
   @$pb.TagNumber(3)
-  set buffer(BufferState value) => setField(3, value);
+  set buffer(BufferState value) => $_setField(3, value);
   @$pb.TagNumber(3)
   $core.bool hasBuffer() => $_has(2);
   @$pb.TagNumber(3)
-  void clearBuffer() => clearField(3);
+  void clearBuffer() => $_clearField(3);
   @$pb.TagNumber(3)
   BufferState ensureBuffer() => $_ensure(2);
 
   @$pb.TagNumber(4)
   CrowdConfig get crowdConfig => $_getN(3);
   @$pb.TagNumber(4)
-  set crowdConfig(CrowdConfig value) => setField(4, value);
+  set crowdConfig(CrowdConfig value) => $_setField(4, value);
   @$pb.TagNumber(4)
   $core.bool hasCrowdConfig() => $_has(3);
   @$pb.TagNumber(4)
-  void clearCrowdConfig() => clearField(4);
+  void clearCrowdConfig() => $_clearField(4);
   @$pb.TagNumber(4)
   CrowdConfig ensureCrowdConfig() => $_ensure(3);
 }
@@ -787,7 +829,7 @@ class HeartbeatRequest extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  HeartbeatRequest clone() => HeartbeatRequest()..mergeFromMessage(this);
+  HeartbeatRequest clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   HeartbeatRequest copyWith(void Function(HeartbeatRequest) updates) =>
       super.copyWith((message) => updates(message as HeartbeatRequest))
@@ -817,6 +859,8 @@ class RobotStatus extends $pb.GeneratedMessage {
     Pose2D? pose,
     $core.double? linearVelocity,
     $core.double? angularVelocity,
+    $fixnum.Int64? dataAgeMs,
+    $core.double? minRangeMeters,
   }) {
     final result = create();
     if (connected != null) result.connected = connected;
@@ -827,6 +871,8 @@ class RobotStatus extends $pb.GeneratedMessage {
     if (pose != null) result.pose = pose;
     if (linearVelocity != null) result.linearVelocity = linearVelocity;
     if (angularVelocity != null) result.angularVelocity = angularVelocity;
+    if (dataAgeMs != null) result.dataAgeMs = dataAgeMs;
+    if (minRangeMeters != null) result.minRangeMeters = minRangeMeters;
     return result;
   }
 
@@ -844,17 +890,19 @@ class RobotStatus extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'robotcontrol'),
       createEmptyInstance: create)
     ..aOB(1, _omitFieldNames ? '' : 'connected')
-    ..a<$core.int>(2, _omitFieldNames ? '' : 'navStatus', $pb.PbFieldType.O3)
+    ..aI(2, _omitFieldNames ? '' : 'navStatus')
     ..aOS(3, _omitFieldNames ? '' : 'navGoal')
-    ..a<$core.int>(4, _omitFieldNames ? '' : 'battery', $pb.PbFieldType.O3)
+    ..aI(4, _omitFieldNames ? '' : 'battery')
     ..aOS(5, _omitFieldNames ? '' : 'safetyZone')
     ..aOM<Pose2D>(6, _omitFieldNames ? '' : 'pose', subBuilder: Pose2D.create)
-    ..a<$core.double>(7, _omitFieldNames ? '' : 'linearVelocity', $pb.PbFieldType.OD)
-    ..a<$core.double>(8, _omitFieldNames ? '' : 'angularVelocity', $pb.PbFieldType.OD)
+    ..aD(7, _omitFieldNames ? '' : 'linearVelocity')
+    ..aD(8, _omitFieldNames ? '' : 'angularVelocity')
+    ..aInt64(9, _omitFieldNames ? '' : 'dataAgeMs')
+    ..aD(10, _omitFieldNames ? '' : 'minRangeMeters')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  RobotStatus clone() => RobotStatus()..mergeFromMessage(this);
+  RobotStatus clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   RobotStatus copyWith(void Function(RobotStatus) updates) =>
       super.copyWith((message) => updates(message as RobotStatus))
@@ -879,7 +927,7 @@ class RobotStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasConnected() => $_has(0);
   @$pb.TagNumber(1)
-  void clearConnected() => clearField(1);
+  void clearConnected() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.int get navStatus => $_getIZ(1);
@@ -888,7 +936,7 @@ class RobotStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasNavStatus() => $_has(1);
   @$pb.TagNumber(2)
-  void clearNavStatus() => clearField(2);
+  void clearNavStatus() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $core.String get navGoal => $_getSZ(2);
@@ -897,7 +945,7 @@ class RobotStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasNavGoal() => $_has(2);
   @$pb.TagNumber(3)
-  void clearNavGoal() => clearField(3);
+  void clearNavGoal() => $_clearField(3);
 
   @$pb.TagNumber(4)
   $core.int get battery => $_getIZ(3);
@@ -906,7 +954,7 @@ class RobotStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $core.bool hasBattery() => $_has(3);
   @$pb.TagNumber(4)
-  void clearBattery() => clearField(4);
+  void clearBattery() => $_clearField(4);
 
   @$pb.TagNumber(5)
   $core.String get safetyZone => $_getSZ(4);
@@ -915,16 +963,16 @@ class RobotStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   $core.bool hasSafetyZone() => $_has(4);
   @$pb.TagNumber(5)
-  void clearSafetyZone() => clearField(5);
+  void clearSafetyZone() => $_clearField(5);
 
   @$pb.TagNumber(6)
   Pose2D get pose => $_getN(5);
   @$pb.TagNumber(6)
-  set pose(Pose2D value) => setField(6, value);
+  set pose(Pose2D value) => $_setField(6, value);
   @$pb.TagNumber(6)
   $core.bool hasPose() => $_has(5);
   @$pb.TagNumber(6)
-  void clearPose() => clearField(6);
+  void clearPose() => $_clearField(6);
   @$pb.TagNumber(6)
   Pose2D ensurePose() => $_ensure(5);
 
@@ -935,7 +983,7 @@ class RobotStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   $core.bool hasLinearVelocity() => $_has(6);
   @$pb.TagNumber(7)
-  void clearLinearVelocity() => clearField(7);
+  void clearLinearVelocity() => $_clearField(7);
 
   @$pb.TagNumber(8)
   $core.double get angularVelocity => $_getN(7);
@@ -944,7 +992,25 @@ class RobotStatus extends $pb.GeneratedMessage {
   @$pb.TagNumber(8)
   $core.bool hasAngularVelocity() => $_has(7);
   @$pb.TagNumber(8)
-  void clearAngularVelocity() => clearField(8);
+  void clearAngularVelocity() => $_clearField(8);
+
+  @$pb.TagNumber(9)
+  $fixnum.Int64 get dataAgeMs => $_getI64(8);
+  @$pb.TagNumber(9)
+  set dataAgeMs($fixnum.Int64 value) => $_setInt64(8, value);
+  @$pb.TagNumber(9)
+  $core.bool hasDataAgeMs() => $_has(8);
+  @$pb.TagNumber(9)
+  void clearDataAgeMs() => $_clearField(9);
+
+  @$pb.TagNumber(10)
+  $core.double get minRangeMeters => $_getN(9);
+  @$pb.TagNumber(10)
+  set minRangeMeters($core.double value) => $_setDouble(9, value);
+  @$pb.TagNumber(10)
+  $core.bool hasMinRangeMeters() => $_has(9);
+  @$pb.TagNumber(10)
+  void clearMinRangeMeters() => $_clearField(10);
 }
 
 class Pose2D extends $pb.GeneratedMessage {
@@ -973,13 +1039,13 @@ class Pose2D extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'Pose2D',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'robotcontrol'),
       createEmptyInstance: create)
-    ..a<$core.double>(1, _omitFieldNames ? '' : 'x', $pb.PbFieldType.OD)
-    ..a<$core.double>(2, _omitFieldNames ? '' : 'y', $pb.PbFieldType.OD)
-    ..a<$core.double>(3, _omitFieldNames ? '' : 'theta', $pb.PbFieldType.OD)
+    ..aD(1, _omitFieldNames ? '' : 'x')
+    ..aD(2, _omitFieldNames ? '' : 'y')
+    ..aD(3, _omitFieldNames ? '' : 'theta')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  Pose2D clone() => Pose2D()..mergeFromMessage(this);
+  Pose2D clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   Pose2D copyWith(void Function(Pose2D) updates) =>
       super.copyWith((message) => updates(message as Pose2D)) as Pose2D;
@@ -1003,7 +1069,7 @@ class Pose2D extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasX() => $_has(0);
   @$pb.TagNumber(1)
-  void clearX() => clearField(1);
+  void clearX() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.double get y => $_getN(1);
@@ -1012,7 +1078,7 @@ class Pose2D extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasY() => $_has(1);
   @$pb.TagNumber(2)
-  void clearY() => clearField(2);
+  void clearY() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $core.double get theta => $_getN(2);
@@ -1021,7 +1087,7 @@ class Pose2D extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasTheta() => $_has(2);
   @$pb.TagNumber(3)
-  void clearTheta() => clearField(3);
+  void clearTheta() => $_clearField(3);
 }
 
 /// Buffer state
@@ -1056,12 +1122,12 @@ class BufferState extends $pb.GeneratedMessage {
     ..aOB(1, _omitFieldNames ? '' : 'paused')
     ..aOM<BufferCommand>(2, _omitFieldNames ? '' : 'current',
         subBuilder: BufferCommand.create)
-    ..a<$core.int>(3, _omitFieldNames ? '' : 'pendingCount', $pb.PbFieldType.O3)
-    ..a<$core.int>(4, _omitFieldNames ? '' : 'completedCount', $pb.PbFieldType.O3)
+    ..aI(3, _omitFieldNames ? '' : 'pendingCount')
+    ..aI(4, _omitFieldNames ? '' : 'completedCount')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  BufferState clone() => BufferState()..mergeFromMessage(this);
+  BufferState clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   BufferState copyWith(void Function(BufferState) updates) =>
       super.copyWith((message) => updates(message as BufferState))
@@ -1086,16 +1152,16 @@ class BufferState extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasPaused() => $_has(0);
   @$pb.TagNumber(1)
-  void clearPaused() => clearField(1);
+  void clearPaused() => $_clearField(1);
 
   @$pb.TagNumber(2)
   BufferCommand get current => $_getN(1);
   @$pb.TagNumber(2)
-  set current(BufferCommand value) => setField(2, value);
+  set current(BufferCommand value) => $_setField(2, value);
   @$pb.TagNumber(2)
   $core.bool hasCurrent() => $_has(1);
   @$pb.TagNumber(2)
-  void clearCurrent() => clearField(2);
+  void clearCurrent() => $_clearField(2);
   @$pb.TagNumber(2)
   BufferCommand ensureCurrent() => $_ensure(1);
 
@@ -1106,7 +1172,7 @@ class BufferState extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasPendingCount() => $_has(2);
   @$pb.TagNumber(3)
-  void clearPendingCount() => clearField(3);
+  void clearPendingCount() => $_clearField(3);
 
   @$pb.TagNumber(4)
   $core.int get completedCount => $_getIZ(3);
@@ -1115,7 +1181,7 @@ class BufferState extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $core.bool hasCompletedCount() => $_has(3);
   @$pb.TagNumber(4)
-  void clearCompletedCount() => clearField(4);
+  void clearCompletedCount() => $_clearField(4);
 }
 
 class BufferCommand extends $pb.GeneratedMessage {
@@ -1124,14 +1190,14 @@ class BufferCommand extends $pb.GeneratedMessage {
     $core.String? type,
     $fixnum.Int64? startedAt,
     $fixnum.Int64? elapsedMs,
-    $core.Map<$core.String, $core.String>? data,
+    $core.Iterable<$core.MapEntry<$core.String, $core.String>>? data,
   }) {
     final result = create();
     if (id != null) result.id = id;
     if (type != null) result.type = type;
     if (startedAt != null) result.startedAt = startedAt;
     if (elapsedMs != null) result.elapsedMs = elapsedMs;
-    if (data != null) result.data.addAll(data);
+    if (data != null) result.data.addEntries(data);
     return result;
   }
 
@@ -1160,7 +1226,7 @@ class BufferCommand extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  BufferCommand clone() => BufferCommand()..mergeFromMessage(this);
+  BufferCommand clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   BufferCommand copyWith(void Function(BufferCommand) updates) =>
       super.copyWith((message) => updates(message as BufferCommand))
@@ -1185,7 +1251,7 @@ class BufferCommand extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearId() => clearField(1);
+  void clearId() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.String get type => $_getSZ(1);
@@ -1194,7 +1260,7 @@ class BufferCommand extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasType() => $_has(1);
   @$pb.TagNumber(2)
-  void clearType() => clearField(2);
+  void clearType() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $fixnum.Int64 get startedAt => $_getI64(2);
@@ -1203,7 +1269,7 @@ class BufferCommand extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasStartedAt() => $_has(2);
   @$pb.TagNumber(3)
-  void clearStartedAt() => clearField(3);
+  void clearStartedAt() => $_clearField(3);
 
   @$pb.TagNumber(4)
   $fixnum.Int64 get elapsedMs => $_getI64(3);
@@ -1212,10 +1278,10 @@ class BufferCommand extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $core.bool hasElapsedMs() => $_has(3);
   @$pb.TagNumber(4)
-  void clearElapsedMs() => clearField(4);
+  void clearElapsedMs() => $_clearField(4);
 
   @$pb.TagNumber(5)
-  $core.Map<$core.String, $core.String> get data => $_getMap(4);
+  $pb.PbMap<$core.String, $core.String> get data => $_getMap(4);
 }
 
 enum BufferControl_Control {
@@ -1283,7 +1349,7 @@ class BufferControl extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  BufferControl clone() => BufferControl()..mergeFromMessage(this);
+  BufferControl clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   BufferControl copyWith(void Function(BufferControl) updates) =>
       super.copyWith((message) => updates(message as BufferControl))
@@ -1301,18 +1367,30 @@ class BufferControl extends $pb.GeneratedMessage {
       $pb.GeneratedMessage.$_defaultFor<BufferControl>(create);
   static BufferControl? _defaultInstance;
 
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
+  @$pb.TagNumber(6)
   BufferControl_Control whichControl() =>
       _BufferControl_ControlByTag[$_whichOneof(0)]!;
-  void clearControl() => clearField($_whichOneof(0));
+  @$pb.TagNumber(1)
+  @$pb.TagNumber(2)
+  @$pb.TagNumber(3)
+  @$pb.TagNumber(4)
+  @$pb.TagNumber(5)
+  @$pb.TagNumber(6)
+  void clearControl() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
   LoadCommands get load => $_getN(0);
   @$pb.TagNumber(1)
-  set load(LoadCommands value) => setField(1, value);
+  set load(LoadCommands value) => $_setField(1, value);
   @$pb.TagNumber(1)
   $core.bool hasLoad() => $_has(0);
   @$pb.TagNumber(1)
-  void clearLoad() => clearField(1);
+  void clearLoad() => $_clearField(1);
   @$pb.TagNumber(1)
   LoadCommands ensureLoad() => $_ensure(0);
 
@@ -1323,7 +1401,7 @@ class BufferControl extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasPause() => $_has(1);
   @$pb.TagNumber(2)
-  void clearPause() => clearField(2);
+  void clearPause() => $_clearField(2);
 
   @$pb.TagNumber(3)
   $core.bool get resume => $_getBF(2);
@@ -1332,7 +1410,7 @@ class BufferControl extends $pb.GeneratedMessage {
   @$pb.TagNumber(3)
   $core.bool hasResume() => $_has(2);
   @$pb.TagNumber(3)
-  void clearResume() => clearField(3);
+  void clearResume() => $_clearField(3);
 
   @$pb.TagNumber(4)
   $core.bool get skip => $_getBF(3);
@@ -1341,7 +1419,7 @@ class BufferControl extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   $core.bool hasSkip() => $_has(3);
   @$pb.TagNumber(4)
-  void clearSkip() => clearField(4);
+  void clearSkip() => $_clearField(4);
 
   @$pb.TagNumber(5)
   $core.bool get clear_5 => $_getBF(4);
@@ -1350,16 +1428,16 @@ class BufferControl extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   $core.bool hasClear_5() => $_has(4);
   @$pb.TagNumber(5)
-  void clearClear_5() => clearField(5);
+  void clearClear_5() => $_clearField(5);
 
   @$pb.TagNumber(6)
   TriggerStartTour get triggerStart => $_getN(5);
   @$pb.TagNumber(6)
-  set triggerStart(TriggerStartTour value) => setField(6, value);
+  set triggerStart(TriggerStartTour value) => $_setField(6, value);
   @$pb.TagNumber(6)
   $core.bool hasTriggerStart() => $_has(5);
   @$pb.TagNumber(6)
-  void clearTriggerStart() => clearField(6);
+  void clearTriggerStart() => $_clearField(6);
   @$pb.TagNumber(6)
   TriggerStartTour ensureTriggerStart() => $_ensure(5);
 }
@@ -1388,13 +1466,13 @@ class LoadCommands extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'LoadCommands',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'robotcontrol'),
       createEmptyInstance: create)
-    ..pc<BufferCommand>(1, _omitFieldNames ? '' : 'commands', $pb.PbFieldType.PM,
+    ..pPM<BufferCommand>(1, _omitFieldNames ? '' : 'commands',
         subBuilder: BufferCommand.create)
     ..aOB(2, _omitFieldNames ? '' : 'clearExisting')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  LoadCommands clone() => LoadCommands()..mergeFromMessage(this);
+  LoadCommands clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   LoadCommands copyWith(void Function(LoadCommands) updates) =>
       super.copyWith((message) => updates(message as LoadCommands))
@@ -1413,7 +1491,7 @@ class LoadCommands extends $pb.GeneratedMessage {
   static LoadCommands? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $core.List<BufferCommand> get commands => $_getList(0);
+  $pb.PbList<BufferCommand> get commands => $_getList(0);
 
   @$pb.TagNumber(2)
   $core.bool get clearExisting => $_getBF(1);
@@ -1422,7 +1500,7 @@ class LoadCommands extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasClearExisting() => $_has(1);
   @$pb.TagNumber(2)
-  void clearClearExisting() => clearField(2);
+  void clearClearExisting() => $_clearField(2);
 }
 
 /// UI Control - trigger actions on tablet
@@ -1452,7 +1530,7 @@ class TriggerStartTour extends $pb.GeneratedMessage {
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  TriggerStartTour clone() => TriggerStartTour()..mergeFromMessage(this);
+  TriggerStartTour clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   TriggerStartTour copyWith(void Function(TriggerStartTour) updates) =>
       super.copyWith((message) => updates(message as TriggerStartTour))
@@ -1477,7 +1555,7 @@ class TriggerStartTour extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasSequenceId() => $_has(0);
   @$pb.TagNumber(1)
-  void clearSequenceId() => clearField(1);
+  void clearSequenceId() => $_clearField(1);
 }
 
 /// Crowd logic config
@@ -1506,12 +1584,12 @@ class CrowdConfig extends $pb.GeneratedMessage {
       _omitMessageNames ? '' : 'CrowdConfig',
       package: const $pb.PackageName(_omitMessageNames ? '' : 'robotcontrol'),
       createEmptyInstance: create)
-    ..a<$core.double>(1, _omitFieldNames ? '' : 'safeDistanceMeters', $pb.PbFieldType.OD)
-    ..a<$core.double>(2, _omitFieldNames ? '' : 'rampRate', $pb.PbFieldType.OD)
+    ..aD(1, _omitFieldNames ? '' : 'safeDistanceMeters')
+    ..aD(2, _omitFieldNames ? '' : 'rampRate')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
-  CrowdConfig clone() => CrowdConfig()..mergeFromMessage(this);
+  CrowdConfig clone() => deepCopy();
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
   CrowdConfig copyWith(void Function(CrowdConfig) updates) =>
       super.copyWith((message) => updates(message as CrowdConfig))
@@ -1536,7 +1614,7 @@ class CrowdConfig extends $pb.GeneratedMessage {
   @$pb.TagNumber(1)
   $core.bool hasSafeDistanceMeters() => $_has(0);
   @$pb.TagNumber(1)
-  void clearSafeDistanceMeters() => clearField(1);
+  void clearSafeDistanceMeters() => $_clearField(1);
 
   @$pb.TagNumber(2)
   $core.double get rampRate => $_getN(1);
@@ -1545,7 +1623,7 @@ class CrowdConfig extends $pb.GeneratedMessage {
   @$pb.TagNumber(2)
   $core.bool hasRampRate() => $_has(1);
   @$pb.TagNumber(2)
-  void clearRampRate() => clearField(2);
+  void clearRampRate() => $_clearField(2);
 }
 
 const $core.bool _omitFieldNames =

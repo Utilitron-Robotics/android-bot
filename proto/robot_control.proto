@@ -91,10 +91,12 @@ message RobotStatus {
   int32 nav_status = 2;
   string nav_goal = 3;
   int32 battery = 4;
-  string safety_zone = 5;
+  string safety_zone = 5;      // "STOP", "CREEP", "WARN", "CLEAR"
   Pose2D pose = 6;
   double linear_velocity = 7;
   double angular_velocity = 8;
+  int64 data_age_ms = 9;       // How old is the robot data (-1 = never received)
+  double min_range_meters = 10; // Actual LIDAR minimum range for gauge
 }
 
 message Pose2D {

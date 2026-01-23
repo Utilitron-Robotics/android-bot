@@ -46,6 +46,24 @@ const ClientMessage$json = {
       '9': 0,
       '10': 'bufferControl'
     },
+    {
+      '1': 'webrtc_signal',
+      '3': 4,
+      '4': 1,
+      '5': 11,
+      '6': '.robotcontrol.WebRTCSignal',
+      '9': 0,
+      '10': 'webrtcSignal'
+    },
+    {
+      '1': 'request_map_stream',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.robotcontrol.RequestMapStream',
+      '9': 0,
+      '10': 'requestMapStream'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -57,8 +75,10 @@ final $typed_data.Uint8List clientMessageDescriptor = $convert.base64Decode(
     'Cg1DbGllbnRNZXNzYWdlEjEKB2NvbW1hbmQYASABKAsyFS5yb2JvdGNvbnRyb2wuQ29tbWFuZE'
     'gAUgdjb21tYW5kEk0KEWhlYXJ0YmVhdF9yZXF1ZXN0GAIgASgLMh4ucm9ib3Rjb250cm9sLkhl'
     'YXJ0YmVhdFJlcXVlc3RIAFIQaGVhcnRiZWF0UmVxdWVzdBJECg5idWZmZXJfY29udHJvbBgDIA'
-    'EoCzIbLnJvYm90Y29udHJvbC5CdWZmZXJDb250cm9sSABSDWJ1ZmZlckNvbnRyb2xCCQoHbWVz'
-    'c2FnZQ==');
+    'EoCzIbLnJvYm90Y29udHJvbC5CdWZmZXJDb250cm9sSABSDWJ1ZmZlckNvbnRyb2wSQQoNd2Vi'
+    'cnRjX3NpZ25hbBgEIAEoCzIaLnJvYm90Y29udHJvbC5XZWJSVENTaWduYWxIAFIMd2VicnRjU2'
+    'lnbmFsEk4KEnJlcXVlc3RfbWFwX3N0cmVhbRgFIAEoCzIeLnJvYm90Y29udHJvbC5SZXF1ZXN0'
+    'TWFwU3RyZWFtSABSEHJlcXVlc3RNYXBTdHJlYW1CCQoHbWVzc2FnZQ==');
 
 @$core.Deprecated('Use serverMessageDescriptor instead')
 const ServerMessage$json = {
@@ -100,6 +120,15 @@ const ServerMessage$json = {
       '9': 0,
       '10': 'bufferState'
     },
+    {
+      '1': 'webrtc_signal',
+      '3': 5,
+      '4': 1,
+      '5': 11,
+      '6': '.robotcontrol.WebRTCSignal',
+      '9': 0,
+      '10': 'webrtcSignal'
+    },
   ],
   '8': [
     {'1': 'message'},
@@ -112,8 +141,53 @@ final $typed_data.Uint8List serverMessageDescriptor = $convert.base64Decode(
     'JlYXRIAFIJaGVhcnRiZWF0EkQKDmNvbW1hbmRfcmVzdWx0GAIgASgLMhsucm9ib3Rjb250cm9s'
     'LkNvbW1hbmRSZXN1bHRIAFINY29tbWFuZFJlc3VsdBI+Cgxyb2JvdF9zdGF0dXMYAyABKAsyGS'
     '5yb2JvdGNvbnRyb2wuUm9ib3RTdGF0dXNIAFILcm9ib3RTdGF0dXMSPgoMYnVmZmVyX3N0YXRl'
-    'GAQgASgLMhkucm9ib3Rjb250cm9sLkJ1ZmZlclN0YXRlSABSC2J1ZmZlclN0YXRlQgkKB21lc3'
-    'NhZ2U=');
+    'GAQgASgLMhkucm9ib3Rjb250cm9sLkJ1ZmZlclN0YXRlSABSC2J1ZmZlclN0YXRlEkEKDXdlYn'
+    'J0Y19zaWduYWwYBSABKAsyGi5yb2JvdGNvbnRyb2wuV2ViUlRDU2lnbmFsSABSDHdlYnJ0Y1Np'
+    'Z25hbEIJCgdtZXNzYWdl');
+
+@$core.Deprecated('Use webRTCSignalDescriptor instead')
+const WebRTCSignal$json = {
+  '1': 'WebRTCSignal',
+  '2': [
+    {'1': 'sdp', '3': 1, '4': 1, '5': 9, '9': 0, '10': 'sdp'},
+    {'1': 'candidate', '3': 2, '4': 1, '5': 9, '9': 0, '10': 'candidate'},
+    {
+      '1': 'candidate_mid',
+      '3': 3,
+      '4': 1,
+      '5': 9,
+      '9': 0,
+      '10': 'candidateMid'
+    },
+    {
+      '1': 'candidate_mline_index',
+      '3': 4,
+      '4': 1,
+      '5': 5,
+      '9': 0,
+      '10': 'candidateMlineIndex'
+    },
+  ],
+  '8': [
+    {'1': 'signal'},
+  ],
+};
+
+/// Descriptor for `WebRTCSignal`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List webRTCSignalDescriptor = $convert.base64Decode(
+    'CgxXZWJSVENTaWduYWwSEgoDc2RwGAEgASgJSABSA3NkcBIeCgljYW5kaWRhdGUYAiABKAlIAF'
+    'IJY2FuZGlkYXRlEiUKDWNhbmRpZGF0ZV9taWQYAyABKAlIAFIMY2FuZGlkYXRlTWlkEjQKFWNh'
+    'bmRpZGF0ZV9tbGluZV9pbmRleBgEIAEoBUgAUhNjYW5kaWRhdGVNbGluZUluZGV4QggKBnNpZ2'
+    '5hbA==');
+
+@$core.Deprecated('Use requestMapStreamDescriptor instead')
+const RequestMapStream$json = {
+  '1': 'RequestMapStream',
+};
+
+/// Descriptor for `RequestMapStream`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List requestMapStreamDescriptor =
+    $convert.base64Decode('ChBSZXF1ZXN0TWFwU3RyZWFt');
 
 @$core.Deprecated('Use commandDescriptor instead')
 const Command$json = {
@@ -246,6 +320,8 @@ const RobotStatus$json = {
     },
     {'1': 'linear_velocity', '3': 7, '4': 1, '5': 1, '10': 'linearVelocity'},
     {'1': 'angular_velocity', '3': 8, '4': 1, '5': 1, '10': 'angularVelocity'},
+    {'1': 'data_age_ms', '3': 9, '4': 1, '5': 3, '10': 'dataAgeMs'},
+    {'1': 'min_range_meters', '3': 10, '4': 1, '5': 1, '10': 'minRangeMeters'},
   ],
 };
 
@@ -256,7 +332,8 @@ final $typed_data.Uint8List robotStatusDescriptor = $convert.base64Decode(
     'eRgEIAEoBVIHYmF0dGVyeRIfCgtzYWZldHlfem9uZRgFIAEoCVIKc2FmZXR5Wm9uZRIoCgRwb3'
     'NlGAYgASgLMhQucm9ib3Rjb250cm9sLlBvc2UyRFIEcG9zZRInCg9saW5lYXJfdmVsb2NpdHkY'
     'ByABKAFSDmxpbmVhclZlbG9jaXR5EikKEGFuZ3VsYXJfdmVsb2NpdHkYCCABKAFSD2FuZ3VsYX'
-    'JWZWxvY2l0eQ==');
+    'JWZWxvY2l0eRIeCgtkYXRhX2FnZV9tcxgJIAEoA1IJZGF0YUFnZU1zEigKEG1pbl9yYW5nZV9t'
+    'ZXRlcnMYCiABKAFSDm1pblJhbmdlTWV0ZXJz');
 
 @$core.Deprecated('Use pose2DDescriptor instead')
 const Pose2D$json = {

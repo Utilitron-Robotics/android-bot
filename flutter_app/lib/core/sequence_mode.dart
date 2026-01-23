@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -890,7 +891,7 @@ class SequenceManager extends ChangeNotifier {
       final waypointName = wp is String
           ? wp
           : (wp as Map<String, dynamic>)['name'] as String? ?? '';
-      final dwellTime = dwellTimes[waypointName] as int? ?? 0;
+      final dwellTime = (dwellTimes[waypointName] as num?)?.toInt() ?? 0;
 
       // Check if waypoint has additional data
       if (wp is Map<String, dynamic>) {
@@ -898,9 +899,9 @@ class SequenceManager extends ChangeNotifier {
           waypoint: waypointName,
           speakText: wp['speak_text'] as String?,
           displayUrl: wp['display_url'] as String?,
-          displayDuration: wp['display_duration'] as int? ?? 0,
+          displayDuration: (wp['display_duration'] as num?)?.toInt() ?? 0,
           waitSeconds:
-              dwellTime > 0 ? dwellTime : (wp['wait_seconds'] as int? ?? 0),
+              dwellTime > 0 ? dwellTime : ((wp['wait_seconds'] as num?)?.toInt() ?? 0),
         );
       }
       return SequenceStop(
@@ -916,12 +917,12 @@ class SequenceManager extends ChangeNotifier {
       stops: stops,
       loop: cloudData['loop'] as bool? ?? false,
       announceArrival: cloudData['announce_arrival'] as bool? ?? false,
-      restAtEndSeconds: cloudData['rest_at_end_seconds'] as int? ?? 0,
+      restAtEndSeconds: (cloudData['rest_at_end_seconds'] as num?)?.toInt() ?? 0,
       introText: cloudData['intro_text'] as String?,
       outroText: cloudData['outro_text'] as String?,
       startWaypoint: cloudData['start_waypoint'] as String?,
       endWaypoint: cloudData['end_waypoint'] as String?,
-      modifiedAt: cloudData['modified_at'] as int?,
+      modifiedAt: (cloudData['modified_at'] as num?)?.toInt(),
       // Migrate from old motion_trigger_start field
       awaitVisitorAtStart: cloudData['await_visitor_at_start'] as bool? ??
           cloudData['motion_trigger_start'] as bool? ??
@@ -1230,6 +1231,13 @@ class SequenceManager extends ChangeNotifier {
       sequence: sequence,
       callback: SequenceCallbackAdapter(_callback!),
     );
+
+    // On native platforms (not web), gRPC relay handles recovery
+    // Set flag to prevent Flutter from racing with relay's recovery sequence
+    if (!kIsWeb) {
+      _activeSequenceTask!.relayHandlesRecovery = true;
+      debugPrint('SequenceManager: Relay handles recovery (gRPC mode)');
+    }
 
     _activeSequenceTask!.addListener(_onSequenceTaskChanged);
 

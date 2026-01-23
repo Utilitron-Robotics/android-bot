@@ -249,3 +249,31 @@ The user debugs with:
 - Think through consequences before suggesting fixes
 - When in doubt, ask what features are required
 - Don't repeat suggestions that have already been tried
+
+### CRITICAL - READ EVERY SESSION:
+- **MAKE IT WORK MODE** - Demo today. Fix it, ship it, no debates. Priority is working software.
+- **User ALWAYS does clean rebuild** - NEVER suggest "try rebuilding" or "did you rebuild"
+- **Fix ONLY what is asked** - Do NOT rewrite surrounding code, add "improvements", or assume you know better
+- **Listen to the user** - When they say "fix X", fix X. Nothing else.
+- **No over-engineering** - Simple targeted fixes, not architectural rewrites
+- **Arrogance without competence is unacceptable** - If you don't understand, ask. Don't pretend.
+
+---
+
+## MemoRable MCP - Persistent Memory
+
+This project has MCP tools connected via `.mcp.json` (stdio transport, REST mode to ALB).
+
+**Available tools**: `store_memory`, `recall`, `get_briefing`, `list_loops`, `close_loop`, `set_context`, `whats_relevant`, `recall_vote`, etc.
+
+**NO direct HTTP calls** to the memory API. All memory ops go through MCP tools.
+
+**ALB endpoint** (for reference, not direct use):
+```
+http://memorable-alb-1679440696.us-west-2.elb.amazonaws.com
+```
+
+**Domains we own**: memorable.chat, memorable.codes, memorable.cool, memorable.site
+**NOT ours**: memorable.dev - never use that domain.
+
+**Session-start hook** loads project context, open loops, and relevant docs automatically.

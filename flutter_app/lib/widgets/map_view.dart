@@ -54,6 +54,7 @@ class _MapViewState extends State<MapView> {
   bool _lastKnownConnected = false;
   WsConnectionState? _lastWsState;
   String? _httpBaseUrl;  // HTTP endpoint for map (e.g., http://192.168.1.100:8765)
+  bool _refreshRequested = false;  // Track if we've already requested a refresh on 404
 
   // Robot pose on map
   double _robotX = 0;
@@ -235,10 +236,17 @@ class _MapViewState extends State<MapView> {
         final msg = data['msg'];
         if (msg != null) {
           _handleMapMessage(msg);
+          _refreshRequested = false;  // Reset on success
         }
       } else if (response.statusCode == 404) {
-        // No map cached yet - this is normal on startup
-        debugPrint('MapView: No map cached on relay yet');
+        // No map cached yet - trigger a refresh to kickstart subscription
+        if (!_refreshRequested) {
+          debugPrint('MapView: No map cached on relay, requesting refresh...');
+          _refreshRequested = true;
+          http.post(Uri.parse('$_httpBaseUrl/map/refresh')).catchError((e) {
+            debugPrint('MapView: Refresh request failed: $e');
+          });
+        }
       } else {
         debugPrint('MapView: HTTP map fetch failed: ${response.statusCode}');
       }
@@ -333,9 +341,9 @@ class _MapViewState extends State<MapView> {
 
   void _handleMapMessage(dynamic data) async {
     if (data == null) return;
-    
-    MapInfo newMapInfo;
-    List<int> gridData;
+
+    MapInfo? newMapInfo;
+    ui.Image? image;
 
     // Adapt to either legacy message (Map<String, dynamic>) or new model
     if (data is model.OccupancyGrid) {
@@ -346,34 +354,65 @@ class _MapViewState extends State<MapView> {
         originX: data.info.origin.position.x,
         originY: data.info.origin.position.y,
       );
-      gridData = data.data;
+      image = await _occupancyGridToImage(data.data, newMapInfo.width, newMapInfo.height);
     } else {
-       // Legacy path
+      // Legacy path - handle both raw occupancy grid and PNG-encoded data
       try {
+        final mapData = data['data'];
         final info = data['info'] as Map<String, dynamic>?;
-        final mapDataList = data['data'] as List?;
-        if (info == null || mapDataList == null) return;
 
-        newMapInfo = MapInfo(
-          width: info['width'] as int? ?? 0,
-          height: info['height'] as int? ?? 0,
-          resolution: (info['resolution'] as num?)?.toDouble() ?? 0.05,
-          originX: (info['origin']?['position']?['x'] as num?)?.toDouble() ?? 0,
-          originY: (info['origin']?['position']?['y'] as num?)?.toDouble() ?? 0,
-        );
-        gridData = mapDataList.cast<int>();
+        if (mapData is String) {
+          // PNG-encoded map data (from fragmented/compressed subscription)
+          final pngBytes = base64Decode(mapData);
+          final codec = await ui.instantiateImageCodec(Uint8List.fromList(pngBytes));
+          final frame = await codec.getNextFrame();
+          image = frame.image;
+
+          // Extract map info if available
+          if (info != null) {
+            newMapInfo = MapInfo(
+              width: info['width'] as int? ?? image.width,
+              height: info['height'] as int? ?? image.height,
+              resolution: (info['resolution'] as num?)?.toDouble() ?? 0.05,
+              originX: (info['origin']?['position']?['x'] as num?)?.toDouble() ?? 0,
+              originY: (info['origin']?['position']?['y'] as num?)?.toDouble() ?? 0,
+            );
+          } else {
+            newMapInfo = MapInfo(
+              width: image.width,
+              height: image.height,
+              resolution: 0.05,
+              originX: 0,
+              originY: 0,
+            );
+          }
+        } else if (mapData is List) {
+          // Raw occupancy grid data
+          if (info == null) return;
+          newMapInfo = MapInfo(
+            width: info['width'] as int? ?? 0,
+            height: info['height'] as int? ?? 0,
+            resolution: (info['resolution'] as num?)?.toDouble() ?? 0.05,
+            originX: (info['origin']?['position']?['x'] as num?)?.toDouble() ?? 0,
+            originY: (info['origin']?['position']?['y'] as num?)?.toDouble() ?? 0,
+          );
+          final gridData = mapData.cast<int>();
+          image = await _occupancyGridToImage(gridData, newMapInfo.width, newMapInfo.height);
+        } else {
+          debugPrint('MapView: Unknown map data type: ${mapData.runtimeType}');
+          return;
+        }
       } catch (e) {
-         if (mounted) setState(() => _error = 'Legacy map parse error: $e');
-         return;
+        debugPrint('MapView: Map parse error: $e');
+        if (mounted) setState(() => _error = 'Map parse error: $e');
+        return;
       }
     }
 
+    if (newMapInfo == null || image == null) return;
     if (newMapInfo.width == 0 || newMapInfo.height == 0) return;
-    
-    _mapInfo = newMapInfo;
 
-    // Convert occupancy grid to image
-    final image = await _occupancyGridToImage(gridData, newMapInfo.width, newMapInfo.height);
+    _mapInfo = newMapInfo;
 
     if (mounted) {
       final oldImage = _mapImage;

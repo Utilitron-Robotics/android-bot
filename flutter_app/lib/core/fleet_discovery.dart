@@ -254,6 +254,20 @@ class FleetDiscovery extends ChangeNotifier {
     return null;
   }
 
+  /// Get gateway IP on macOS
+  Future<String?> getGatewayIp() async {
+    if (!Platform.isMacOS) return null;
+    try {
+      final result = await Process.run('ipconfig', ['getoption', 'en0', 'router']);
+      if (result.exitCode == 0) {
+        return (result.stdout as String).trim();
+      }
+    } catch (e) {
+      debugPrint('Failed to get gateway IP: $e');
+    }
+    return null;
+  }
+
   /// Connect to a WiFi network (macOS)
   Future<WifiConnectResult> connectToWifi(String ssid,
       {String? password}) async {

@@ -159,6 +159,18 @@ class BufferSequenceExecutor extends ChangeNotifier {
         // Clear countdown on tablet
         _bufferClient.updateCountdown(0);
       }
+
+      // BACKGROUND FIX: If button_standby was running but is now gone (current=null),
+      // and no commands were loaded after (pending=0), the visitor pressed the button
+      // while the Flutter app was in background and the completion event was lost.
+      if (_awaitingVisitorAtStart &&
+          _buttonStandbyConfirmed &&
+          _status == SequenceExecutorStatus.running &&
+          state.pendingCount == 0) {
+        debugPrint('BufferSequenceExecutor: Button pressed while app was in background - resuming tour');
+        resumeFromVisitor();
+        return;
+      }
     }
 
     // Check for paused state
@@ -293,6 +305,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
       debugPrint('BufferSequenceExecutor: Relay showing START TOUR button - awaiting visitor');
       _currentPhase = SequencePhase.awaitingVisitor;
       _awaitingVisitorAtStart = true;
+      _buttonStandbyConfirmed = true;
       _currentWaitDurationMs = 0;
     } else {
       _currentWaitDurationMs = 0;
@@ -508,6 +521,10 @@ class BufferSequenceExecutor extends ChangeNotifier {
   // Track if we're waiting for visitor at start
   bool _awaitingVisitorAtStart = false;
 
+  // Track if button_standby was confirmed started on relay
+  // Used to detect when button was pressed while app was in background
+  bool _buttonStandbyConfirmed = false;
+
   /// True if currently waiting for visitor tap at start
   bool get isAwaitingVisitor => _awaitingVisitorAtStart;
 
@@ -534,6 +551,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _needsStateRestore = false; // We have fresh state, no restore needed
     _reconnectTimestamp = 0; // Clear reconnect filter for fresh sequence
     _awaitingVisitorAtStart = false;
+    _buttonStandbyConfirmed = false;
 
     // Save sequence ID for reconnect recovery
     _saveRunningSequenceId(sequence.id);
@@ -632,6 +650,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     debugPrint('BufferSequenceExecutor: ✓ Visitor triggered! Loading tour commands...');
     _awaitingVisitorAtStart = false;
+    _buttonStandbyConfirmed = false;
     _currentPhase = SequencePhase.navigating;
 
     // Load the rest of the sequence (skip nav to start since we're already there)
@@ -870,6 +889,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _currentStopIndex = -1;
     _navRetryCount = 0;
     _awaitingVisitorAtStart = false;
+    _buttonStandbyConfirmed = false;
     _stopCountdown();
     _needsStateRestore = true; // Ready to restore on next reconnect
 

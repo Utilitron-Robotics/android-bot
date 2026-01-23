@@ -108,25 +108,18 @@ object ChassisProtocol {
         type = "std_msgs/Bool"  // True when person detected
     ))
 
+    /**
+     * Subscribe to map WITH fragmentation and compression per chassis protocol docs.
+     * Robot sends PNG-compressed fragments (6000 byte chunks).
+     * Relay reassembles fragments before caching.
+     */
     fun subscribeMap(): String = toJson(MapSubscribeMsg(
         op = OP_SUBSCRIBE,
         id = "get_map",
         topic = TOPIC_MAP,
         type = "nav_msgs/OccupancyGrid",
         fragmentSize = 6000,
-        compression = "png"
-    ))
-
-    /**
-     * Subscribe to map WITHOUT fragmentation/compression.
-     * Returns raw OccupancyGrid that Flutter can parse directly.
-     * Uses throttle_rate to limit map updates to every 5 seconds.
-     */
-    fun subscribeMapSimple(): String = toJson(SubscribeMsg(
-        op = OP_SUBSCRIBE,
-        id = "get_map_simple",
-        topic = TOPIC_MAP,
-        type = "nav_msgs/OccupancyGrid",
+        compression = "png",
         throttleRate = 5000
     ))
 
@@ -247,7 +240,8 @@ data class MapSubscribeMsg(
     val topic: String,
     val type: String,
     @SerializedName("fragment_size") val fragmentSize: Int,
-    val compression: String
+    val compression: String,
+    @SerializedName("throttle_rate") val throttleRate: Int? = null
 )
 
 data class UnsubscribeMsg(

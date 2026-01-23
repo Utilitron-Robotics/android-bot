@@ -68,6 +68,11 @@ class SequenceTaskMode extends TaskMode {
   final Sequence sequence;
   final SequenceTaskCallback callback;
 
+  /// When true, the relay handles recovery (backup/spin/nudge) on nav failure.
+  /// Flutter should NOT retry navigate commands - let relay handle it.
+  /// Set to true when connected via gRPC to avoid racing with relay recovery.
+  bool relayHandlesRecovery = false;
+
   // Current state
   int _currentStopIndex = -1;
   SequenceTaskPhase _phase = SequenceTaskPhase.starting;
@@ -330,14 +335,19 @@ class SequenceTaskMode extends TaskMode {
 
       case NavStatus.failed:
         if (_waitingForArrival && _pendingWaypoint != null) {
-          debugPrint(
-              'SequenceTaskMode: Navigation reported failure (604) - delegating to CommandManager');
-          // We let the CommandManager handle the retry logic based on the failed status update
-          // DO NOT manually retry here
-          if (currentCommand != null) {
-            // This will trigger CommandManager's retry logic if retries remain
-            commandManager?.commandFailed(
-                currentCommand!.id, "Robot reported navigation failure (604)");
+          if (relayHandlesRecovery) {
+            // gRPC mode: Relay handles recovery (backup/spin/nudge) - don't retry here
+            // The relay will retry navigation after its recovery sequence completes
+            debugPrint(
+                'SequenceTaskMode: Navigation failed (604) - relay handles recovery, waiting...');
+          } else {
+            // WebSocket mode: No relay recovery, let CommandManager retry
+            debugPrint(
+                'SequenceTaskMode: Navigation reported failure (604) - delegating to CommandManager');
+            if (currentCommand != null) {
+              commandManager?.commandFailed(
+                  currentCommand!.id, "Robot reported navigation failure (604)");
+            }
           }
         }
         break;
@@ -353,13 +363,19 @@ class SequenceTaskMode extends TaskMode {
                 'SequenceTaskMode: Ignoring 602 - robot never started moving (expected cancel of previous task)');
             break;
           }
-          debugPrint(
-              'SequenceTaskMode: Navigation cancelled (after robot was moving)');
 
-          if (currentCommand != null) {
-            // This will trigger CommandManager's retry logic if retries remain
-            commandManager?.commandFailed(currentCommand!.id,
-                "Robot reported navigation cancellation (602)");
+          if (relayHandlesRecovery) {
+            // gRPC mode: Relay may cancel during recovery sequence - don't treat as failure
+            debugPrint(
+                'SequenceTaskMode: Navigation cancelled (602) - relay may be recovering, waiting...');
+          } else {
+            // WebSocket mode: No relay recovery, treat as failure
+            debugPrint(
+                'SequenceTaskMode: Navigation cancelled (after robot was moving)');
+            if (currentCommand != null) {
+              commandManager?.commandFailed(currentCommand!.id,
+                  "Robot reported navigation cancellation (602)");
+            }
           }
         }
         break;

@@ -60,7 +60,6 @@ class _JoystickControlState extends State<JoystickControl> {
   bool _obstacleLeft = false;
   bool _obstacleRight = false;
   double _minFrontRange = double.infinity;
-  StreamSubscription? _scanSubscription;
   StreamSubscription? _grpcStatusSubscription;
   RobotSpeedMode _robotSpeedMode = RobotSpeedMode.safetyMed;
   bool _speedModeLoading = false;
@@ -90,7 +89,6 @@ class _JoystickControlState extends State<JoystickControl> {
     super.initState();
     AudioAnnouncer().init();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _subscribeToScan();
       _subscribeToGrpcStatus();
       _querySpeedMode();
     });
@@ -174,92 +172,7 @@ class _JoystickControlState extends State<JoystickControl> {
   void dispose() {
     _sendTimer?.cancel();
     _grpcStatusSubscription?.cancel();
-    // Unsubscribe from /scan topic before cancelling listener
-    if (_scanSubscription != null) {
-      try {
-        final robot = context.read<RobotConnection>();
-        if (robot.isConnected) {
-          robot.client.unsubscribe(topic: '/scan');
-        }
-      } catch (e) {
-        // Context may not be available during dispose
-      }
-      _scanSubscription!.cancel();
-      _scanSubscription = null;
-    }
     super.dispose();
-  }
-
-  void _subscribeToScan() {
-    final robot = context.read<RobotConnection>();
-    if (!robot.isConnected) return;
-
-    // Subscribe to laser scan for obstacle detection
-    robot.client.send({
-      'op': 'subscribe',
-      'topic': '/scan',
-      'type': 'sensor_msgs/LaserScan',
-      'throttle_rate': 150, // ~6Hz for responsive safety
-      'queue_length': 1,
-    });
-
-    _scanSubscription = robot.client.messages.listen((msg) {
-      if (msg['topic'] == '/scan') {
-        _handleLaserScan(msg['msg']);
-      }
-    });
-  }
-
-  void _handleLaserScan(dynamic data) {
-    if (data == null) return;
-
-    final ranges = data['ranges'] as List?;
-    if (ranges == null || ranges.isEmpty) return;
-
-    final numRanges = ranges.length;
-    // Front arc: center ~60 degrees
-    final frontStart = (numRanges * 0.4).round();
-    final frontEnd = (numRanges * 0.6).round();
-    // Left arc
-    final leftStart = (numRanges * 0.6).round();
-    final leftEnd = (numRanges * 0.8).round();
-    // Right arc
-    final rightStart = (numRanges * 0.2).round();
-    final rightEnd = (numRanges * 0.4).round();
-
-    double minFront = double.infinity;
-    double minLeft = double.infinity;
-    double minRight = double.infinity;
-
-    for (var i = frontStart; i < frontEnd; i++) {
-      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
-      if (r > 0.05 && r < minFront) minFront = r;
-    }
-    for (var i = leftStart; i < leftEnd; i++) {
-      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
-      if (r > 0.05 && r < minLeft) minLeft = r;
-    }
-    for (var i = rightStart; i < rightEnd; i++) {
-      final r = (ranges[i] as num?)?.toDouble() ?? double.infinity;
-      if (r > 0.05 && r < minRight) minRight = r;
-    }
-
-    final wasObstacle = _obstacleAhead;
-    _obstacleAhead = minFront < creepDistance;  // Anything in creep zone or closer
-    _obstacleLeft = minLeft < creepDistance;
-    _obstacleRight = minRight < creepDistance;
-    _minFrontRange = minFront;
-
-    // Announce when entering danger zones - only when actively using joystick
-    if (_slamSafe && _audioEnabled && _sendTimer != null) {
-      if (minFront < stopDistance && !wasObstacle) {
-        AudioAnnouncer().speak('Stop! Too close!');
-      } else if (_obstacleAhead && !wasObstacle) {
-        AudioAnnouncer().speak('Obstacle ahead. Creeping.');
-      }
-    }
-
-    if (mounted) setState(() {});
   }
 
   @override

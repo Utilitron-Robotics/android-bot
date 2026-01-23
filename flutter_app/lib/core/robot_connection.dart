@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'rosbridge_client.dart';
+import 'platform_transport.dart';
 import 'task_mode.dart';
 import '../services/robot_introspection.dart';
 import '../services/audio_announcer.dart';
@@ -11,9 +12,17 @@ import '../services/sequence_executor.dart';
 enum RobotConnectionState { disconnected, connecting, connected, error }
 
 /// Manages robot connection and discovered capabilities
+///
+/// Platform-aware transport:
+/// - Web: WebSocket via RosbridgeClient
+/// - Native: gRPC via PlatformTransport (with WebSocket fallback for discovery)
 class RobotConnection extends ChangeNotifier implements CommandExecutor {
   final RosbridgeClient _client = RosbridgeClient();
   RobotIntrospection? _introspection;
+
+  // Platform transport - used on native for commands
+  PlatformTransport? _platformTransport;
+  PlatformTransport? get platformTransport => _platformTransport;
 
   RobotConnectionState _state = RobotConnectionState.disconnected;
   String _robotUrl = '';
@@ -22,7 +31,11 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   // Subscriptions for live data
   StreamSubscription? _statusSubscription;
+  StreamSubscription? _platformStatusSub;
   RobotStatus _status = RobotStatus();
+
+  // When true, skip status subscription (gRPC handles it)
+  bool _skipStatusSubscription = false;
 
   // Connection health tracking
   DateTime? _lastStatusUpdate;
@@ -135,11 +148,18 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   /// Connect to robot using connectUrl, but save displayUrl for the UI
   /// This allows HTTP mode to connect via WebSocket but show HTTP URL to user
-  Future<void> connectWithDisplayUrl(String connectUrl, String displayUrl) async {
-    if (_state == RobotConnectionState.connecting) return;
+  /// Set capabilityOnly=true when gRPC handles status (skips /robot_status subscription)
+  Future<void> connectWithDisplayUrl(String connectUrl, String displayUrl, {bool capabilityOnly = false}) async {
+    _skipStatusSubscription = capabilityOnly;
+    debugPrint('RobotConnection: connectWithDisplayUrl called - connectUrl=$connectUrl, displayUrl=$displayUrl');
+    if (_state == RobotConnectionState.connecting) {
+      debugPrint('RobotConnection: Already connecting, skipping');
+      return;
+    }
 
     // CRITICAL: Disconnect from any existing robot first!
     if (_state == RobotConnectionState.connected) {
+      debugPrint('RobotConnection: Disconnecting from existing connection');
       disconnect();
     }
 
@@ -156,7 +176,9 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
     _client.onReconnect = _onClientReconnect;
 
     try {
+      debugPrint('RobotConnection: Connecting WebSocket to $connectUrl...');
       await _client.connect(connectUrl);
+      debugPrint('RobotConnection: WebSocket connected!');
 
       // Inject dependency for audio announcements
       AudioAnnouncer().setRobotConnection(this);
@@ -165,15 +187,20 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
       SequenceExecutor().init(this);
 
       // Discover robot capabilities
+      debugPrint('RobotConnection: Starting capability discovery...');
       _introspection = RobotIntrospection(_client);
       _capabilities = await _introspection!.discover();
+      debugPrint('RobotConnection: Discovery complete - waypoints: ${_capabilities?.waypoints.length ?? 0}');
 
       // Subscribe to status updates if available
       _subscribeToStatus();
 
       _state = RobotConnectionState.connected;
+      debugPrint('RobotConnection: State set to connected');
       notifyListeners();
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('RobotConnection: Connection failed: $e');
+      debugPrint('RobotConnection: Stack: $stack');
       _state = RobotConnectionState.error;
       _errorMessage = e.toString();
       notifyListeners();
@@ -222,6 +249,7 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   void _subscribeToStatus() {
     // Always subscribe to robot_status - Chassis robots always have this
+    // This is the reliable source for nav status, battery, etc.
     _client.subscribe(
       topic: '/robot_status',
       type: 'yutong_assistance/RobotStatus',

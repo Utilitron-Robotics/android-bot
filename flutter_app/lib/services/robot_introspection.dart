@@ -79,6 +79,7 @@ class RobotIntrospection {
 
   /// Discover all robot capabilities
   Future<RobotCapabilities> discover() async {
+    print('RobotIntrospection: Starting discovery...');
     final results = await Future.wait([
       _discoverTopics(),
       _discoverServices(),
@@ -86,12 +87,14 @@ class RobotIntrospection {
       _discoverWaypoints(),
     ]);
 
-    return RobotCapabilities(
+    final caps = RobotCapabilities(
       topics: results[0] as List<TopicInfo>,
       services: results[1] as List<ServiceInfo>,
       parameters: results[2] as List<String>,
       waypoints: results[3] as List<String>,
     );
+    print('RobotIntrospection: Discovery complete - ${caps.topics.length} topics, ${caps.services.length} services, ${caps.parameters.length} params, ${caps.waypoints.length} waypoints');
+    return caps;
   }
 
   Future<List<TopicInfo>> _discoverTopics() async {
@@ -174,6 +177,7 @@ class RobotIntrospection {
   }
 
   Future<List<String>> _discoverWaypoints() async {
+    print('RobotIntrospection: Discovering waypoints via /poi service...');
     try {
       // Chassis protocol: call /poi with empty string to get available waypoints
       final result = await client.callService(
@@ -181,14 +185,17 @@ class RobotIntrospection {
         args: {'poi': ''},
         timeout: const Duration(seconds: 5),
       );
+      print('RobotIntrospection: /poi response: $result');
 
       // Response has avaliable_list (note: typo in API is intentional)
       final pois = result['values']?['avaliable_list'] as List?;
       if (pois != null && pois.isNotEmpty) {
+        print('RobotIntrospection: Found ${pois.length} waypoints');
         return pois.map((p) => p.toString()).toList();
       }
+      print('RobotIntrospection: No waypoints in response');
     } catch (e) {
-      // Service might not exist or timeout
+      print('RobotIntrospection: Waypoint discovery failed: $e');
     }
 
     // Return empty - user can configure manually

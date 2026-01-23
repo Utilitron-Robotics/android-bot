@@ -359,21 +359,25 @@ class _HudScreenState extends State<HudScreen>
     }
 
     if (isStale) {
-      debugPrint('HUD: ⚠️ Connection STALE! Forcing reconnect...');
+      debugPrint('HUD: Connection STALE! Reconnecting gRPC only (preserving WebSocket)...');
       final savedUrl = robot.robotUrl;
-      robot.disconnect();
       if (savedUrl.isNotEmpty) {
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) {
-            debugPrint('HUD: 🔄 Reconnecting to $savedUrl');
-            if (kIsWeb) {
-              robot.connect(savedUrl);
-            } else {
-              final host = _extractHost(savedUrl);
-              context.read<UnifiedTransportManager>().connectToHost(host);
-            }
+        if (kIsWeb) {
+          // Web: reconnect WebSocket
+          robot.disconnect();
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) robot.connect(savedUrl);
+          });
+        } else {
+          // Native: only reconnect gRPC, preserve WebSocket (keeps waypoints/capabilities)
+          final host = _extractHost(savedUrl);
+          context.read<UnifiedTransportManager>().connectToHost(host);
+          // Only reconnect WS if it's actually disconnected
+          if (robot.state != RobotConnectionState.connected) {
+            final wsUrl = 'ws://$host:8766';
+            robot.connectWithDisplayUrl(wsUrl, host);
           }
-        });
+        }
       }
     } else {
       debugPrint('HUD: ✓ Connection healthy');
@@ -1029,12 +1033,8 @@ class _HudScreenState extends State<HudScreen>
                       icon: Icons.rocket_launch,
                       color: Colors.green,
                       onTap: () {
-                        debugPrint('START TOUR - trigger welcome screen');
-                        // Enable await visitor to show START TOUR button
-                        final awaitSequence = seq!.copyWith(
-                          awaitVisitorAtStart: true,
-                        );
-                        tourManager.startSequence(awaitSequence);
+                        debugPrint('START TOUR - starting immediately');
+                        tourManager.startSequence(seq!);
                       },
                       tooltip: 'Start Tour',
                     ),

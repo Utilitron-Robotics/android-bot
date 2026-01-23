@@ -769,6 +769,11 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                 Log.i(TAG, "Obstacle: Unknown, falling back to normal escalation")
                 null
             }
+            SuggestedAction.HARD_STOP -> {
+                // Wall or mapped obstacle - stop silently, nav will reroute
+                Log.i(TAG, "Obstacle: Wall/mapped obstacle, hard stop")
+                null
+            }
             SuggestedAction.NONE -> null
         }
 
