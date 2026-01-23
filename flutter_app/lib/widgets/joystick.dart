@@ -97,11 +97,23 @@ class _JoystickControlState extends State<JoystickControl> {
   void _subscribeToGrpcStatus() {
     final transport = context.read<UnifiedTransportManager>();
     _grpcStatusSubscription = transport.robotStatus.listen((status) {
-      final safetyZone = status['safety_zone'] as String?;
-      if (safetyZone != null && mounted) {
-        // Convert safety zone to approximate distance for gauge
-        double distance;
-        switch (safetyZone.toUpperCase()) {
+      if (!mounted) return;
+
+      // Use actual min_range_meters from relay (real LIDAR distance)
+      final minRange = status['min_range_meters'] as double?;
+      final dataAgeMs = status['data_age_ms'] as int?;
+
+      double distance;
+      if (minRange != null && minRange > 0 && minRange < 100) {
+        // Real LIDAR data from relay
+        distance = minRange;
+      } else if (dataAgeMs != null && (dataAgeMs < 0 || dataAgeMs > 3000)) {
+        // Stale or never-received LIDAR data - signal it
+        distance = -1; // Sentinel: gauge shows "NO DATA"
+      } else {
+        // Fallback: use safety zone name if min_range not populated
+        final safetyZone = status['safety_zone'] as String?;
+        switch (safetyZone?.toUpperCase()) {
           case 'STOP':
             distance = 0.15;
             break;
@@ -114,11 +126,12 @@ class _JoystickControlState extends State<JoystickControl> {
           default:
             distance = double.infinity;
         }
-        setState(() {
-          _minFrontRange = distance;
-          _obstacleAhead = distance < creepDistance;
-        });
       }
+
+      setState(() {
+        _minFrontRange = distance;
+        _obstacleAhead = distance > 0 && distance < creepDistance;
+      });
     });
   }
 
@@ -339,7 +352,7 @@ class _JoystickControlState extends State<JoystickControl> {
             ),
             const SizedBox(height: 8),
             // Obstacle zone indicator in safe mode (compact)
-            if (_slamSafe && _minFrontRange < warnDistance)
+            if (_slamSafe && _minFrontRange > 0 && _minFrontRange < warnDistance)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 margin: const EdgeInsets.only(bottom: 6),
@@ -468,7 +481,10 @@ class _JoystickControlState extends State<JoystickControl> {
     if (_slamSafe && targetLinear > 0) {
       final dist = _minFrontRange;
 
-      if (dist < stopDistance) {
+      if (dist < 0) {
+        // Stale LIDAR data - stop forward motion for safety
+        targetLinear = 0;
+      } else if (dist < stopDistance) {
         // STOP ZONE: Too close - no forward motion at all
         targetLinear = 0;
       } else if (dist < creepDistance) {
@@ -662,10 +678,16 @@ class _DistanceGauge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Stale/no LIDAR data sentinel
+    final bool isStale = distance < 0;
+
     // Determine zone and color
     Color zoneColor;
     String zoneLabel;
-    if (distance < stopDist) {
+    if (isStale) {
+      zoneColor = Colors.grey;
+      zoneLabel = 'NO DATA';
+    } else if (distance < stopDist) {
       zoneColor = Colors.red;
       zoneLabel = 'STOP';
     } else if (distance < creepDist) {
@@ -680,8 +702,8 @@ class _DistanceGauge extends StatelessWidget {
     }
 
     // Clamp display distance for gauge
-    final displayDist = distance.isInfinite ? 2.0 : distance.clamp(0.0, 2.0);
-    final gaugePercent = (displayDist / 2.0).clamp(0.0, 1.0);
+    final displayDist = (isStale || distance.isInfinite) ? 2.0 : distance.clamp(0.0, 2.0);
+    final gaugePercent = isStale ? 0.0 : (displayDist / 2.0).clamp(0.0, 1.0);
 
     return Column(
       children: [
@@ -737,7 +759,7 @@ class _DistanceGauge extends StatelessWidget {
         const SizedBox(height: 4),
         // Distance value
         Text(
-          distance.isInfinite ? '>2m' : '${distance.toStringAsFixed(2)}m',
+          isStale ? '---' : (distance.isInfinite ? '>2m' : '${distance.toStringAsFixed(2)}m'),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             fontFamily: 'monospace',
             color: zoneColor,

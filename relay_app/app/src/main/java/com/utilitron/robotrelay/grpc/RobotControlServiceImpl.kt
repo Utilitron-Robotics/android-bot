@@ -76,6 +76,9 @@ class RobotControlServiceImpl(
         val statusJob = scope.launch {
             robotClient.robotStatus.collect { status ->
                 if (status != null) {
+                    val dataAge = if (robotClient.lastRobotDataTime > 0)
+                        System.currentTimeMillis() - robotClient.lastRobotDataTime else -1L
+
                     val robotStatus = RobotStatus.newBuilder()
                         .setConnected(robotClient.connectionState.value == ConnectionState.CONNECTED)
                         .setNavStatus(status.navStatus)
@@ -89,6 +92,8 @@ class RobotControlServiceImpl(
                             .build())
                         .setLinearVelocity(status.velocity.getOrNull(0) ?: 0.0)
                         .setAngularVelocity(status.velocity.getOrNull(1) ?: 0.0)
+                        .setDataAgeMs(dataAge)
+                        .setMinRangeMeters(robotClient.minFrontDistance.toDouble())
                         .build()
 
                     val message = ServerMessage.newBuilder()

@@ -86,7 +86,8 @@ class RobotWebSocketClient(
 
     // Crowd control: minimum front LIDAR distance for gradient speed ramping
     @Volatile
-    private var minFrontDistance: Float = Float.MAX_VALUE
+    var minFrontDistance: Float = Float.MAX_VALUE
+        private set
 
     // Crowd control config: distance-proportional speed limiting
     private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here

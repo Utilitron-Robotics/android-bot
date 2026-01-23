@@ -1,6 +1,18 @@
 # ROS Topic Subscriptions & Data Flow
 
-This document maps every ROS topic used by the system, who publishes/subscribes, and the data flow.
+This document maps every ROS topic used by the system, who publishes/subscribes, and the data flow through the relay to Flutter.
+
+---
+
+## Architecture Reminder
+
+```
+Flutter (display/control layer)  ←── gRPC stream ──→  Relay (data/operations layer)  ←── WS :9090 ──→  Robot
+```
+
+- **Relay** subscribes to all topics, processes data, sends results via gRPC
+- **Flutter** receives processed results and displays them — NO raw topic processing
+- **Proto fields**: `data_age_ms` (stale detection), `min_range_meters` (actual LIDAR distance), `safety_zone` (computed zone)
 
 ---
 
@@ -8,17 +20,35 @@ This document maps every ROS topic used by the system, who publishes/subscribes,
 
 ### `/scan` (sensor_msgs/LaserScan) - PRIMARY
 - **Publisher**: Robot base (LIDAR hardware)
-- **Subscriber**: Relay app
-- **Message format**: `ranges` array of float distances (meters), `angle_min`, `angle_max`, `angle_increment`
-- **Data flow**: Robot → Relay → computes safety zones (STOP/CREEP/WARN/CLEAR) → gRPC stream → Flutter joystick
+- **Subscriber**: Relay app (`RobotWebSocketClient.kt:445-456`)
+- **Message format**: `ranges` array of float distances (meters)
+- **Processing**: Relay extracts front arc (40-60% of array), filters <5cm noise, computes `minFrontDistance`, classifies safety zone
+- **Data flow**: Robot → Relay → `minFrontDistance` + `safetyZone` → gRPC `min_range_meters` + `safety_zone` → Flutter gauge
+- **Throttle**: 150ms (subscription level)
 - **Status**: WORKS on our robots
 
 ### `/laser_data` (yutong_assistance/point_array) - CHASSIS PROTOCOL
 - **Publisher**: Robot base (chassis firmware, may not publish on all robots)
-- **Subscriber**: Relay app
+- **Subscriber**: Relay app (`RobotWebSocketClient.kt:422-443`)
 - **Message format**: `px`/`py` coordinate arrays (cartesian points)
-- **Data flow**: Robot → Relay → same safety zone computation as `/scan`
-- **Status**: Referenced in chassis protocol docs, but NOT available on all robots
+- **Processing**: Same safety zone computation via `checkLaserData()` after converting to distances
+- **Status**: Referenced in chassis protocol docs, NOT available on all robots
+
+---
+
+## Stale Data Detection
+
+### How It Works
+- `RobotWebSocketClient._lastRobotDataTime` updated on EVERY incoming message (`parseStatusUpdate()`, line 333)
+- `RobotControlServiceImpl` computes `data_age_ms = now - lastRobotDataTime` on each gRPC status update
+- Flutter receives via `unified_transport.dart:525` → `status['data_age_ms']`
+- Joystick gauge: `data_age_ms > 3000` or `< 0` → shows "NO DATA" (grey), blocks forward motion in SLAM Safe mode
+- `CommandBuffer` heartbeat also sends `data_age_ms` via WS JSON for buffer clients
+
+### Stale Thresholds
+- `data_age_ms = -1`: Never received any data from robot
+- `data_age_ms > 3000`: Joystick flags stale (stops forward motion in safe mode)
+- `data_age_ms > 5000`: `buffer_client.dart` considers data fully stale
 
 ---
 
@@ -26,37 +56,40 @@ This document maps every ROS topic used by the system, who publishes/subscribes,
 
 ### `/robot_status` (yutong_assistance/RobotStatus)
 - **Publisher**: Robot base
-- **Subscriber**: Relay app
-- **Message format**: `nav_status` (600=Idle, 601=Moving, 602=Cancelled, 603=Arrived, 604=Failed, 605=Standby), battery, errors
-- **Data flow**: Robot → Relay → gRPC stream → Flutter UI (status bar, indicators)
+- **Subscriber**: Relay app (`RobotWebSocketClient.kt:342-359`)
+- **Message format**: `nav_status`, `battery`, `velocity[]`, `control_state`, `soft_estop`, `hard_estop`, `current_goal_name`
+- **Data flow**: Robot → Relay → gRPC `RobotStatus` → Flutter status bar
 
-### `/robot_pose` (geometry_msgs/PoseStamped)
+### `/robot_pose` (geometry_msgs/Pose2D)
 - **Publisher**: Robot base (SLAM/localization)
-- **Subscriber**: Relay app
-- **Message format**: `position` (x, y, z) + `orientation` (quaternion)
-- **Data flow**: Robot → Relay → gRPC stream → Flutter map view (robot marker position)
+- **Subscriber**: Relay app (`RobotWebSocketClient.kt:361-368`)
+- **Message format**: `x`, `y`, `theta`
+- **Data flow**: Robot → Relay → gRPC `Pose2D` → Flutter map view (robot marker)
 
 ### `/navi_status`
 - **Publisher**: Robot base (navigation stack)
 - **Subscriber**: Relay app
-- **Data flow**: Robot → Relay → forwarded to clients for navigation progress
+- **Data flow**: Robot → Relay → `CommandBuffer.onNavStatus()` for arrival/failure detection
 
 ---
 
 ## Map
 
-### `/map` (nav_msgs/OccupancyGrid, served as fragmented PNG)
+### `/map` (nav_msgs/OccupancyGrid, fragmented PNG)
 - **Publisher**: Robot base (map server)
-- **Subscriber**: Relay app (subscribes, caches, serves via HTTP)
-- **Data flow**: Robot → Relay (caches PNG) → Flutter polls via HTTP GET on port 8765
-- **Note**: Map is a large payload; relay caches and serves it to avoid repeated ROS fetches
+- **Subscriber**: Relay app (subscribes with `fragment_size=6000`, `compression=png`)
+- **Relay processing**: Reassembles fragments (`handleMapFragment()`), caches complete message
+- **Data flow**: Robot → Relay (fragment reassembly + cache) → Flutter polls HTTP `GET :8765/map`
+- **Refresh**: Flutter sends `POST :8765/map/refresh` → Relay unsubscribes + resubscribes
+- **Original approach**: Flutter subscribed directly via WS, processed raw OccupancyGrid locally (commit 3c15ff8)
+- **Why HTTP**: Large payload (100KB+), fragmentation handling, independent of WS state, relay caches for multiple clients
 
 ---
 
 ## Command Topics (Relay Publishes)
 
 ### `/cmd_vel_mux/input/teleop` (geometry_msgs/Twist)
-- **Publisher**: Relay app (on joystick input from Flutter)
+- **Publisher**: Relay app
 - **Subscriber**: Robot base (motor controller)
 - **Message format**: `linear.x` (m/s), `angular.z` (rad/s)
 - **Duration**: Each command lasts 0.6 seconds per protocol spec
@@ -65,67 +98,84 @@ This document maps every ROS topic used by the system, who publishes/subscribes,
 ### `/move_base/cancel` (actionlib_msgs/GoalID)
 - **Publisher**: Relay app
 - **Subscriber**: Robot base (move_base action server)
-- **Data flow**: Flutter cancel button → gRPC → Relay → publishes empty GoalID to cancel all goals
+- **Data flow**: Flutter cancel → gRPC → Relay → publishes empty GoalID
 
-### `/soft_stop` (std_msgs/Bool or custom)
+### `/soft_stop`
 - **Publisher**: Relay app
 - **Subscriber**: Robot base
-- **Data flow**: Flutter e-stop → gRPC → Relay → publishes stop command
+- **Data flow**: Flutter e-stop → gRPC → Relay → publishes stop
 
 ---
 
 ## Safety & Sensor Topics
 
 ### `/mobile_base/sensors/core`
-- **Publisher**: Robot base (bumper/cliff sensors)
-- **Subscriber**: Relay app
-- **Data flow**: Robot → Relay → safety state updates → gRPC → Flutter UI warnings
+- **Publisher**: Robot base (bumper/cliff/ultrasonic)
+- **Subscriber**: Relay app (`RobotWebSocketClient.kt:369-421`)
+- **Message format**: `bumper` (bitmask), `cliff` (bitmask), `analog_input[1]` (central ultrasonic mm)
+- **Behavior**: Bumper/cliff → immediate STOP + cancel nav (unless docking). Ultrasonic tracked for motion detection.
+- **Data flow**: Robot → Relay → safety zone override → gRPC → Flutter
 
 ### `/people_detected`
 - **Publisher**: Robot base (people detection node)
-- **Subscriber**: Relay app
-- **Data flow**: Robot → Relay → used in obstacle classification logic
+- **Subscriber**: Relay app (`RobotWebSocketClient.kt:466-473`)
+- **Data flow**: Robot → Relay → obstacle classification logic
 
 ### `/global_path` (nav_msgs/Path)
 - **Publisher**: Robot base (global planner)
-- **Subscriber**: Relay app
-- **Data flow**: Robot → Relay → used by obstacle classifier to determine if obstacles are on-path vs off-path
+- **Subscriber**: Relay app (`RobotWebSocketClient.kt:457-464`)
+- **Data flow**: Robot → Relay → `ObstacleClassifier` path corridor for on-path/off-path detection
 
 ---
 
 ## Navigation Service
 
-### `/poi` (service call)
-- **Type**: ROS Service (not topic)
+### `/poi` (ROS service call)
 - **Called by**: Relay app
 - **Args**: `{poi: "waypoint_name"}`
 - **Data flow**: Flutter nav request → gRPC → Relay → service call → robot navigates
 
 ---
 
-## Why LIDAR Keeps Breaking (The 3-Time Failure Pattern)
+## Safety Zone Thresholds
 
-This has broken three separate times. Each time the same root cause:
+| Zone | Normal | Detach Mode (docking) |
+|------|--------|----------------------|
+| STOP | < 0.20m | < 0.08m |
+| CREEP | 0.20-0.50m | 0.08-0.20m |
+| WARN | 0.50-0.80m | 0.20-0.40m |
+| CLEAR | > 0.80m | > 0.40m |
 
-### Failure 1: Subscribed to wrong topic
-- Code was subscribing to `/laser_data` (from chassis protocol docs)
-- Our robots don't publish `/laser_data`, they publish `/scan`
-- **Fix**: Subscribe to `/scan` instead
+---
 
-### Failure 2: Removed `/scan` subscription while "fixing" something else
-- A bug fix for an unrelated issue removed the `/scan` subscription
-- The developer saw `/laser_data` in the protocol docs and assumed that was correct
-- Safety zones stopped working, joystick lost LIDAR protection
-- **Fix**: Restored `/scan` subscription
+## Why LIDAR Keeps Breaking (The Pattern)
 
-### Failure 3: Subscribed to `/scan` but wrong message parsing
-- Subscribed to the right topic but parsed it as `point_array` format instead of `LaserScan`
-- `ranges` array (polar, floats) vs `px`/`py` arrays (cartesian, coordinate pairs)
-- **Fix**: Parse as `sensor_msgs/LaserScan` with `ranges` array
+This has broken multiple times. Root causes:
 
-### Lessons Learned
-1. **The protocol docs lie** (or describe a different firmware version). Trust what the robot actually publishes.
-2. **Subscribe to BOTH** `/scan` and `/laser_data` - process whichever delivers data.
-3. **Never remove a working subscription** until the replacement is verified end-to-end with actual LIDAR data flowing to the Flutter UI.
-4. **When fixing a bug, grep ALL callers** - tour start exists in BOTH `hud_screen.dart` AND `sequence_editor.dart`. Missing one means the fix is incomplete.
-5. **Test LIDAR safety by walking in front of the robot** - if the joystick doesn't show STOP/CREEP zones, the subscription is broken.
+### 1. Wrong topic subscription
+- Chassis protocol docs say `/laser_data` — our robots publish `/scan`
+- **Fix**: Subscribe to BOTH, process whichever delivers
+
+### 2. Removed working subscription during unrelated fix
+- Developer assumed `/laser_data` was correct, removed `/scan`
+- **Fix**: Restored `/scan`, added to CLAUDE.md as critical lesson
+
+### 3. Wrong message parsing
+- Subscribed to `/scan` but parsed as `point_array` (px/py) instead of `LaserScan` (ranges)
+- **Fix**: Parse as `sensor_msgs/LaserScan`
+
+### 4. gRPC path never wired up (this fix)
+- Relay tracked `minFrontDistance` and `_lastRobotDataTime` correctly
+- `CommandBuffer` WS heartbeat sent `data_age_ms` correctly
+- But `RobotControlServiceImpl` gRPC builder never set `data_age_ms` or `min_range_meters`
+- Flutter gauge was reverse-engineering fake distances from zone names ("STOP"→0.15, "CREEP"→0.35)
+- Stale LIDAR (after nav) showed ">2m" CLEAR instead of "NO DATA"
+- **Fix**: Wire `setDataAgeMs()` and `setMinRangeMeters()` in gRPC builder, use real values in Flutter gauge
+
+### Lessons
+1. **The protocol docs describe a different firmware** — trust what the robot publishes
+2. **Subscribe to BOTH** `/scan` and `/laser_data`
+3. **Never remove a working subscription** until replacement is verified end-to-end
+4. **When fixing a bug, grep ALL callers** (tour start in BOTH hud_screen AND sequence_editor)
+5. **Test LIDAR by walking in front of robot** — gauge must show STOP/CREEP
+6. **Verify the ENTIRE pipeline** — relay tracking data means nothing if gRPC doesn't send it to Flutter
