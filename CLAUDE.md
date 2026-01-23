@@ -258,6 +258,16 @@ The user debugs with:
 - **No over-engineering** - Simple targeted fixes, not architectural rewrites
 - **Arrogance without competence is unacceptable** - If you don't understand, ask. Don't pretend.
 
+### CRITICAL: LIDAR Topics - /scan vs /laser_data
+- The robot publishes `/scan` (sensor_msgs/LaserScan, `ranges` array of floats)
+- The chassis protocol docs reference `/laser_data` (yutong_assistance/point_array, `px`/`py` coordinate arrays)
+- These are DIFFERENT topics with DIFFERENT message formats
+- `/scan` is the one that WORKS on our robots
+- The relay subscribes to BOTH and processes whichever delivers data
+- The Flutter joystick gets safety zones via gRPC (relay processes LIDAR → STOP/CREEP/WARN/CLEAR)
+- **NEVER remove a working data subscription until the replacement is VERIFIED end-to-end**
+- **When fixing a bug, grep ALL callers** (e.g. tour start exists in BOTH hud_screen.dart AND sequence_editor.dart)
+
 ---
 
 ## MemoRable MCP - Persistent Memory
