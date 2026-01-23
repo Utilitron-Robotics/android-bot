@@ -416,7 +416,14 @@ class RobotWebSocketClient(
         if (newZone != oldZone) {
             Log.i(TAG, "LIDAR Safety Zone changed: $newZone (was $oldZone) at ${minFront}m")
             if (newZone == SafetyZone.STOP) {
-                stop()
+                // Only stop during manual control - robot's move_base handles
+                // its own obstacle avoidance during autonomous navigation
+                val isNavigating = _robotStatus.value?.navStatus == 601
+                if (!isNavigating) {
+                    stop()
+                } else {
+                    Log.i(TAG, "LIDAR STOP zone ignored - move_base navigating (status 601)")
+                }
             }
         }
         _robotStatus.value = _robotStatus.value?.copy(safetyZone = newZone)

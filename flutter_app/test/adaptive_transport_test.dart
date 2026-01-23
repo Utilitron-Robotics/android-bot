@@ -10,6 +10,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:droid_controller/core/adaptive_transport.dart';
 import 'package:droid_controller/core/transport_config.dart';
@@ -132,7 +133,7 @@ class MockTransport implements RobotTransport {
     _messageController.close();
   }
 
-  static final _random = DateTime.now().millisecondsSinceEpoch % 1000;
+  static final _random = Random(DateTime.now().millisecondsSinceEpoch % 1000);
 }
 
 // ============================================================

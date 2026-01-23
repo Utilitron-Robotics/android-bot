@@ -125,12 +125,12 @@ class SimpleTransport extends ChangeNotifier {
     // Listen for status updates
     _grpcStatusSub = _grpc!.robotStatus.listen((status) {
       _navStatus = status.navStatus;
-      _battery = status.battery;
+      _battery = status.battery.toDouble();
       _currentGoal = status.navGoal;
 
       _statusController.add(RobotStatusUpdate(
         navStatus: status.navStatus,
-        battery: status.battery,
+        battery: status.battery.toDouble(),
         currentGoal: status.navGoal,
         x: status.pose.x,
         y: status.pose.y,

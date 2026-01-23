@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "com.utilitron.robotrelay.proto";
+option java_outer_classname = "RelayProto";
+
+package relay;
+
+service RelayService {
+  rpc RelayMessage(RelayRequest) returns (RelayResponse);
+}
+
+message RelayRequest {
+  string message = 1;
+}
+
+message RelayResponse {
+  string message = 1;
+}
