@@ -109,17 +109,16 @@ object ChassisProtocol {
     ))
 
     /**
-     * Subscribe to map WITH fragmentation and compression per chassis protocol docs.
-     * Robot sends PNG-compressed fragments (6000 byte chunks).
-     * Relay reassembles fragments before caching.
+     * Subscribe to map WITHOUT fragmentation/compression.
+     * Returns raw OccupancyGrid that Flutter can parse directly.
+     * The fragmented+PNG approach from chassis docs does NOT produce
+     * the expected message format on our robots.
      */
-    fun subscribeMap(): String = toJson(MapSubscribeMsg(
+    fun subscribeMap(): String = toJson(SubscribeMsg(
         op = OP_SUBSCRIBE,
         id = "get_map",
         topic = TOPIC_MAP,
         type = "nav_msgs/OccupancyGrid",
-        fragmentSize = 6000,
-        compression = "png",
         throttleRate = 5000
     ))
 

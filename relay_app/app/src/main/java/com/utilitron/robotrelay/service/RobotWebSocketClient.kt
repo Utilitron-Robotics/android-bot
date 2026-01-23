@@ -222,10 +222,10 @@ class RobotWebSocketClient(
         )))
         send(ChassisProtocol.subscribeGlobalPath())  // For obstacle path intersection
         send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection
-        // Subscribe to /map with fragmentation+compression per chassis protocol docs
+        // Subscribe to /map (raw OccupancyGrid, no fragmentation - works on our robots)
         val mapSubMsg = ChassisProtocol.subscribeMap()
         val mapSent = send(mapSubMsg)
-        Log.i(TAG, ">>> Sending /map subscription (fragmented+png): $mapSubMsg")
+        Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
         Log.i(TAG, ">>> /map subscription sent: $mapSent")
     }
 
@@ -316,12 +316,11 @@ class RobotWebSocketClient(
         scope.launch {
             Log.i(TAG, ">>> MAP REFRESH: Starting refresh sequence")
 
-            synchronized(_mapFragments) { _mapFragments.clear() }
-
             val unsubMsg = ChassisProtocol.unsubscribe(ChassisProtocol.TOPIC_MAP, "get_map")
             send(unsubMsg)
             delay(300)
 
+            _cachedMapMessage = null
             val subMsg = ChassisProtocol.subscribeMap()
             val sent = send(subMsg)
             Log.i(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
