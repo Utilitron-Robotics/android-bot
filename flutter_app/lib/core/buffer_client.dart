@@ -11,13 +11,15 @@ class BufferCommand {
   final int? timeoutMs;
   final ProcessingType processingType;  // Sequential or parallel execution
 
+  static int _idCounter = 0;
+
   BufferCommand({
     String? id,
     required this.type,
     this.data = const {},
     this.timeoutMs,
     this.processingType = ProcessingType.sequential,  // Default: wait for completion
-  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
+  }) : id = id ?? '${DateTime.now().millisecondsSinceEpoch}_${_idCounter++}';
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -399,6 +401,10 @@ class BufferClient extends ChangeNotifier {
   StreamSubscription? _messageSubscription;
   StreamSubscription? _stateSubscription;
 
+  // Auto-reconnect cooldown (prevent rapid reconnect spam)
+  DateTime? _lastReconnectAttempt;
+  static const Duration _reconnectCooldown = Duration(seconds: 5);
+
   // Current state
   BufferState _state = BufferState();
   BufferState get state => _state;
@@ -498,15 +504,24 @@ class BufferClient extends ChangeNotifier {
     };
   }
 
-  /// Called when Relay connection goes stale
+  /// Called when Relay connection goes stale - auto-reconnect WebSocket
   void _onRelayStale() {
-    debugPrint('BufferClient: Relay connection STALE');
+    final now = DateTime.now();
+    final canReconnect = _lastReconnectAttempt == null ||
+        now.difference(_lastReconnectAttempt!) > _reconnectCooldown;
+
+    if (canReconnect) {
+      _lastReconnectAttempt = now;
+      debugPrint('BufferClient: Relay connection STALE - triggering WebSocket reconnect');
+      _client.reconnect();
+    }
     notifyListeners();
   }
 
   /// Called when Relay connection recovers
   void _onRelayRecovered() {
     debugPrint('BufferClient: Relay connection RECOVERED');
+    _lastReconnectAttempt = null; // Reset cooldown for next drop
     notifyListeners();
   }
 

@@ -111,6 +111,19 @@ class BufferSequenceExecutor extends ChangeNotifier {
       return;
     }
 
+    // Detect button_standby completed while we still think it's active
+    // This fires when the visitor presses START TOUR and relay moves to next command
+    if (_awaitingVisitorAtStart &&
+        _buttonStandbyConfirmed &&
+        _status == SequenceExecutorStatus.running &&
+        state.current?.type != 'button_standby') {
+      debugPrint('BufferSequenceExecutor: Button pressed! Relay moved past button_standby (current=${state.current?.type})');
+      _awaitingVisitorAtStart = false;
+      _buttonStandbyConfirmed = false;
+      _currentPhase = SequencePhase.navigating;
+      notifyListeners();
+    }
+
     // Update phase based on current command
     if (state.current != null) {
       switch (state.current!.type) {
@@ -158,18 +171,6 @@ class BufferSequenceExecutor extends ChangeNotifier {
         _countdownSeconds = 0;
         // Clear countdown on tablet
         _bufferClient.updateCountdown(0);
-      }
-
-      // BACKGROUND FIX: If button_standby was running but is now gone (current=null),
-      // and no commands were loaded after (pending=0), the visitor pressed the button
-      // while the Flutter app was in background and the completion event was lost.
-      if (_awaitingVisitorAtStart &&
-          _buttonStandbyConfirmed &&
-          _status == SequenceExecutorStatus.running &&
-          state.pendingCount == 0) {
-        debugPrint('BufferSequenceExecutor: Button pressed while app was in background - resuming tour');
-        resumeFromVisitor();
-        return;
       }
 
       // RECONNECT FIX: If buffer is empty and we're running, the final command's
@@ -403,28 +404,20 @@ class BufferSequenceExecutor extends ChangeNotifier {
       }
     }
 
-    // Special handling: button_standby completed (visitor pressed START TOUR on tablet)
-    // Now load the remaining tour commands
+    // button_standby completed = visitor pressed START TOUR (or SKIP WAIT)
+    // Relay already has remaining commands queued - just update phase
     final isButtonStandby = result.commandId.contains('button_standby');
-    debugPrint('BufferSequenceExecutor: button_standby check: isSuccess=${result.isSuccess}, contains_button_standby=$isButtonStandby');
-    if (result.isSuccess && isButtonStandby) {
-      debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
-      debugPrint('BufferSequenceExecutor: BUTTON_STANDBY COMPLETED');
-      debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
-      debugPrint('BufferSequenceExecutor: Visitor pressed START TOUR!');
-      debugPrint('BufferSequenceExecutor: commandId=${result.commandId}');
-      debugPrint('BufferSequenceExecutor: result=${result.result}');
-      debugPrint('BufferSequenceExecutor: Calling resumeFromVisitor()...');
-      // Note: resumeFromVisitor() handles setting _awaitingVisitorAtStart = false
-      // and _currentPhase = navigating internally
-      resumeFromVisitor();
+    if (isButtonStandby) {
+      debugPrint('BufferSequenceExecutor: button_standby completed (${result.result}) - relay continues autonomously');
+      _awaitingVisitorAtStart = false;
+      _buttonStandbyConfirmed = false;
+      _currentPhase = SequencePhase.navigating;
+      notifyListeners();
       return;
     }
 
     // Handle navigation failures with retry logic (ALL in Flutter)
     if (result.isFailure) {
-      // Check if this was a navigation failure
-      // Use _currentPhase as it's updated by both start events and heartbeats
       if (_currentPhase == SequencePhase.navigating) {
         _handleNavigationFailure(result);
         return;
@@ -433,43 +426,19 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     // Check for sequence completion
     if (result.isSuccess || result.result == 'cancelled') {
-      _navRetryCount = 0; // Reset retry count on success/cancel
+      _navRetryCount = 0;
 
-      // DEBUG: Log state before visitor check
-      debugPrint('BufferSequenceExecutor: Command success - awaitingVisitor=$_awaitingVisitorAtStart, phase=$_currentPhase, hasSequence=${_currentSequence != null}');
-
-      // Special handling: nav to start completed while awaiting visitor
-      // Now send button_standby to show START TOUR overlay on tablet
+      // Nav to start completed while awaiting visitor → update phase for UI
       if (_awaitingVisitorAtStart &&
           _currentPhase == SequencePhase.navigating &&
           _currentSequence != null) {
-        debugPrint('BufferSequenceExecutor: Arrived at start! Sending button_standby for visitor overlay...');
+        debugPrint('BufferSequenceExecutor: Arrived at start - relay will show START TOUR button next');
         _currentPhase = SequencePhase.awaitingVisitor;
-
-        // Send button_standby command - relay will show START TOUR button
-        final buttonCmd = BufferCommand.buttonStandby(
-          sequenceId: _currentSequence!.id,
-          buttonText: _currentSequence!.effectiveAwaitButtonText,
-          displayUrl: _currentSequence!.effectiveAwaitDisplayUrl,
-        );
-        _totalCommandCount = 2; // nav + button_standby
-
-        // Load async but handle result
-        _bufferClient.loadCommands([buttonCmd], clearExisting: false).then((loaded) {
-          if (loaded) {
-            debugPrint('BufferSequenceExecutor: ✓ button_standby confirmed - waiting for visitor to press START TOUR');
-          } else {
-            debugPrint('BufferSequenceExecutor: ✗ button_standby load FAILED - tour may be stuck');
-            // Try to recover by loading full tour anyway
-            resumeFromVisitor();
-          }
-        });
-
+        _buttonStandbyConfirmed = true;
         notifyListeners();
-        return; // Don't check completion - wait for button press
+        return; // Don't check completion - button_standby is next in queue
       }
 
-      // Check completion immediately - we track command count locally, no need to wait for heartbeat
       _checkSequenceCompletion();
     }
 
@@ -596,46 +565,19 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     _callback.onSequenceStarted(sequence);
 
-    // Check if we should await visitor at start
+    // Track if awaiting visitor (for UI state like SKIP WAIT button)
     if (sequence.awaitVisitorAtStart &&
         sequence.startWaypoint != null &&
         sequence.startWaypoint!.isNotEmpty) {
-      debugPrint('BufferSequenceExecutor: 🚦 AWAIT VISITOR PATH');
-      debugPrint('BufferSequenceExecutor: Phase 1 - navigating to start waypoint: ${sequence.startWaypoint}');
-
-      // Phase 1: Just navigate to start waypoint
-      final navCommand = BufferCommand.navigate(sequence.startWaypoint!);
-      _totalCommandCount = 1; // Just the nav for now
-
-      try {
-        final loaded = await _bufferClient.loadCommands([navCommand], clearExisting: true);
-        if (!loaded) {
-          debugPrint('BufferSequenceExecutor: ✗ FAILED to load nav command - aborting');
-          _status = SequenceExecutorStatus.idle;
-          _currentSequence = null;
-          notifyListeners();
-          return;
-        }
-      } catch (e, stack) {
-        debugPrint('BufferSequenceExecutor: ✗ EXCEPTION loading nav command: $e');
-        debugPrint('BufferSequenceExecutor: Stack: $stack');
-        _status = SequenceExecutorStatus.idle;
-        _currentSequence = null;
-        notifyListeners();
-        return;
-      }
-
-      // Will enter awaitingVisitor phase when nav completes (in _onCommandCompleted)
       _awaitingVisitorAtStart = true;
-      debugPrint('BufferSequenceExecutor: ✓ Nav to start loaded');
-      debugPrint('BufferSequenceExecutor: ✓ _awaitingVisitorAtStart = true');
-      debugPrint('BufferSequenceExecutor: ✓ Waiting for nav completion to show START TOUR button');
-      notifyListeners();
-      return;
+      debugPrint('BufferSequenceExecutor: 🚦 AWAIT VISITOR - all commands loaded at once (relay runs autonomously)');
+    } else {
+      debugPrint('BufferSequenceExecutor: 🚀 NORMAL START');
     }
 
-    // Normal start - load all commands at once
-    debugPrint('BufferSequenceExecutor: 🚀 NORMAL START PATH (no await visitor)');
+    // ALWAYS load ALL commands at once - relay executes sequentially
+    // For await_visitor: nav-to-start → button_standby → intro → stops...
+    // The relay handles button_standby autonomously (waits for press, then continues)
     final commands = _buildSequenceCommands(sequence);
     _totalCommandCount = commands.length;
     debugPrint('BufferSequenceExecutor: Built $_totalCommandCount commands');
@@ -671,67 +613,23 @@ class BufferSequenceExecutor extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Resume from visitor wait - called when START TOUR button is pressed
-  Future<void> resumeFromVisitor() async {
-    debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
-    debugPrint('BufferSequenceExecutor: RESUME FROM VISITOR');
-    debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
-    debugPrint('BufferSequenceExecutor: _awaitingVisitorAtStart=$_awaitingVisitorAtStart');
-    debugPrint('BufferSequenceExecutor: _currentSequence=${_currentSequence?.name}');
+  /// Resume from visitor wait - called when SKIP WAIT is pressed on Flutter HUD
+  /// The relay already has all commands queued. We just skip the button_standby.
+  void resumeFromVisitor() {
+    debugPrint('BufferSequenceExecutor: SKIP WAIT - skipping button_standby on relay');
 
-    if (!_awaitingVisitorAtStart || _currentSequence == null) {
-      debugPrint('BufferSequenceExecutor: ✗ NOT awaiting visitor - ignoring');
-      debugPrint('BufferSequenceExecutor:   _awaitingVisitorAtStart=$_awaitingVisitorAtStart');
-      debugPrint('BufferSequenceExecutor:   _currentSequence=${_currentSequence?.name ?? "NULL"}');
+    if (!_awaitingVisitorAtStart) {
+      debugPrint('BufferSequenceExecutor: Not awaiting visitor - ignoring');
       return;
     }
 
-    debugPrint('BufferSequenceExecutor: ✓ Visitor triggered! Loading tour commands...');
     _awaitingVisitorAtStart = false;
     _buttonStandbyConfirmed = false;
     _currentPhase = SequencePhase.navigating;
 
-    // Load the rest of the sequence (skip nav to start since we're already there)
-    final commands = _buildSequenceCommands(_currentSequence!, skipNavToStart: true);
-    _totalCommandCount = commands.length;
-    _completedCommandCount = 0;
+    // Skip the button_standby command on the relay - it will move to the next command
+    _bufferClient.skip();
 
-    debugPrint('BufferSequenceExecutor: Built $_totalCommandCount commands (skipNavToStart=true)');
-
-    // Log first few commands
-    for (var i = 0; i < commands.length && i < 5; i++) {
-      debugPrint('BufferSequenceExecutor:   [$i] ${commands[i].type}: ${commands[i].data}');
-    }
-
-    try {
-      var loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
-      if (!loaded && _bufferClient.isStale) {
-        // Connection stale (app was in background) - wait for reconnect and retry
-        debugPrint('BufferSequenceExecutor: Load failed (stale connection), waiting for reconnect...');
-        for (int i = 0; i < 30; i++) {
-          await Future.delayed(const Duration(milliseconds: 500));
-          if (!_bufferClient.isStale) {
-            debugPrint('BufferSequenceExecutor: Connection restored! Retrying load...');
-            loaded = await _bufferClient.loadCommands(commands, clearExisting: true);
-            break;
-          }
-        }
-      }
-      if (!loaded) {
-        debugPrint('BufferSequenceExecutor: ✗ FAILED to load tour commands');
-        _status = SequenceExecutorStatus.failed;
-        notifyListeners();
-        return;
-      }
-    } catch (e, stack) {
-      debugPrint('BufferSequenceExecutor: ✗ EXCEPTION loading tour commands: $e');
-      debugPrint('BufferSequenceExecutor: Stack: $stack');
-      _status = SequenceExecutorStatus.failed;
-      notifyListeners();
-      return;
-    }
-
-    debugPrint('BufferSequenceExecutor: ✓ Tour commands loaded - tour starting!');
     notifyListeners();
   }
 
@@ -937,6 +835,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
     _status = SequenceExecutorStatus.idle;
     _currentSequence = null;
     _currentStopIndex = -1;
+    _currentPhase = SequencePhase.navigating;
     _navRetryCount = 0;
     _awaitingVisitorAtStart = false;
     _buttonStandbyConfirmed = false;

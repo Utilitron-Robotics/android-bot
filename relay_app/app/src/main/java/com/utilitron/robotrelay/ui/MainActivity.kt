@@ -9,6 +9,7 @@ import android.text.format.Formatter
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.webkit.WebViewClient
 import android.widget.EditText
@@ -85,15 +86,40 @@ class MainActivity : AppCompatActivity() {
     // Motion standby state
     private var currentMotionSequenceId: String? = null
 
+    /// Bring this Activity to the foreground and wake screen for tour display
+    @Suppress("DEPRECATION")
+    private fun bringToForeground() {
+        // Wake the screen if it's off
+        val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+        if (!pm.isInteractive) {
+            val wl = pm.newWakeLock(
+                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "robotrelay:tour_display"
+            )
+            wl.acquire(5000) // Hold for 5s to let FLAG_KEEP_SCREEN_ON take over
+        }
+        // Bring activity to front
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
+    }
+
     private val displayReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val url = intent?.getStringExtra(RelayService.EXTRA_URL)
             Log.i(TAG, ">>> displayReceiver.onReceive: url='${url?.take(100) ?: "null"}...'")
+            // Wake screen + bring to front for tour content
+            if (!url.isNullOrEmpty()) bringToForeground()
             if (url.isNullOrEmpty()) {
                 Log.i(TAG, "Hiding WebView and motion overlay, showing main layout")
                 binding.webView.visibility = View.GONE
                 binding.motionOverlay.visibility = View.GONE
                 binding.mainLayout.visibility = View.VISIBLE
+                // Tour display closed - allow screen to sleep
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             } else if (url.startsWith("motion://")) {
                 // Handle motion standby URLs
                 handleMotionUrl(url)
@@ -106,6 +132,8 @@ class MainActivity : AppCompatActivity() {
                 binding.motionOverlay.visibility = View.GONE
                 binding.webView.visibility = View.VISIBLE
                 binding.webView.loadUrl(url)
+                // Keep screen on while displaying tour content
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             }
         }
     }
@@ -115,6 +143,8 @@ class MainActivity : AppCompatActivity() {
         binding.mainLayout.visibility = View.GONE
         binding.webView.visibility = View.GONE
         binding.motionOverlay.visibility = View.VISIBLE
+        // Keep screen on during motion standby (waiting for visitor)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         when {
             url.startsWith("motion://standby") -> {
@@ -204,6 +234,8 @@ class MainActivity : AppCompatActivity() {
         binding.motionOverlay.visibility = View.GONE
         binding.webView.visibility = View.VISIBLE
         binding.webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+        // Keep screen on while showing POI display
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private val countdownReceiver = object : BroadcastReceiver() {
@@ -253,6 +285,9 @@ class MainActivity : AppCompatActivity() {
             val buttonText = intent?.getStringExtra(RelayService.EXTRA_TOUR_BUTTON_TEXT) ?: "Start Tour"
             Log.i(TAG, ">>> tourStandbyReceiver: sequenceId=$sequenceId, buttonText=$buttonText")
 
+            // Wake screen + bring to front for visitor button
+            if (sequenceId != null) bringToForeground()
+
             // Show the START TOUR button using motionOverlay (simple, no lock screen interference)
             if (sequenceId != null) {
                 currentMotionSequenceId = sequenceId
@@ -262,6 +297,8 @@ class MainActivity : AppCompatActivity() {
                 binding.motionWaitingLayout.visibility = View.GONE
                 binding.motionStartLayout.visibility = View.VISIBLE
                 binding.btnStartTour.text = buttonText
+                // Keep screen on while waiting for visitor to press button
+                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 Log.i(TAG, "Showing START TOUR button via motionOverlay for visitor")
             }
 
@@ -380,6 +417,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // Register broadcast receivers for the full Activity lifecycle (not just visible)
+        // Tours run autonomously - display/button broadcasts must be received even if screen is off
+        val localBroadcastManager = LocalBroadcastManager.getInstance(this)
+        localBroadcastManager.registerReceiver(displayReceiver, IntentFilter(RelayService.ACTION_DISPLAY))
+        localBroadcastManager.registerReceiver(countdownReceiver, IntentFilter(RelayService.ACTION_COUNTDOWN))
+        localBroadcastManager.registerReceiver(tourModeReceiver, IntentFilter(RelayService.ACTION_TOUR_MODE))
+        localBroadcastManager.registerReceiver(tourStandbyReceiver, IntentFilter(RelayService.ACTION_TOUR_STANDBY))
+
         setupUI()
         startRelayService(getRobotIp())
     }
@@ -389,11 +434,6 @@ class MainActivity : AppCompatActivity() {
         Intent(this, RelayService::class.java).also { intent ->
             bindService(intent, connection, Context.BIND_AUTO_CREATE)
         }
-        val localBroadcastManager = LocalBroadcastManager.getInstance(this)
-        localBroadcastManager.registerReceiver(displayReceiver, IntentFilter(RelayService.ACTION_DISPLAY))
-        localBroadcastManager.registerReceiver(countdownReceiver, IntentFilter(RelayService.ACTION_COUNTDOWN))
-        localBroadcastManager.registerReceiver(tourModeReceiver, IntentFilter(RelayService.ACTION_TOUR_MODE))
-        localBroadcastManager.registerReceiver(tourStandbyReceiver, IntentFilter(RelayService.ACTION_TOUR_STANDBY))
     }
 
     override fun onStop() {
@@ -402,11 +442,17 @@ class MainActivity : AppCompatActivity() {
             unbindService(connection)
             bound = false
         }
+    }
+
+    override fun onDestroy() {
         val localBroadcastManager = LocalBroadcastManager.getInstance(this)
         localBroadcastManager.unregisterReceiver(displayReceiver)
         localBroadcastManager.unregisterReceiver(countdownReceiver)
         localBroadcastManager.unregisterReceiver(tourModeReceiver)
         localBroadcastManager.unregisterReceiver(tourStandbyReceiver)
+        // Remove keep-screen-on when Activity is destroyed
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        super.onDestroy()
     }
 
 
@@ -544,13 +590,31 @@ class MainActivity : AppCompatActivity() {
         // Motion standby "Start Tour" button handler
         binding.btnStartTour.setOnClickListener {
             Log.i(TAG, "Start Tour button pressed for sequence: $currentMotionSequenceId")
-            // Notify the service that the tour was started by button press
-            service?.notifyTourStarted(currentMotionSequenceId ?: "")
+            val svc = service
+            if (svc != null) {
+                Log.i(TAG, "Service bound - calling notifyTourStarted")
+                svc.notifyTourStarted(currentMotionSequenceId ?: "")
+            } else {
+                Log.e(TAG, "SERVICE IS NULL! Attempting rebind to trigger tour start...")
+                // Service lost binding - rebind and retry
+                Intent(this, RelayService::class.java).also { intent ->
+                    bindService(intent, connection, Context.BIND_AUTO_CREATE)
+                }
+                // Retry after rebind (service will be set in onServiceConnected)
+                lifecycleScope.launch {
+                    delay(1000)
+                    val retrySvc = service
+                    if (retrySvc != null) {
+                        Log.i(TAG, "Service rebound - retrying notifyTourStarted")
+                        retrySvc.notifyTourStarted(currentMotionSequenceId ?: "")
+                    } else {
+                        Log.e(TAG, "Service STILL null after rebind - tour start FAILED")
+                    }
+                }
+            }
             // Hide motion overlay and show webView for tour content
             binding.motionOverlay.visibility = View.GONE
             binding.webView.visibility = View.VISIBLE
-            // NOTE: Lock screen disabled - was causing issues
-            // service?.startTourMode(null)
         }
 
         // Lock screen START TOUR button - for visitors to manually start tour

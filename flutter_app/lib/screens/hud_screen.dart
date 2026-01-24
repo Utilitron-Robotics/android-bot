@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import '../core/buffer_client.dart' show BufferClient;
+import '../core/buffer_sequence_executor.dart' show BufferSequenceExecutor;
 import '../core/robot_connection.dart';
 import '../core/unified_transport.dart' show UnifiedTransportManager;
 import '../core/sequence_mode.dart'
@@ -343,40 +345,44 @@ class _HudScreenState extends State<HudScreen>
     debugPrint(
         'HUD: 🔍 Health check - isStale=$isStale, lastHeartbeat=${hbAge}s ago');
 
-    // Check if a tour is awaiting visitor - DON'T reconnect in this case!
-    // User may have backgrounded app to go press the button on tablet
     final tourManager = context.read<SequenceManager>();
     final bufferExecutor = tourManager.bufferExecutor;
     final isAwaitingVisitor =
         bufferExecutor?.currentPhase == SequencePhase.awaitingVisitor ||
             bufferExecutor?.isAwaitingVisitor == true;
 
-    if (isStale && isAwaitingVisitor) {
-      debugPrint(
-          'HUD: ⚠️ Connection stale but AWAITING VISITOR - skipping reconnect to preserve tour state');
-      debugPrint('HUD: 💡 User may be pressing START TOUR button on tablet');
-      return;
-    }
-
     if (isStale) {
-      debugPrint('HUD: Connection STALE! Reconnecting gRPC only (preserving WebSocket)...');
       final savedUrl = robot.robotUrl;
-      if (savedUrl.isNotEmpty) {
+      if (savedUrl.isEmpty) return;
+      final host = _extractHost(savedUrl);
+
+      if (isAwaitingVisitor) {
+        // Awaiting visitor: reconnect WebSocket directly (preserves BufferClient/tour state)
+        debugPrint('HUD: Connection STALE while awaiting visitor - low-level WS reconnect');
+        robot.client.reconnect();
+        // Also reconnect gRPC for command channel
+        context.read<UnifiedTransportManager>().connectToHost(host);
+        // Monitor heartbeat to detect if button was pressed while disconnected
+        if (bufferExecutor != null && bufferClient != null) {
+          _monitorButtonStandbyRecovery(bufferExecutor, bufferClient);
+        }
+      } else {
+        debugPrint('HUD: Connection STALE! Full reconnect (WebSocket + gRPC)...');
         if (kIsWeb) {
-          // Web: reconnect WebSocket
           robot.disconnect();
           Future.delayed(const Duration(milliseconds: 500), () {
             if (mounted) robot.connect(savedUrl);
           });
         } else {
-          // Native: only reconnect gRPC, preserve WebSocket (keeps waypoints/capabilities)
-          final host = _extractHost(savedUrl);
-          context.read<UnifiedTransportManager>().connectToHost(host);
-          // Only reconnect WS if it's actually disconnected
-          if (robot.state != RobotConnectionState.connected) {
-            final wsUrl = 'ws://$host:8766';
-            robot.connectWithDisplayUrl(wsUrl, host);
-          }
+          // Full reconnect: WebSocket (heartbeats) + gRPC (commands)
+          robot.disconnect();
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) {
+              final wsUrl = 'ws://$host:8766';
+              robot.connectWithDisplayUrl(wsUrl, host);
+              context.read<UnifiedTransportManager>().connectToHost(host);
+            }
+          });
         }
       }
     } else {
@@ -384,6 +390,38 @@ class _HudScreenState extends State<HudScreen>
       // Seed the SINC rhythm by triggering a state update
       robot.notifyListeners();
     }
+  }
+
+  /// Monitor heartbeat after reconnection to detect if button_standby was
+  /// completed while disconnected (visitor pressed START TOUR on tablet).
+  void _monitorButtonStandbyRecovery(
+      BufferSequenceExecutor executor, BufferClient client) {
+    debugPrint('HUD: Monitoring for button_standby recovery after reconnect...');
+    int checks = 0;
+    const maxChecks = 20; // 10 seconds max
+    Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      checks++;
+      if (!mounted || checks > maxChecks) {
+        timer.cancel();
+        if (checks > maxChecks) {
+          debugPrint('HUD: Button standby recovery timeout - no heartbeat received');
+        }
+        return;
+      }
+      // Once we get a heartbeat (no longer stale), the BufferSequenceExecutor's
+      // heartbeat handler will auto-detect if button was pressed while disconnected
+      if (!client.isStale) {
+        timer.cancel();
+        final state = client.state;
+        final currentType = state.current?.type;
+        debugPrint('HUD: Reconnected! Buffer: current=$currentType, pending=${state.pendingCount}');
+        if (currentType != 'button_standby') {
+          debugPrint('HUD: button_standby already completed - relay running tour');
+        } else {
+          debugPrint('HUD: button_standby still active - waiting for visitor');
+        }
+      }
+    });
   }
 
   /// Enable wake lock to keep screen on during tours
@@ -1049,13 +1087,16 @@ class _HudScreenState extends State<HudScreen>
                       onTap: () {
                         debugPrint(
                             'HUD: SKIP WAIT pressed - resuming tour without visitor');
-                        // If connection is stale (app was backgrounded), reconnect first
+                        // If connection is stale (app was backgrounded), reconnect without destroying tour state
                         final bc = tourManager.bufferExecutor?.bufferClient;
                         if (bc != null && bc.isStale) {
-                          debugPrint('HUD: Connection stale - triggering reconnect before resume');
+                          debugPrint('HUD: Connection stale - low-level WS reconnect (preserving tour)');
                           final r = context.read<RobotConnection>();
                           final host = _extractHost(r.robotUrl);
                           if (host.isNotEmpty) {
+                            // Low-level WebSocket reconnect (preserves BufferClient)
+                            r.client.reconnect();
+                            // Reconnect gRPC
                             context.read<UnifiedTransportManager>().connectToHost(host);
                           }
                         }
@@ -1469,12 +1510,14 @@ class _HudScreenState extends State<HudScreen>
             ),
           ],
 
-          // Stale data warning - check BOTH RobotConnection AND BufferClient
-          // robot.isStale: WebSocket status updates not received
-          // bufferClient.isStale: Relay heartbeats not received OR robot data old
+          // Stale data warning - BufferClient is authoritative when active
+          // bufferClient tracks relay heartbeat rhythm + robot data_age_ms
+          // robot.isStale only tracks WebSocket /robot_status subscription (can lag after background)
           Builder(builder: (context) {
-            final bufferStale = tourManager.bufferClient?.isStale ?? false;
-            final isStale = robot.isStale || bufferStale;
+            final bufferClient = tourManager.bufferClient;
+            final isStale = bufferClient != null
+                ? bufferClient.isStale  // Buffer active: trust relay heartbeat
+                : robot.isStale;        // No buffer: fall back to WS subscription
             if (!isStale) return const SizedBox.shrink();
             return const Row(
               mainAxisSize: MainAxisSize.min,

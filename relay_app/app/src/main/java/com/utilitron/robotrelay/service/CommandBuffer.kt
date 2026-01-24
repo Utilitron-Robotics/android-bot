@@ -206,12 +206,17 @@ class CommandBuffer(
      * Completes the current standby command (motion_standby or button_standby).
      */
     fun notifyTourStarted() {
-        val cmd = currentCommand ?: return
-        if (cmd.type != "motion_standby" && cmd.type != "button_standby") {
-            Log.w(TAG, "notifyTourStarted called but current command is ${cmd.type}")
+        val cmd = currentCommand
+        if (cmd == null) {
+            Log.e(TAG, "notifyTourStarted called but currentCommand is NULL! Buffer may have been cleared/restarted.")
+            Log.e(TAG, "  pendingQueue.size=${pendingQueue.size}, completedHistory.size=${completedHistory.size}")
             return
         }
-        Log.i(TAG, "Tour started via button press, completing ${cmd.type}")
+        if (cmd.type != "motion_standby" && cmd.type != "button_standby") {
+            Log.w(TAG, "notifyTourStarted called but current command is ${cmd.type} (id=${cmd.id})")
+            return
+        }
+        Log.i(TAG, "Tour started via button press, completing ${cmd.type} (id=${cmd.id})")
         completeCommand(cmd.id, "success")
     }
 

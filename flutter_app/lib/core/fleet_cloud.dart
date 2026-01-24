@@ -209,9 +209,13 @@ class FleetCloudClient extends ChangeNotifier {
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 10));
 
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        if (response.body.isNotEmpty) {
+          return jsonDecode(response.body) as Map<String, dynamic>;
+        }
+        return {}; // Success but no body (201/204)
       }
+      debugPrint('FleetCloud: POST $path status=${response.statusCode}: ${response.body}');
     } catch (e) {
       debugPrint('FleetCloud: POST $path failed: $e');
     }
@@ -415,9 +419,13 @@ class FleetCloudClient extends ChangeNotifier {
         headers: _headers,
         body: jsonEncode(body),
       ).timeout(const Duration(seconds: 10));
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        if (response.body.isNotEmpty) {
+          return jsonDecode(response.body) as Map<String, dynamic>;
+        }
+        return {}; // Success but no body (204)
       }
+      debugPrint('FleetCloud: PUT $path status=${response.statusCode}: ${response.body}');
     } catch (e) {
       debugPrint('FleetCloud: PUT $path failed: $e');
     }
