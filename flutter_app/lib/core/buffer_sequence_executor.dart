@@ -373,12 +373,6 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     _completedCommandCount++;
 
-    // Clear countdown immediately so timer doesn't hang at 1
-    if (_countdownSeconds > 0) {
-      _countdownSeconds = 0;
-      _bufferClient.updateCountdown(0);
-    }
-
     // Clamp to prevent impossible states
     if (_completedCommandCount > _totalCommandCount && _totalCommandCount > 0) {
       debugPrint(
