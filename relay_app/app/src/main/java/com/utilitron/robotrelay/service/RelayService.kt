@@ -315,7 +315,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                 port = 50051,
                 robotClient = robotClient,
                 taskExecutor = this,
-                context = this
+                context = this,
+                commandBuffer = relayServer.commandBuffer
             )
             grpcServer?.start()
             Log.i(TAG, "✅ gRPC server started on port 50051 - WAN-READY!")

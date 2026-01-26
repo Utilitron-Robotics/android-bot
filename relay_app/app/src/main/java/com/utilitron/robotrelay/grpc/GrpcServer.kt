@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.utilitron.robotrelay.service.RobotWebSocketClient
 import com.utilitron.robotrelay.service.RelayServer
+import com.utilitron.robotrelay.service.CommandBuffer
 import io.grpc.Server
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder
 import kotlinx.coroutines.*
@@ -23,7 +24,8 @@ class GrpcServer(
     private val port: Int = 50051,
     private val robotClient: RobotWebSocketClient,
     private val taskExecutor: RelayServer.TaskExecutor? = null,
-    private val context: Context
+    private val context: Context,
+    private val commandBuffer: CommandBuffer? = null
 ) {
     companion object {
         private const val TAG = "GrpcServer"
@@ -39,7 +41,7 @@ class GrpcServer(
 
     fun start() {
         try {
-            serviceImpl = RobotControlServiceImpl(robotClient, taskExecutor, context)
+            serviceImpl = RobotControlServiceImpl(robotClient, taskExecutor, context, commandBuffer)
 
             server = NettyServerBuilder
                 .forPort(port)

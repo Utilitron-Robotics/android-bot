@@ -6,6 +6,7 @@ import com.utilitron.robotrelay.service.RobotWebSocketClient
 import com.utilitron.robotrelay.service.RelayServer
 import com.utilitron.robotrelay.service.ConnectionState
 import com.utilitron.robotrelay.service.WebRtcManager
+import com.utilitron.robotrelay.service.CommandBuffer
 import io.grpc.stub.StreamObserver
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -20,7 +21,8 @@ import com.utilitron.robotrelay.grpc.RobotControlGrpc
 class RobotControlServiceImpl(
     private val robotClient: RobotWebSocketClient,
     private val taskExecutor: RelayServer.TaskExecutor?,
-    private val context: Context
+    private val context: Context,
+    private val commandBuffer: CommandBuffer? = null
 ) : RobotControlGrpc.RobotControlImplBase() {
 
     companion object {
@@ -289,22 +291,23 @@ class RobotControlServiceImpl(
             BufferControl.ControlCase.LOAD -> {
                 // Load commands into buffer
                 Log.i(TAG, "Loading ${control.load.commandsList.size} commands")
+                // TODO: Implement command loading via gRPC
             }
             BufferControl.ControlCase.PAUSE -> {
-                // Pause buffer execution
-                Log.i(TAG, "Pausing buffer")
+                Log.i(TAG, "gRPC: Pausing buffer")
+                commandBuffer?.pause()
             }
             BufferControl.ControlCase.RESUME -> {
-                // Resume buffer execution
-                Log.i(TAG, "Resuming buffer")
+                Log.i(TAG, "gRPC: Resuming buffer")
+                commandBuffer?.resume()
             }
             BufferControl.ControlCase.SKIP -> {
-                // Skip current command
-                Log.i(TAG, "Skipping current command")
+                Log.i(TAG, "gRPC: Skipping current command")
+                commandBuffer?.skip()
             }
             BufferControl.ControlCase.CLEAR -> {
-                // Clear all commands
-                Log.i(TAG, "Clearing buffer")
+                Log.i(TAG, "gRPC: Clearing buffer")
+                commandBuffer?.clear()
             }
             else -> Log.w(TAG, "Unknown buffer control: ${control.controlCase}")
         }
