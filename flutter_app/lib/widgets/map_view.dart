@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -61,6 +62,11 @@ class _MapViewState extends State<MapView> {
   double _robotY = 0;
   double _robotTheta = 0;
 
+  // LIDAR points for real-time obstacle/people visualization
+  List<double> _lidarPx = [];
+  List<double> _lidarPy = [];
+  Timer? _lidarTimer;
+
   @override
   void initState() {
     super.initState();
@@ -92,7 +98,46 @@ class _MapViewState extends State<MapView> {
       
       // Always subscribe to pose, assuming it comes from a separate topic
       _subscribeToPose();
+
+      // Start LIDAR polling for real-time obstacle visualization
+      _startLidarPolling();
     });
+  }
+
+  /// Poll LIDAR data for real-time visualization of people/obstacles
+  void _startLidarPolling() {
+    _lidarTimer?.cancel();
+    if (_httpBaseUrl == null) return;
+
+    // Poll LIDAR every 200ms (fast enough for smooth visualization)
+    _lidarTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      _fetchLidarData();
+    });
+  }
+
+  Future<void> _fetchLidarData() async {
+    if (_httpBaseUrl == null) return;
+
+    try {
+      final response = await http.get(
+        Uri.parse('$_httpBaseUrl/lidar'),
+      ).timeout(const Duration(milliseconds: 500));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final px = (data['px'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
+        final py = (data['py'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
+
+        if (mounted && px.isNotEmpty) {
+          setState(() {
+            _lidarPx = px;
+            _lidarPy = py;
+          });
+        }
+      }
+    } catch (e) {
+      // Silent fail - LIDAR is optional visualization
+    }
   }
 
   void _subscribeToWebRtcMapStream() {
@@ -198,6 +243,7 @@ class _MapViewState extends State<MapView> {
     _wsStateSubscription?.cancel();
     _poseSubscription?.cancel();
     _pollTimer?.cancel();
+    _lidarTimer?.cancel();
     if (_mapImage != null && _mapImage != _MapCache.image) {
       _mapImage?.dispose();
     }
@@ -554,7 +600,7 @@ class _MapViewState extends State<MapView> {
       child: _mapImage == null
           ? const SizedBox.expand()
           : CustomPaint(
-              key: ValueKey(_mapImage.hashCode),
+              key: ValueKey('${_mapImage.hashCode}_${_lidarPx.length}'),
               painter: _MapPainter(
                 mapImage: _mapImage!,
                 mapInfo: _mapInfo!,
@@ -562,6 +608,8 @@ class _MapViewState extends State<MapView> {
                 robotY: _robotY,
                 robotTheta: _robotTheta,
                 fillMode: true,
+                lidarPx: _lidarPx,
+                lidarPy: _lidarPy,
               ),
               size: Size.infinite,
             ),
@@ -618,13 +666,15 @@ class _MapViewState extends State<MapView> {
     }
 
     return CustomPaint(
-      key: ValueKey(_mapImage.hashCode),
+      key: ValueKey('${_mapImage.hashCode}_${_lidarPx.length}'),
       painter: _MapPainter(
         mapImage: _mapImage!,
         mapInfo: _mapInfo!,
         robotX: _robotX,
         robotY: _robotY,
         robotTheta: _robotTheta,
+        lidarPx: _lidarPx,
+        lidarPy: _lidarPy,
       ),
       size: Size.infinite,
     );
@@ -654,6 +704,8 @@ class _MapPainter extends CustomPainter {
   final double robotY;
   final double robotTheta;
   final bool fillMode; // When true, centers map and fills available space
+  final List<double> lidarPx;
+  final List<double> lidarPy;
 
   _MapPainter({
     required this.mapImage,
@@ -662,6 +714,8 @@ class _MapPainter extends CustomPainter {
     required this.robotY,
     required this.robotTheta,
     this.fillMode = false,
+    this.lidarPx = const [],
+    this.lidarPy = const [],
   });
 
   @override
@@ -699,6 +753,38 @@ class _MapPainter extends CustomPainter {
     canvas.scale(scale, -scale);
     canvas.drawImage(mapImage, Offset.zero, Paint());
     canvas.restore();
+
+    // Draw LIDAR points - shows people/obstacles as silhouettes!
+    if (lidarPx.isNotEmpty && lidarPx.length == lidarPy.length) {
+      final lidarPaint = Paint()
+        ..color = Colors.red.withOpacity(0.8)
+        ..strokeWidth = 2.0
+        ..style = PaintingStyle.fill;
+
+      for (var i = 0; i < lidarPx.length; i++) {
+        // Transform from robot frame to world frame
+        final localX = lidarPx[i];
+        final localY = lidarPy[i];
+
+        // Skip invalid/far points
+        final dist = (localX * localX + localY * localY);
+        if (dist < 0.01 || dist > 100) continue; // Skip < 10cm or > 10m
+
+        // Rotate by robot heading
+        final cosTheta = cos(robotTheta);
+        final sinTheta = sin(robotTheta);
+        final worldX = robotX + localX * cosTheta - localY * sinTheta;
+        final worldY = robotY + localX * sinTheta + localY * cosTheta;
+
+        // Convert to screen coordinates
+        final pixelX = (worldX - mapInfo.originX) / mapInfo.resolution;
+        final pixelY = (worldY - mapInfo.originY) / mapInfo.resolution;
+        final screenX = centerX + (pixelX * scale);
+        final screenY = (centerY + scaledHeight) - (pixelY * scale);
+
+        canvas.drawCircle(Offset(screenX, screenY), 2.0, lidarPaint);
+      }
+    }
 
     // Draw robot position
     final robotPixelX = (robotX - mapInfo.originX) / mapInfo.resolution;
@@ -750,6 +836,7 @@ class _MapPainter extends CustomPainter {
         oldDelegate.robotX != robotX ||
         oldDelegate.robotY != robotY ||
         oldDelegate.robotTheta != robotTheta ||
-        oldDelegate.fillMode != fillMode;
+        oldDelegate.fillMode != fillMode ||
+        oldDelegate.lidarPx.length != lidarPx.length;
   }
 }

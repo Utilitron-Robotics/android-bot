@@ -94,6 +94,15 @@ class RobotWebSocketClient(
     var lastLidarTime: Long = 0
         private set
 
+    // Raw LIDAR points for visualization (in robot frame)
+    // These are the px/py coordinates that show people/obstacles as silhouettes
+    @Volatile
+    var lidarPointsX: List<Double> = emptyList()
+        private set
+    @Volatile
+    var lidarPointsY: List<Double> = emptyList()
+        private set
+
     // Crowd control config: distance-proportional speed limiting
     private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here
     private var crowdRampRate: Double = 0.5      // 0.1=gentle, 1.0=aggressive
@@ -472,6 +481,10 @@ class RobotWebSocketClient(
                     val py = msg.get("py")?.asJsonArray?.map { it.asDouble }
 
                     if (px != null && py != null && px.size == py.size) {
+                        // Store raw points for visualization (shows people/obstacles as silhouettes)
+                        lidarPointsX = px
+                        lidarPointsY = py
+
                         // Feed coordinate data to obstacle classifier
                         obstacleClassifier?.processLidarScan(px, py)
 

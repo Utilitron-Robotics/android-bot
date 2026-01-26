@@ -286,6 +286,8 @@ class RelayHttpServer(
             // Map endpoint - HTTP transport for large map data (more reliable than WS)
             uri == "/map" && method == Method.GET -> handleGetMap()
             uri == "/map/refresh" && method == Method.POST -> handleRefreshMap()
+            // LIDAR endpoint - real-time scan points for visualization (shows people silhouettes!)
+            uri == "/lidar" && method == Method.GET -> handleGetLidar()
             // Task endpoints
             uri == "/speak" && method == Method.POST -> handleSpeak(session)
             uri == "/display" && method == Method.POST -> handleDisplay(session)
@@ -464,6 +466,43 @@ class RelayHttpServer(
         return newFixedLengthResponse(Response.Status.OK, "application/json", mapJson).apply {
             addHeader("X-Map-Age-Ms", age.toString())
             addHeader("X-Map-Size", mapJson.length.toString())
+        }
+    }
+
+    /**
+     * GET /lidar - Real-time LIDAR scan points for visualization
+     * Returns px/py coordinate arrays in robot frame - render these on the map
+     * to see people, obstacles, and dynamic objects as silhouettes!
+     */
+    private fun handleGetLidar(): Response {
+        val px = robotClient.lidarPointsX
+        val py = robotClient.lidarPointsY
+        val age = System.currentTimeMillis() - robotClient.lastLidarTime
+
+        if (px.isEmpty() || age > 5000) {
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json",
+                gson.toJson(mapOf(
+                    "error" to "No LIDAR data available",
+                    "age_ms" to age,
+                    "hint" to "Robot may not be publishing /laser_data"
+                )))
+        }
+
+        // Also include robot pose so Flutter can transform to world coordinates
+        val status = robotClient.robotStatus.value
+        val data = mapOf(
+            "px" to px,
+            "py" to py,
+            "robot_x" to (status?.x ?: 0.0),
+            "robot_y" to (status?.y ?: 0.0),
+            "robot_theta" to (status?.theta ?: 0.0),
+            "age_ms" to age,
+            "point_count" to px.size
+        )
+
+        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(data)).apply {
+            addHeader("X-Lidar-Age-Ms", age.toString())
+            addHeader("X-Point-Count", px.size.toString())
         }
     }
 
