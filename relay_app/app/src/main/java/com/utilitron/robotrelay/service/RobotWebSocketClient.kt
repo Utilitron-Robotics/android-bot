@@ -265,6 +265,7 @@ class RobotWebSocketClient(
         send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection (boolean)
         send(ChassisProtocol.subscribeDetectedPeopleArray())  // Rich people detection data
         send(ChassisProtocol.subscribeHandpose())  // Hand gesture detection
+        send(ChassisProtocol.subscribeLocalCostmap())  // Real-time obstacle blocks (OEM-style)
         // Subscribe to /map (raw OccupancyGrid, no fragmentation - works on our robots)
         val mapSubMsg = ChassisProtocol.subscribeMap()
         val mapSent = send(mapSubMsg)
@@ -558,6 +559,20 @@ class RobotWebSocketClient(
                     val gestureId = msg.get("data")?.asInt
                     if (gestureId != null) {
                         Log.i(TAG, ">>> Hand gesture ID: $gestureId")
+                    }
+                }
+                ChassisProtocol.TOPIC_LOCAL_COSTMAP -> {
+                    // Local costmap - shows real-time obstacles as inflated blocks
+                    val info = msg.get("info")?.asJsonObject
+                    val data = msg.get("data")?.asJsonArray
+                    if (info != null && data != null) {
+                        val width = info.get("width")?.asInt ?: 0
+                        val height = info.get("height")?.asInt ?: 0
+                        val resolution = info.get("resolution")?.asFloat ?: 0f
+                        // Count occupied cells (value > 0)
+                        val occupiedCount = data.count { it.asInt > 0 }
+                        Log.i(TAG, ">>> LOCAL_COSTMAP: ${width}x${height} @ ${resolution}m, occupied=$occupiedCount")
+                        // TODO: Store and expose via /costmap endpoint for Flutter visualization
                     }
                 }
             }

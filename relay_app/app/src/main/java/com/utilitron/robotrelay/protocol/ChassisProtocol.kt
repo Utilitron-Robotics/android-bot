@@ -36,6 +36,7 @@ object ChassisProtocol {
     const val TOPIC_PEOPLE_DETECTED = "/people_detected"
     const val TOPIC_DETECTED_PEOPLE_ARRAY = "/detected_people_array"  // Rich people detection data
     const val TOPIC_HANDPOSE = "/handpose"  // Hand gesture detection
+    const val TOPIC_LOCAL_COSTMAP = "/move_base/local_costmap/costmap"  // Real-time obstacle blocks
 
     // Services
     const val SERVICE_POI = "/poi"
@@ -131,6 +132,19 @@ object ChassisProtocol {
         id = "get_handpose",
         topic = TOPIC_HANDPOSE,
         type = "std_msgs/Int32"  // Likely gesture ID
+    ))
+
+    /**
+     * Subscribe to local costmap - shows real-time obstacles as inflated "blocks".
+     * This is what the OEM software uses to show obstacle rectangles on the map.
+     * Throttled heavily because costmap can be large.
+     */
+    fun subscribeLocalCostmap(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_local_costmap",
+        topic = TOPIC_LOCAL_COSTMAP,
+        type = "nav_msgs/OccupancyGrid",
+        throttleRate = 500  // 2Hz max - costmap is heavy
     ))
 
     /**
