@@ -233,6 +233,12 @@ flutter run -d [platform]  # ios, android, chrome, macos
 - **SINC-Style Health Checks** - Heartbeat staleness detection on app resume and tour start
 - **Case-Insensitive Waypoints** - Waypoint matching normalized to prevent missed stops
 - **REST AT END Fix** - Timer now starts after arrival, not before
+- **data_age_ms Staleness Fix** - Timestamp now tracked immediately on message receipt (not in coroutine)
+- **gRPC Stream Synchronization** - Mutex locks prevent DATA_LOSS errors from concurrent writes
+
+### Connection Handling
+- **Adaptive Reconnect During Tours** - HUD detects active tours (via TourManager) and uses low-level WS reconnect to preserve tour state instead of triggering full reconnect
+- **HUD as Passive Observer** - Reconnects no longer cancel active navigation or reset relay state
 
 ### UX Changes
 - **Screen Lock Disabled** - Full HUD visible during tours (no "Do not touch" overlay)
