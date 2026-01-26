@@ -94,6 +94,10 @@ class RobotWebSocketClient(
     var lastLidarTime: Long = 0
         private set
 
+    // Rate limit costmap logging (it's HUGE - 40k+ cells at 2Hz)
+    private var lastCostmapLogTime: Long = 0
+    private var lastPeopleArrayLogTime: Long = 0
+
     // Raw LIDAR points for visualization (in robot frame)
     // These are the px/py coordinates that show people/obstacles as silhouettes
     @Volatile
@@ -533,24 +537,24 @@ class RobotWebSocketClient(
                     }
                 }
                 ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY -> {
-                    // Rich people detection data - LOG EVERYTHING to understand format
-                    Log.i(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${msg}")
-                    // Parse what we can - try common field names
-                    val count = msg.get("count")?.asInt
-                        ?: msg.get("people_count")?.asInt
-                        ?: msg.get("num")?.asInt
-                    val people = msg.get("people")?.asJsonArray
-                        ?: msg.get("data")?.asJsonArray
-                        ?: msg.get("detections")?.asJsonArray
-
-                    if (count != null) {
-                        Log.i(TAG, ">>> People count: $count")
-                    }
-                    if (people != null && people.size() > 0) {
-                        Log.i(TAG, ">>> People array size: ${people.size()}")
-                        // Log first person's data structure
-                        val firstPerson = people.firstOrNull()
-                        Log.i(TAG, ">>> First person data: $firstPerson")
+                    // Rich people detection data - log summary only (once per second max)
+                    if (lastPeopleArrayLogTime == 0L || System.currentTimeMillis() - lastPeopleArrayLogTime > 1000) {
+                        lastPeopleArrayLogTime = System.currentTimeMillis()
+                        // Try to find array field
+                        val people = msg.get("people")?.asJsonArray
+                            ?: msg.get("data")?.asJsonArray
+                            ?: msg.get("detections")?.asJsonArray
+                            ?: msg.get("persons")?.asJsonArray
+                        if (people != null && people.size() > 0) {
+                            Log.i(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${people.size()} people detected")
+                            // Log first person's structure ONCE to understand format
+                            if (lastPeopleArrayLogTime < 5000) {
+                                Log.i(TAG, ">>> First person structure: ${people.firstOrNull()}")
+                            }
+                        } else {
+                            // Log the keys to understand the message format
+                            Log.i(TAG, ">>> DETECTED_PEOPLE_ARRAY keys: ${msg.keySet()}")
+                        }
                     }
                 }
                 ChassisProtocol.TOPIC_HANDPOSE -> {
@@ -562,17 +566,14 @@ class RobotWebSocketClient(
                     }
                 }
                 ChassisProtocol.TOPIC_LOCAL_COSTMAP -> {
-                    // Local costmap - shows real-time obstacles as inflated blocks
-                    val info = msg.get("info")?.asJsonObject
-                    val data = msg.get("data")?.asJsonArray
-                    if (info != null && data != null) {
-                        val width = info.get("width")?.asInt ?: 0
-                        val height = info.get("height")?.asInt ?: 0
-                        val resolution = info.get("resolution")?.asFloat ?: 0f
-                        // Count occupied cells (value > 0)
-                        val occupiedCount = data.count { it.asInt > 0 }
-                        Log.i(TAG, ">>> LOCAL_COSTMAP: ${width}x${height} @ ${resolution}m, occupied=$occupiedCount")
-                        // TODO: Store and expose via /costmap endpoint for Flutter visualization
+                    // Local costmap - MASSIVE data, just track that we're getting it
+                    // Don't log the actual data - it's 40,000+ cells at 2Hz!
+                    if (lastCostmapLogTime == 0L || System.currentTimeMillis() - lastCostmapLogTime > 10000) {
+                        val info = msg.get("info")?.asJsonObject
+                        val width = info?.get("width")?.asInt ?: 0
+                        val height = info?.get("height")?.asInt ?: 0
+                        Log.i(TAG, ">>> LOCAL_COSTMAP: Receiving ${width}x${height} grid (logging once per 10s)")
+                        lastCostmapLogTime = System.currentTimeMillis()
                     }
                 }
             }
