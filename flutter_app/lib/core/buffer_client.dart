@@ -582,6 +582,14 @@ class BufferClient extends ChangeNotifier {
   void _handleHeartbeat(Map<String, dynamic> json) {
     final now = DateTime.now();
 
+    // ACK heartbeat back to relay - proves bidirectional connection is alive
+    final sequence = json['sequence'] as int? ?? _heartbeatCount;
+    _client.send({
+      'op': 'heartbeat_ack',
+      'sequence': sequence,
+      'timestamp': now.millisecondsSinceEpoch,
+    });
+
     // DEBUG: Log robot data age from heartbeat
     final robotData = json['robot'] as Map<String, dynamic>?;
     final dataAgeMs = robotData?['data_age_ms'] as int? ?? -1;

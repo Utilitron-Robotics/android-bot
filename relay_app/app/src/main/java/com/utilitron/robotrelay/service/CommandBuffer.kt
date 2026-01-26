@@ -88,6 +88,21 @@ class CommandBuffer(
     val isFlutterConnected: Boolean get() = flutterMessenger.isConnected.value
 
     /**
+     * Called when Flutter acknowledges a heartbeat.
+     * This proves the bidirectional connection is alive - Flutter received our heartbeat
+     * and was able to send an ACK back.
+     */
+    fun onHeartbeatAck(sequence: Int, timestamp: Long) {
+        val heartbeat = HeartbeatData(
+            timestamp = timestamp,
+            source = "flutter",
+            sequenceNumber = sequence
+        )
+        flutterMessenger.receiveHeartbeat(heartbeat)
+        Log.d(TAG, "Flutter ACK received (seq=$sequence) - bidirectional connection confirmed")
+    }
+
+    /**
      * Start the buffer (heartbeat + execution loop)
      */
     fun start() {

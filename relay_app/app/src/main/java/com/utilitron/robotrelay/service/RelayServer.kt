@@ -778,6 +778,12 @@ class RelayWebSocketServer(
                         commandBuffer?.skip()
                         return
                     }
+                    "heartbeat_ack" -> {
+                        // Flutter confirmed it received heartbeat - connection is bidirectionally alive
+                        val sequence = json.get("sequence")?.asInt ?: 0
+                        commandBuffer?.onHeartbeatAck(sequence, System.currentTimeMillis())
+                        return
+                    }
                     "buffer_status" -> {
                         Log.i(TAG, "Buffer status request")
                         // Heartbeat will send current status
