@@ -98,6 +98,13 @@ class RobotWebSocketClient(
     private var lastCostmapLogTime: Long = 0
     private var lastPeopleArrayLogTime: Long = 0
 
+    // === HUMAN DETECTION TOPIC DISCOVERY ===
+    // Log ANY topic that might be related to people/human detection
+    private val humanTopicKeywords = listOf(
+        "people", "person", "human", "body", "skeleton", "leg", "track",
+        "detect", "face", "gesture", "hand", "pose", "pedestrian", "obstacle"
+    )
+
     // Raw LIDAR points for visualization (in robot frame)
     // These are the px/py coordinates that show people/obstacles as silhouettes
     @Volatile
@@ -398,6 +405,16 @@ class RobotWebSocketClient(
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
             val current = _robotStatus.value ?: RobotStatusData()
+
+            // === LOG ANY HUMAN-RELATED TOPICS ===
+            val topicLower = topic.lowercase()
+            if (humanTopicKeywords.any { topicLower.contains(it) }) {
+                Log.i(TAG, ">>> HUMAN_TOPIC: $topic")
+                Log.i(TAG, ">>> HUMAN_DATA keys: ${msg.keySet()}")
+                // Log first 500 chars of data to see structure
+                val dataPreview = msg.toString().take(500)
+                Log.i(TAG, ">>> HUMAN_DATA preview: $dataPreview")
+            }
 
             when (topic) {
                 ChassisProtocol.TOPIC_ROBOT_STATUS -> {
