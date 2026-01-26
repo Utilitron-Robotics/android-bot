@@ -31,7 +31,11 @@ class RobotControlServiceImpl(
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val activeStreams = ConcurrentHashMap<String, StreamObserver<ServerMessage>>()
+    private val streamActive = ConcurrentHashMap<String, Boolean>()  // Track stream lifecycle
     private val webRtcManagers = ConcurrentHashMap<String, WebRtcManager>()
+
+    // Mutex to synchronize gRPC stream writes - prevents DATA_LOSS errors from concurrent onNext() calls
+    private val streamLocks = ConcurrentHashMap<String, Any>()
 
 
     /**
@@ -44,38 +48,51 @@ class RobotControlServiceImpl(
 
         val streamId = System.currentTimeMillis().toString()
         activeStreams[streamId] = responseObserver
+        streamActive[streamId] = true
+        streamLocks[streamId] = Any()  // Create lock for this stream
 
         Log.i(TAG, "New gRPC stream connected: $streamId")
+
+        // Thread-safe send helper - prevents DATA_LOSS from concurrent onNext() calls
+        fun safeSend(message: ServerMessage): Boolean {
+            if (streamActive[streamId] != true) return false
+            val lock = streamLocks[streamId] ?: return false
+            return try {
+                synchronized(lock) {
+                    responseObserver.onNext(message)
+                }
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send message: ${e.message}")
+                streamActive[streamId] = false
+                false
+            }
+        }
 
         // Initialize WebRTC Manager for this stream
         val webRtcManager = WebRtcManager(context, robotClient) { signal ->
             val serverMessage = ServerMessage.newBuilder().setWebrtcSignal(signal).build()
-            responseObserver.onNext(serverMessage)
+            safeSend(serverMessage)
         }
         webRtcManagers[streamId] = webRtcManager
 
         // Start heartbeat for this stream
         val heartbeatJob = scope.launch {
             delay(STREAM_STABILIZE_DELAY_MS)
-            while (isActive) {
-                try {
-                    val heartbeat = buildHeartbeat()
-                    val message = ServerMessage.newBuilder()
-                        .setHeartbeat(heartbeat)
-                        .build()
-                    responseObserver.onNext(message)
-                    delay(HEARTBEAT_INTERVAL_MS)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Heartbeat failed: ${e.message}")
-                    break
-                }
+            while (isActive && streamActive[streamId] == true) {
+                val heartbeat = buildHeartbeat()
+                val message = ServerMessage.newBuilder()
+                    .setHeartbeat(heartbeat)
+                    .build()
+                if (!safeSend(message)) break
+                delay(HEARTBEAT_INTERVAL_MS)
             }
         }
 
         // Subscribe to robot status updates
         val statusJob = scope.launch {
             robotClient.robotStatus.collect { status ->
-                if (status != null) {
+                if (status != null && streamActive[streamId] == true) {
                     val now = System.currentTimeMillis()
                     val dataAge = if (robotClient.lastRobotDataTime > 0)
                         now - robotClient.lastRobotDataTime else -1L
@@ -107,11 +124,7 @@ class RobotControlServiceImpl(
                         .setRobotStatus(robotStatus)
                         .build()
 
-                    try {
-                        responseObserver.onNext(message)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to send status update: ${e.message}")
-                    }
+                    safeSend(message)
                 }
             }
         }
@@ -197,18 +210,32 @@ class RobotControlServiceImpl(
         scope.launch {
             val success = executeCommand(command)
 
-            // Send result back to stream
-            val result = CommandResult.newBuilder()
-                .setCommandId(command.id)
-                .setStatus(if (success) "success" else "failed")
-                .setMessage(command.type)
-                .build()
+            // Send result back to stream (only if still active)
+            if (streamActive[streamId] == true) {
+                val result = CommandResult.newBuilder()
+                    .setCommandId(command.id)
+                    .setStatus(if (success) "success" else "failed")
+                    .setMessage(command.type)
+                    .build()
 
-            val message = ServerMessage.newBuilder()
-                .setCommandResult(result)
-                .build()
+                val message = ServerMessage.newBuilder()
+                    .setCommandResult(result)
+                    .build()
 
-            activeStreams[streamId]?.onNext(message)
+                // Use synchronized send to prevent DATA_LOSS from concurrent writes
+                val lock = streamLocks[streamId]
+                val observer = activeStreams[streamId]
+                if (lock != null && observer != null) {
+                    try {
+                        synchronized(lock) {
+                            observer.onNext(message)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to send command result: ${e.message}")
+                        streamActive[streamId] = false
+                    }
+                }
+            }
         }
     }
 
@@ -316,7 +343,10 @@ class RobotControlServiceImpl(
     }
 
     private fun cleanup(streamId: String, vararg jobs: Job) {
+        streamActive[streamId] = false  // Mark inactive FIRST to stop sends
         activeStreams.remove(streamId)
+        streamActive.remove(streamId)
+        streamLocks.remove(streamId)  // Clean up the lock
         webRtcManagers[streamId]?.close()
         webRtcManagers.remove(streamId)
         jobs.forEach { it.cancel() }
