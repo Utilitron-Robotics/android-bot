@@ -34,6 +34,8 @@ object ChassisProtocol {
     const val TOPIC_SOFT_STOP = "/soft_stop"
     const val TOPIC_SENSORS_CORE = "/mobile_base/sensors/core"
     const val TOPIC_PEOPLE_DETECTED = "/people_detected"
+    const val TOPIC_DETECTED_PEOPLE_ARRAY = "/detected_people_array"  // Rich people detection data
+    const val TOPIC_HANDPOSE = "/handpose"  // Hand gesture detection
 
     // Services
     const val SERVICE_POI = "/poi"
@@ -106,6 +108,29 @@ object ChassisProtocol {
         id = "get_people_detected",
         topic = TOPIC_PEOPLE_DETECTED,
         type = "std_msgs/Bool"  // True when person detected
+    ))
+
+    /**
+     * Subscribe to rich people detection data.
+     * This topic provides position, count, and tracking info for detected people.
+     * Message type is unknown - logging will reveal the actual format.
+     */
+    fun subscribeDetectedPeopleArray(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_detected_people_array",
+        topic = TOPIC_DETECTED_PEOPLE_ARRAY,
+        type = "yutong_assistance/PersonArray",  // Best guess based on other msg types
+        throttleRate = 200
+    ))
+
+    /**
+     * Subscribe to hand gesture detection.
+     */
+    fun subscribeHandpose(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_handpose",
+        topic = TOPIC_HANDPOSE,
+        type = "std_msgs/Int32"  // Likely gesture ID
     ))
 
     /**

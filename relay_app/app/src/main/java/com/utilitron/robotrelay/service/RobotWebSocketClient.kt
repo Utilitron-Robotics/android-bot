@@ -253,7 +253,9 @@ class RobotWebSocketClient(
             throttleRate = 150
         )))
         send(ChassisProtocol.subscribeGlobalPath())  // For obstacle path intersection
-        send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection
+        send(ChassisProtocol.subscribePeopleDetected())  // For human motion detection (boolean)
+        send(ChassisProtocol.subscribeDetectedPeopleArray())  // Rich people detection data
+        send(ChassisProtocol.subscribeHandpose())  // Hand gesture detection
         // Subscribe to /map (raw OccupancyGrid, no fragmentation - works on our robots)
         val mapSubMsg = ChassisProtocol.subscribeMap()
         val mapSent = send(mapSubMsg)
@@ -509,11 +511,40 @@ class RobotWebSocketClient(
                     }
                 }
                 ChassisProtocol.TOPIC_PEOPLE_DETECTED -> {
-                    // Robot's built-in people detection
+                    // Robot's built-in people detection (boolean)
                     val detected = msg.get("data")?.asBoolean ?: false
                     if (detected != _peopleDetected.value) {
-                        Log.i(TAG, "People detection changed: $detected")
+                        Log.i(TAG, ">>> PEOPLE_DETECTED: $detected")
                         _peopleDetected.value = detected
+                    }
+                }
+                ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY -> {
+                    // Rich people detection data - LOG EVERYTHING to understand format
+                    Log.i(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${msg}")
+                    // Parse what we can - try common field names
+                    val count = msg.get("count")?.asInt
+                        ?: msg.get("people_count")?.asInt
+                        ?: msg.get("num")?.asInt
+                    val people = msg.get("people")?.asJsonArray
+                        ?: msg.get("data")?.asJsonArray
+                        ?: msg.get("detections")?.asJsonArray
+
+                    if (count != null) {
+                        Log.i(TAG, ">>> People count: $count")
+                    }
+                    if (people != null && people.size() > 0) {
+                        Log.i(TAG, ">>> People array size: ${people.size()}")
+                        // Log first person's data structure
+                        val firstPerson = people.firstOrNull()
+                        Log.i(TAG, ">>> First person data: $firstPerson")
+                    }
+                }
+                ChassisProtocol.TOPIC_HANDPOSE -> {
+                    // Hand gesture detection - LOG to understand format
+                    Log.i(TAG, ">>> HANDPOSE: ${msg}")
+                    val gestureId = msg.get("data")?.asInt
+                    if (gestureId != null) {
+                        Log.i(TAG, ">>> Hand gesture ID: $gestureId")
                     }
                 }
             }
