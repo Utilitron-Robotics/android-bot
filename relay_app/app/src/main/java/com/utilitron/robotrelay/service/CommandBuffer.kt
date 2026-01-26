@@ -191,14 +191,19 @@ class CommandBuffer(
      * Skip current command
      */
     fun skip() {
-        currentCommand?.let { cmd ->
-            Log.i(TAG, "Skipping: ${cmd.type} (id=${cmd.id})")
-            completeCommand(cmd.id, "skipped")
+        val cmd = currentCommand
+        if (cmd == null) {
+            Log.w(TAG, ">>> SKIP called but currentCommand is NULL! Nothing to skip.")
+            Log.w(TAG, "    pendingQueue.size=${pendingQueue.size}")
+            return
         }
+        Log.i(TAG, ">>> SKIP: Skipping ${cmd.type} (id=${cmd.id})")
+        completeCommand(cmd.id, "skipped")
         waitingForNavArrival = false
         navArrivalPending = false
         pendingNavWaypoint = null
         hasStartedMoving = false
+        Log.i(TAG, ">>> SKIP: Done, command should advance")
     }
 
     /**
@@ -846,6 +851,8 @@ class CommandBuffer(
                 val buttonText = cmd.data["button_text"] as? String ?: "Start Tour"
                 val pin = cmd.data["pin"] as? String
                 val displayUrl = cmd.data["display_url"] as? String
+                val greetingText = cmd.data["greeting_text"] as? String
+                    ?: "HI Welcome to the Robotics Floor! If you would like a Tour tap the Start Button and Follow Me!"
 
                 Log.i(TAG, "Entering button standby for sequence: $sequenceId, button: $buttonText")
 
@@ -873,9 +880,54 @@ class CommandBuffer(
                     taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }
 
+                // Track when we last played the greeting (cooldown: 30 seconds)
+                var lastGreetingTime = 0L  // 0 = never greeted yet, so first detection can trigger
+                val greetingCooldownMs = 30_000L
+                val initialDelayMs = 1_500L  // Shorter delay - just enough for sensor to stabilize
+                var debugLogCounter = 0
+                val startedAt = System.currentTimeMillis()
+
+                // RISING EDGE detection: only greet when detection transitions false→true
+                // This prevents greeting when someone is walking AWAY (hysteresis active)
+                var wasDetectedLastCycle = false
+
                 // Wait indefinitely until the command is completed by a button press or skipped
                 while (currentCommand != null) {
                     delay(500)
+
+                    val peopleDetected = robotClient.peopleDetected.value
+                    val timeSinceStart = System.currentTimeMillis() - startedAt
+                    val risingEdge = peopleDetected && !wasDetectedLastCycle
+
+                    // Log every 10 iterations (~5 seconds) for debugging
+                    debugLogCounter++
+                    if (debugLogCounter >= 10) {
+                        debugLogCounter = 0
+                        val timeSinceGreeting = if (lastGreetingTime > 0) System.currentTimeMillis() - lastGreetingTime else -1
+                        Log.d(TAG, "button_standby: detected=$peopleDetected, wasDetected=$wasDetectedLastCycle, lastGreeting=${timeSinceGreeting}ms ago")
+                    }
+
+                    // RISING EDGE: Greet when detection transitions from false→true
+                    // This triggers when someone APPROACHES, not when they're leaving
+                    if (risingEdge && timeSinceStart > initialDelayMs) {
+                        val now = System.currentTimeMillis()
+                        val cooldownRemaining = if (lastGreetingTime > 0) greetingCooldownMs - (now - lastGreetingTime) else -1
+
+                        if (lastGreetingTime == 0L || now - lastGreetingTime > greetingCooldownMs) {
+                            Log.i(TAG, "RISING EDGE: People approaching - playing greeting: $greetingText")
+                            lastGreetingTime = now
+                            withContext(Dispatchers.Main) {
+                                taskExecutor?.speakText(greetingText) { /* no-op callback */ }
+                            }
+                        } else {
+                            Log.d(TAG, "RISING EDGE: Detection but cooldown active (${cooldownRemaining/1000}s remaining)")
+                        }
+                    } else if (risingEdge && timeSinceStart <= initialDelayMs) {
+                        Log.d(TAG, "RISING EDGE: Detection during initial settling (${(initialDelayMs - timeSinceStart)/1000}s remaining)")
+                    }
+
+                    // Track for next cycle's rising edge detection
+                    wasDetectedLastCycle = peopleDetected
                 }
 
                 // Command was completed externally (e.g., button press, skip, clear)
