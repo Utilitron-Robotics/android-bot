@@ -50,6 +50,7 @@ class CloudTtsService(
     private var fallbackTts: TextToSpeech? = null
     private var fallbackReady = false
     private var currentCallback: (() -> Unit)? = null
+    @Volatile private var cloudTtsFailed = false  // Once Cloud TTS fails, stay in fallback mode for session
 
     /** True when TTS is currently speaking */
     val isSpeaking: Boolean
@@ -126,27 +127,44 @@ class CloudTtsService(
 
         currentCallback = onComplete
 
-        // Try Cloud TTS if API key is set
-        if (!apiKey.isNullOrEmpty()) {
-            scope.launch {
-                try {
-                    val audioFile = getOrSynthesizeAudio(text, voice)
-                    if (audioFile != null) {
-                        playAudio(audioFile)
-                        return@launch
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Cloud TTS failed: ${e.message}")
-                }
+        // No API key - use device TTS directly (skip cloud entirely)
+        if (apiKey.isNullOrEmpty()) {
+            speakWithFallback(text)
+            return
+        }
 
-                // Fallback to device TTS
+        // Cloud TTS already failed this session - use fallback directly
+        if (cloudTtsFailed) {
+            speakWithFallback(text)
+            return
+        }
+
+        // Try Cloud TTS
+        scope.launch {
+            // Double-check in case another coroutine failed while we were queued
+            if (cloudTtsFailed) {
                 withContext(Dispatchers.Main) {
                     speakWithFallback(text)
                 }
+                return@launch
             }
-        } else {
-            // No API key - use device TTS directly
-            speakWithFallback(text)
+
+            try {
+                val audioFile = getOrSynthesizeAudio(text, voice)
+                if (audioFile != null) {
+                    playAudio(audioFile)
+                    return@launch
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Cloud TTS failed: ${e.message}")
+            }
+
+            // Cloud TTS failed - switch to fallback mode permanently for this session
+            cloudTtsFailed = true
+            Log.w(TAG, "Cloud TTS unavailable, using device TTS for remainder of session")
+            withContext(Dispatchers.Main) {
+                speakWithFallback(text)
+            }
         }
     }
 
@@ -266,7 +284,7 @@ class CloudTtsService(
         })
 
         fallbackTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-        Log.i(TAG, "Using fallback TTS: $text")
+        Log.d(TAG, "TTS: $text")  // Debug level - fallback is now expected
     }
 
     /**
@@ -285,18 +303,25 @@ class CloudTtsService(
      * Pre-cache common phrases for instant playback
      */
     fun precache(phrases: List<String>) {
-        if (apiKey.isNullOrEmpty()) return
+        if (apiKey.isNullOrEmpty() || cloudTtsFailed) return
 
         scope.launch {
             phrases.forEach { phrase ->
+                if (cloudTtsFailed) return@launch  // Stop if cloud TTS failed during precache
                 try {
                     getOrSynthesizeAudio(phrase, DEFAULT_VOICE)
                     delay(500) // Rate limit
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to precache: $phrase")
+                    // If precache fails, mark cloud TTS as failed
+                    cloudTtsFailed = true
+                    Log.w(TAG, "Cloud TTS unavailable during precache, using device TTS for session")
+                    return@launch
                 }
             }
-            Log.i(TAG, "Precached ${phrases.size} phrases")
+            if (!cloudTtsFailed) {
+                Log.i(TAG, "Precached ${phrases.size} phrases")
+            }
         }
     }
 

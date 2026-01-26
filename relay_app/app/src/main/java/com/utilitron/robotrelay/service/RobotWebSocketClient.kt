@@ -172,10 +172,10 @@ class RobotWebSocketClient(
                                 add("msg", mapData)
                             }
                             val converted = topicMsg.toString()
-                            Log.i(TAG, ">>> RECEIVED /static_map service response (${converted.length} bytes)")
+                            Log.d(TAG, ">>> RECEIVED /static_map service response (${converted.length} bytes)")
                             _cachedMapMessage = converted
                             _mapLastUpdated = System.currentTimeMillis()
-                            Log.i(TAG, ">>> Map cached from service call")
+                            Log.d(TAG, ">>> Map cached from service call")
                         }
                     }
                 } catch (e: Exception) {
@@ -187,10 +187,10 @@ class RobotWebSocketClient(
             // Handle complete map message (non-fragmented or after reassembly)
             val isMapMsg = text.contains("\"topic\":\"/map\"") || text.contains("\"topic\": \"/map\"")
             if (isMapMsg) {
-                Log.i(TAG, ">>> RECEIVED /map message (${text.length} bytes)")
+                Log.d(TAG, ">>> RECEIVED /map message (${text.length} bytes)")
                 _cachedMapMessage = text
                 _mapLastUpdated = System.currentTimeMillis()
-                Log.i(TAG, ">>> Map cached for HTTP transport")
+                Log.d(TAG, ">>> Map cached for HTTP transport")
             } else {
                 Log.d(TAG, text.take(200))
             }
@@ -273,8 +273,8 @@ class RobotWebSocketClient(
         // Subscribe to /map (raw OccupancyGrid, no fragmentation - works on our robots)
         val mapSubMsg = ChassisProtocol.subscribeMap()
         val mapSent = send(mapSubMsg)
-        Log.i(TAG, ">>> Sending /map subscription: $mapSubMsg")
-        Log.i(TAG, ">>> /map subscription sent: $mapSent")
+        Log.d(TAG, ">>> Sending /map subscription: $mapSubMsg")
+        Log.d(TAG, ">>> /map subscription sent: $mapSent")
     }
 
     /**
@@ -321,7 +321,7 @@ class RobotWebSocketClient(
             val data = json.optString("data", "")
             if (num < 0 || total <= 0 || data.isEmpty()) return
 
-            Log.i(TAG, ">>> Map fragment $num/$total (${data.length} bytes)")
+            Log.d(TAG, ">>> Map fragment $num/$total (${data.length} bytes)")
 
             synchronized(_mapFragments) {
                 _mapFragmentTotal = total
@@ -336,7 +336,7 @@ class RobotWebSocketClient(
                     _mapFragments.clear()
 
                     val completeMessage = reassembled.toString()
-                    Log.i(TAG, ">>> Map reassembled: ${completeMessage.length} bytes from $total fragments")
+                    Log.d(TAG, ">>> Map reassembled: ${completeMessage.length} bytes from $total fragments")
 
                     // Cache the reassembled map for HTTP transport
                     _cachedMapMessage = completeMessage
@@ -362,7 +362,7 @@ class RobotWebSocketClient(
         }
 
         scope.launch {
-            Log.i(TAG, ">>> MAP REFRESH: Starting refresh sequence")
+            Log.d(TAG, ">>> MAP REFRESH: Starting refresh sequence")
 
             val unsubMsg = ChassisProtocol.unsubscribe(ChassisProtocol.TOPIC_MAP, "get_map")
             send(unsubMsg)
@@ -371,17 +371,17 @@ class RobotWebSocketClient(
             _cachedMapMessage = null
             val subMsg = ChassisProtocol.subscribeMap()
             val sent = send(subMsg)
-            Log.i(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
+            Log.d(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
 
             delay(2000)
             if (_connectionState.value == ConnectionState.CONNECTED && _cachedMapMessage == null) {
-                Log.i(TAG, ">>> MAP REFRESH: No map from subscription, retrying...")
+                Log.d(TAG, ">>> MAP REFRESH: No map from subscription, retrying...")
                 send(subMsg)
 
                 delay(2000)
                 if (_connectionState.value == ConnectionState.CONNECTED && _cachedMapMessage == null) {
                     // Fallback: call /static_map service (works for latched topics)
-                    Log.i(TAG, ">>> MAP REFRESH: Subscription failed, calling /static_map service")
+                    Log.d(TAG, ">>> MAP REFRESH: Subscription failed, calling /static_map service")
                     val serviceCall = """{"op":"call_service","id":"get_static_map","service":"/static_map","type":"nav_msgs/GetMap"}"""
                     send(serviceCall)
                 }
@@ -532,7 +532,7 @@ class RobotWebSocketClient(
                     // Robot's built-in people detection (boolean)
                     val detected = msg.get("data")?.asBoolean ?: false
                     if (detected != _peopleDetected.value) {
-                        Log.i(TAG, ">>> PEOPLE_DETECTED: $detected")
+                        Log.d(TAG, ">>> PEOPLE_DETECTED: $detected")
                         _peopleDetected.value = detected
                     }
                 }
@@ -546,23 +546,23 @@ class RobotWebSocketClient(
                             ?: msg.get("detections")?.asJsonArray
                             ?: msg.get("persons")?.asJsonArray
                         if (people != null && people.size() > 0) {
-                            Log.i(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${people.size()} people detected")
+                            Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${people.size()} people detected")
                             // Log first person's structure ONCE to understand format
                             if (lastPeopleArrayLogTime < 5000) {
-                                Log.i(TAG, ">>> First person structure: ${people.firstOrNull()}")
+                                Log.d(TAG, ">>> First person structure: ${people.firstOrNull()}")
                             }
                         } else {
                             // Log the keys to understand the message format
-                            Log.i(TAG, ">>> DETECTED_PEOPLE_ARRAY keys: ${msg.keySet()}")
+                            Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY keys: ${msg.keySet()}")
                         }
                     }
                 }
                 ChassisProtocol.TOPIC_HANDPOSE -> {
                     // Hand gesture detection - LOG to understand format
-                    Log.i(TAG, ">>> HANDPOSE: ${msg}")
+                    Log.d(TAG, ">>> HANDPOSE: ${msg}")
                     val gestureId = msg.get("data")?.asInt
                     if (gestureId != null) {
-                        Log.i(TAG, ">>> Hand gesture ID: $gestureId")
+                        Log.d(TAG, ">>> Hand gesture ID: $gestureId")
                     }
                 }
                 ChassisProtocol.TOPIC_LOCAL_COSTMAP -> {
@@ -572,7 +572,7 @@ class RobotWebSocketClient(
                         val info = msg.get("info")?.asJsonObject
                         val width = info?.get("width")?.asInt ?: 0
                         val height = info?.get("height")?.asInt ?: 0
-                        Log.i(TAG, ">>> LOCAL_COSTMAP: Receiving ${width}x${height} grid (logging once per 10s)")
+                        Log.d(TAG, ">>> LOCAL_COSTMAP: Receiving ${width}x${height} grid (logging once per 10s)")
                         lastCostmapLogTime = System.currentTimeMillis()
                     }
                 }
@@ -612,7 +612,7 @@ class RobotWebSocketClient(
         val oldZone = safetyZone.getAndSet(newZone)
         if (newZone != oldZone) {
             val obstacleType = _robotStatus.value?.obstacleType ?: "UNKNOWN"
-            Log.i(TAG, "Safety zone: $newZone (was $oldZone) at ${minFront}m, obstacle=$obstacleType" +
+            Log.d(TAG, "Safety zone: $newZone (was $oldZone) at ${minFront}m, obstacle=$obstacleType" +
                     if (_detachMode.value) " [DETACH]" else "")
         }
         _robotStatus.value = _robotStatus.value?.copy(safetyZone = newZone)

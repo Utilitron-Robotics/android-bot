@@ -665,6 +665,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Track previous connection state for meaningful announcements
+    private var previousConnectionState: ConnectionState? = null
+
     private fun observeService() {
         service?.let { svc ->
             lifecycleScope.launch {
@@ -673,12 +676,33 @@ class MainActivity : AppCompatActivity() {
                     binding.tvRobotStatus.setTextColor(
                         when (state) {
                             ConnectionState.CONNECTED -> ContextCompat.getColor(this@MainActivity, R.color.status_green)
-                            ConnectionState.CONNECTING -> ContextCompat.getColor(this@MainActivity, R.color.status_yellow)
+                            ConnectionState.CONNECTING, ConnectionState.STALE -> ContextCompat.getColor(this@MainActivity, R.color.status_yellow)
                             else -> ContextCompat.getColor(this@MainActivity, R.color.status_red)
                         }
                     )
-                    if (state != ConnectionState.CONNECTING) {
-                        speak("Robot ${state.name.lowercase()}")
+
+                    // Only announce meaningful state transitions (backpressure)
+                    val prev = previousConnectionState
+                    previousConnectionState = state
+
+                    val shouldAnnounce = when {
+                        prev == null -> state == ConnectionState.CONNECTED  // Only announce initial connected
+                        state == ConnectionState.CONNECTING -> false  // Never announce connecting
+                        state == prev -> false  // No change
+                        state == ConnectionState.CONNECTED -> true  // Always announce connected
+                        state == ConnectionState.STALE && prev == ConnectionState.CONNECTED -> true  // Lost connection
+                        state == ConnectionState.ERROR && prev == ConnectionState.STALE -> true  // Failed after retries
+                        else -> false  // All other transitions are silent
+                    }
+
+                    if (shouldAnnounce) {
+                        val announcement = when (state) {
+                            ConnectionState.CONNECTED -> "Robot connected"
+                            ConnectionState.STALE -> "Robot disconnected"
+                            ConnectionState.ERROR -> "Robot error"
+                            else -> null
+                        }
+                        announcement?.let { speak(it) }
                     }
                 }
             }

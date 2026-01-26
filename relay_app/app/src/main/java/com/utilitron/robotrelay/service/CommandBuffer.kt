@@ -99,7 +99,7 @@ class CommandBuffer(
             sequenceNumber = sequence
         )
         flutterMessenger.receiveHeartbeat(heartbeat)
-        Log.d(TAG, "Flutter ACK received (seq=$sequence) - bidirectional connection confirmed")
+        Log.v(TAG, "Flutter ACK received (seq=$sequence) - bidirectional connection confirmed")
     }
 
     /**

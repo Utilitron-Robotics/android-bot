@@ -128,7 +128,7 @@ class WebRtcManager(
             override fun onStateChange() {
                 Log.d(TAG, "MapDataChannel state changed: ${mapDataChannel?.state()}")
                 if (mapDataChannel?.state() == DataChannel.State.OPEN) {
-                    Log.i(TAG, "WebRTC Map Data Channel OPEN. Starting map data subscription.")
+                    Log.v(TAG, "WebRTC Map Data Channel OPEN. Starting map data subscription.")
                     subscribeToMapData()
                 }
             }

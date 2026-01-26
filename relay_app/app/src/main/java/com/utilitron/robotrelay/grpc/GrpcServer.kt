@@ -103,7 +103,7 @@ class GrpcServer(
                 } else if (srv.isTerminated) {
                     Log.e(TAG, "Server is terminated!")
                 } else {
-                    Log.d(TAG, "Server healthy - Port: ${srv.port}, Services: ${srv.services.size}")
+                    Log.v(TAG, "Server healthy - Port: ${srv.port}, Services: ${srv.services.size}")
                 }
             }
         }

@@ -133,7 +133,7 @@ class RelayServer(
         connectionWatcherJob = scope.launch {
             robotClient.connectionState.collect { state ->
                 val isConnected = state == ConnectionState.CONNECTED
-                Log.i(TAG, "Robot connection state: $state (was connected: $lastRobotConnectedState)")
+                Log.d(TAG, "Robot connection state: $state (was connected: $lastRobotConnectedState)")
 
                 // Detect reconnection: was disconnected/error, now connected
                 if (isConnected && !lastRobotConnectedState) {
@@ -258,7 +258,7 @@ class RelayHttpServer(
         val uri = session.uri
         val method = session.method
 
-        Log.d(TAG, "$method $uri")
+        Log.v(TAG, "$method $uri")
 
         // CORS headers for browser access
         val corsHeaders = mutableMapOf(
@@ -754,27 +754,27 @@ class RelayWebSocketServer(
                             BufferCommand.fromJson(cmdJson.asJsonObject)
                         } ?: emptyList()
                         val clearExisting = json.get("clear_existing")?.asBoolean ?: false
-                        Log.i(TAG, "Buffer load: ${commands.size} commands, clear=$clearExisting")
+                        Log.d(TAG, "Buffer load: ${commands.size} commands, clear=$clearExisting")
                         commandBuffer?.loadCommands(commands, clearExisting)
                         return
                     }
                     "buffer_clear" -> {
-                        Log.i(TAG, "Buffer clear")
+                        Log.d(TAG, "Buffer clear")
                         commandBuffer?.clear()
                         return
                     }
                     "buffer_pause" -> {
-                        Log.i(TAG, "Buffer pause")
+                        Log.d(TAG, "Buffer pause")
                         commandBuffer?.pause()
                         return
                     }
                     "buffer_resume" -> {
-                        Log.i(TAG, "Buffer resume")
+                        Log.d(TAG, "Buffer resume")
                         commandBuffer?.resume()
                         return
                     }
                     "buffer_skip" -> {
-                        Log.i(TAG, "Buffer skip")
+                        Log.d(TAG, "Buffer skip")
                         commandBuffer?.skip()
                         return
                     }
@@ -785,7 +785,7 @@ class RelayWebSocketServer(
                         return
                     }
                     "buffer_status" -> {
-                        Log.i(TAG, "Buffer status request")
+                        Log.d(TAG, "Buffer status request")
                         // Heartbeat will send current status
                         return
                     }

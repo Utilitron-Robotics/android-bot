@@ -141,7 +141,7 @@ class RobotControlServiceImpl(
                         webRtcManagers[streamId]?.startMapStream()
                     }
                     ClientMessage.MessageCase.WEBRTC_SIGNAL -> {
-                        Log.d(TAG, "Received WebRTCSignal from client")
+                        Log.v(TAG, "Received WebRTCSignal from client")
                         webRtcManagers[streamId]?.handleSignal(value.webrtcSignal)
                     }
                     ClientMessage.MessageCase.HEARTBEAT_REQUEST -> {} // Heartbeat already running
