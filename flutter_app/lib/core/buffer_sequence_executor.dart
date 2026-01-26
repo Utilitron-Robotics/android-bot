@@ -298,14 +298,22 @@ class BufferSequenceExecutor extends ChangeNotifier {
       if (waypoint != null && _currentSequence != null) {
         // Find the stop index for this waypoint (case-insensitive match)
         final waypointNorm = waypoint.toLowerCase().trim();
+        bool foundStop = false;
         for (int i = 0; i < _currentSequence!.stops.length; i++) {
           if (_currentSequence!.stops[i].waypoint.toLowerCase().trim() == waypointNorm) {
             debugPrint(
                 'BufferSequenceExecutor: Found stop index $i for $waypoint');
             _currentStopIndex = i;
             _currentPhase = SequencePhase.navigating;
+            foundStop = true;
             break;
           }
+        }
+        // If navigating to a non-stop waypoint (start/end), clear the stop index
+        if (!foundStop) {
+          debugPrint('BufferSequenceExecutor: Waypoint $waypoint is not a stop, clearing stop index');
+          _currentStopIndex = -1;
+          _currentPhase = SequencePhase.navigating;
         }
       }
     } else if (type == 'display') {
@@ -372,6 +380,12 @@ class BufferSequenceExecutor extends ChangeNotifier {
     }
 
     _completedCommandCount++;
+
+    // Clear countdown immediately so timer doesn't hang at 1
+    if (_countdownSeconds > 0) {
+      _countdownSeconds = 0;
+      _bufferClient.updateCountdown(0);
+    }
 
     // Clamp to prevent impossible states
     if (_completedCommandCount > _totalCommandCount && _totalCommandCount > 0) {
@@ -699,6 +713,7 @@ class BufferSequenceExecutor extends ChangeNotifier {
           sequenceId: sequence.id,
           buttonText: sequence.effectiveAwaitButtonText,
           displayUrl: sequence.effectiveAwaitDisplayUrl,
+          greetingText: sequence.effectiveAwaitGreetingText,
         ));
       }
     }
@@ -787,8 +802,20 @@ class BufferSequenceExecutor extends ChangeNotifier {
       // Navigate back to start to begin loop
       if (sequence.startWaypoint != null && sequence.startWaypoint!.isNotEmpty) {
         commands.add(BufferCommand.navigate(sequence.startWaypoint!));
-        // Wait a moment at start position before restarting
-        commands.add(BufferCommand.wait(3000));
+
+        // If await visitor is enabled, wait for START button each loop iteration
+        if (sequence.awaitVisitorAtStart) {
+          debugPrint('BufferSequenceExecutor: Loop will wait for START button at start');
+          commands.add(BufferCommand.buttonStandby(
+            sequenceId: sequence.id,
+            buttonText: sequence.effectiveAwaitButtonText,
+            displayUrl: sequence.effectiveAwaitDisplayUrl,
+            greetingText: sequence.effectiveAwaitGreetingText,
+          ));
+        } else {
+          // Wait a moment at start position before restarting (only if not awaiting)
+          commands.add(BufferCommand.wait(3000));
+        }
       }
 
       // Add loop command to restart the sequence

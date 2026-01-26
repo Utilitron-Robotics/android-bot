@@ -100,6 +100,7 @@ class BufferCommand {
     required String sequenceId,
     String? buttonText,
     String? displayUrl,
+    String? greetingText,
   }) =>
       BufferCommand(
         id: 'button_standby_${DateTime.now().millisecondsSinceEpoch}',
@@ -108,6 +109,7 @@ class BufferCommand {
           'sequence_id': sequenceId,
           if (buttonText != null) 'button_text': buttonText,
           if (displayUrl != null) 'display_url': displayUrl,
+          if (greetingText != null) 'greeting_text': greetingText,
         },
       );
 

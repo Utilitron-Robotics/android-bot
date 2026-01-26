@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/buffer_client.dart' show BufferClient;
-import '../core/buffer_sequence_executor.dart' show BufferSequenceExecutor;
+import '../core/buffer_sequence_executor.dart' show BufferSequenceExecutor, SequenceExecutorStatus;
 import '../core/robot_connection.dart';
 import '../core/unified_transport.dart' show UnifiedTransportManager;
 import '../core/sequence_mode.dart'
@@ -351,23 +351,33 @@ class _HudScreenState extends State<HudScreen>
         bufferExecutor?.currentPhase == SequencePhase.awaitingVisitor ||
             bufferExecutor?.isAwaitingVisitor == true;
 
+    // ADAPTIVE RECONNECT: If tour is running, preserve state (don't full-disconnect)
+    // HUD is a control panel - it receives output from relay, doesn't send input
+    // unless something changes. Full reconnect would cancel active navigation.
+    // NOTE: Check tourManager.status (covers ALL tour types including SequenceTaskMode fallback)
+    // not just bufferExecutor.status (only covers buffer-based tours)
+    final isTourActive = tourManager.status == SequenceStatus.running ||
+        tourManager.status == SequenceStatus.paused;
+
     if (isStale) {
       final savedUrl = robot.robotUrl;
       if (savedUrl.isEmpty) return;
       final host = _extractHost(savedUrl);
 
-      if (isAwaitingVisitor) {
-        // Awaiting visitor: reconnect WebSocket directly (preserves BufferClient/tour state)
-        debugPrint('HUD: Connection STALE while awaiting visitor - low-level WS reconnect');
+      if (isAwaitingVisitor || isTourActive) {
+        // Tour running: low-level WS reconnect (preserves BufferClient/tour state)
+        // HUD should NEVER cancel navigation just because it reconnected
+        debugPrint('HUD: Connection STALE while tour active - low-level WS reconnect (preserving tour)');
         robot.client.reconnect();
         // Also reconnect gRPC for command channel
         context.read<UnifiedTransportManager>().connectToHost(host);
         // Monitor heartbeat to detect if button was pressed while disconnected
-        if (bufferExecutor != null && bufferClient != null) {
+        if (isAwaitingVisitor && bufferExecutor != null && bufferClient != null) {
           _monitorButtonStandbyRecovery(bufferExecutor, bufferClient);
         }
       } else {
-        debugPrint('HUD: Connection STALE! Full reconnect (WebSocket + gRPC)...');
+        // No tour running: full reconnect is safe
+        debugPrint('HUD: Connection STALE (no tour) - full reconnect (WebSocket + gRPC)...');
         if (kIsWeb) {
           robot.disconnect();
           Future.delayed(const Duration(milliseconds: 500), () {

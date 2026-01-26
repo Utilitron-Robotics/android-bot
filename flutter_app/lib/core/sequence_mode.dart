@@ -83,6 +83,7 @@ class Sequence {
   final bool awaitVisitorAtStart; // Wait for tap/sensor before starting tour
   final String? awaitButtonText; // Button text (default: "START TOUR")
   final String? awaitDisplayUrl; // URL to show behind button (default: "https://frontiertower.io")
+  final String? awaitGreetingText; // Greeting when people detected while waiting
 
   Sequence({
     required this.id,
@@ -99,12 +100,15 @@ class Sequence {
     this.awaitVisitorAtStart = false,
     this.awaitButtonText,
     this.awaitDisplayUrl,
+    this.awaitGreetingText,
     int? modifiedAt,
   }) : modifiedAt = modifiedAt ?? DateTime.now().millisecondsSinceEpoch;
 
   // Effective values with defaults
   String get effectiveAwaitButtonText => awaitButtonText ?? 'START TOUR';
   String get effectiveAwaitDisplayUrl => awaitDisplayUrl ?? 'https://frontiertower.io';
+  String get effectiveAwaitGreetingText => awaitGreetingText ??
+      'HI Welcome to the Robotics Floor! If you would like a Tour tap the Start Button and Follow Me!';
 
   /// Create sequence from waypoint list with auto-loaded scripts
   static Sequence fromWaypointList({
@@ -360,6 +364,7 @@ class Sequence {
         if (endWaypoint != null) 'end_waypoint': endWaypoint,
         if (awaitButtonText != null) 'await_button_text': awaitButtonText,
         if (awaitDisplayUrl != null) 'await_display_url': awaitDisplayUrl,
+        if (awaitGreetingText != null) 'await_greeting_text': awaitGreetingText,
       };
 
   factory Sequence.fromJson(Map<String, dynamic> json) => Sequence(
@@ -387,6 +392,7 @@ class Sequence {
             json['motion_button_text'] as String?,
         awaitDisplayUrl: json['await_display_url'] as String? ??
             json['motion_display_url'] as String?,
+        awaitGreetingText: json['await_greeting_text'] as String?,
       );
 
   Sequence copyWith({
@@ -405,6 +411,7 @@ class Sequence {
     bool? awaitVisitorAtStart,
     String? awaitButtonText,
     String? awaitDisplayUrl,
+    String? awaitGreetingText,
   }) =>
       Sequence(
         id: id ?? this.id,
@@ -422,6 +429,7 @@ class Sequence {
         awaitVisitorAtStart: awaitVisitorAtStart ?? this.awaitVisitorAtStart,
         awaitButtonText: awaitButtonText ?? this.awaitButtonText,
         awaitDisplayUrl: awaitDisplayUrl ?? this.awaitDisplayUrl,
+        awaitGreetingText: awaitGreetingText ?? this.awaitGreetingText,
       );
 
   /// Add a stop
@@ -931,6 +939,7 @@ class SequenceManager extends ChangeNotifier {
           cloudData['motion_button_text'] as String?,
       awaitDisplayUrl: cloudData['await_display_url'] as String? ??
           cloudData['motion_display_url'] as String?,
+      awaitGreetingText: cloudData['await_greeting_text'] as String?,
     );
   }
 
@@ -978,6 +987,7 @@ class SequenceManager extends ChangeNotifier {
         'await_visitor_at_start': sequence.awaitVisitorAtStart,
         'await_button_text': sequence.awaitButtonText,
         'await_display_url': sequence.awaitDisplayUrl,
+        'await_greeting_text': sequence.awaitGreetingText,
         'modified_at': sequence.modifiedAt,
       };
 

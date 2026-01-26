@@ -32,6 +32,8 @@ class _SequenceEditorState extends State<SequenceEditor> {
       TextEditingController();
   final TextEditingController _awaitDisplayUrlController =
       TextEditingController();
+  final TextEditingController _awaitGreetingTextController =
+      TextEditingController();
   final Map<String, TextEditingController> _stopControllers = {};
 
   // Cache to reduce unnecessary rebuilds - only rebuild when these actually change
@@ -91,6 +93,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _outroTextController.dispose();
     _awaitButtonTextController.dispose();
     _awaitDisplayUrlController.dispose();
+    _awaitGreetingTextController.dispose();
     for (final c in _stopControllers.values) {
       c.dispose();
     }
@@ -131,6 +134,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _outroTextController.text = '';
     _awaitButtonTextController.text = '';
     _awaitDisplayUrlController.text = '';
+    _awaitGreetingTextController.text = '';
     setState(() {
       _selectedSequence = newTour;
       _isEditing = true;
@@ -150,6 +154,7 @@ class _SequenceEditorState extends State<SequenceEditor> {
     _outroTextController.text = seq.outroText ?? '';
     _awaitButtonTextController.text = seq.awaitButtonText ?? '';
     _awaitDisplayUrlController.text = seq.awaitDisplayUrl ?? '';
+    _awaitGreetingTextController.text = seq.awaitGreetingText ?? '';
 
     setState(() {
       _selectedSequence = seq;
@@ -236,6 +241,9 @@ class _SequenceEditorState extends State<SequenceEditor> {
       awaitDisplayUrl: _awaitDisplayUrlController.text.isEmpty
           ? null
           : _awaitDisplayUrlController.text,
+      awaitGreetingText: _awaitGreetingTextController.text.isEmpty
+          ? null
+          : _awaitGreetingTextController.text,
     );
 
     _selectedSequence = updatedTour;
@@ -1392,6 +1400,18 @@ class _SequenceEditorState extends State<SequenceEditor> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _awaitGreetingTextController,
+                  decoration: const InputDecoration(
+                    labelText: 'Greeting (spoken when people detected)',
+                    hintText: 'Welcome! Tap the button to start your tour.',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    prefixIcon: Icon(Icons.record_voice_over, size: 18),
+                  ),
+                  maxLines: 2,
                 ),
               ],
             ],

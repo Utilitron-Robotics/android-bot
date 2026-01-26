@@ -133,6 +133,11 @@ class RobotWebSocketClient(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
+            // CRITICAL: Track when we last got ANY data from robot
+            // Must happen IMMEDIATELY on message receipt, before any coroutine launch
+            // so heartbeat always sees fresh timestamp (fixes data_age_ms=-1 bug)
+            _lastRobotDataTime = System.currentTimeMillis()
+
             // Handle map fragments (chassis sends fragmented PNG per protocol docs)
             if (text.contains("\"op\":\"fragment\"") || text.contains("\"op\": \"fragment\"")) {
                 handleMapFragment(text)
@@ -369,8 +374,8 @@ class RobotWebSocketClient(
     }
 
     private fun parseStatusUpdate(json: String) {
-        // Track when we last got ANY data from robot - must happen before early returns
-        _lastRobotDataTime = System.currentTimeMillis()
+        // Note: _lastRobotDataTime is now set in onMessage() directly (before coroutine launch)
+        // This ensures heartbeat always sees fresh timestamp regardless of coroutine scheduling
 
         try {
             val obj = com.google.gson.JsonParser.parseString(json).asJsonObject
@@ -671,10 +676,11 @@ class RobotWebSocketClient(
 }
 
 enum class ConnectionState {
-    DISCONNECTED,
-    CONNECTING,
-    CONNECTED,
-    ERROR
+    DISCONNECTED,  // Initial state or intentional disconnect
+    CONNECTING,    // Actively attempting to connect
+    CONNECTED,     // Successfully connected
+    STALE,         // Was connected, lost connection, quietly retrying
+    ERROR          // Failed after multiple attempts, needs attention
 }
 
 data class SensorStatus(
