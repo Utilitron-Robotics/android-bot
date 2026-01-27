@@ -159,43 +159,108 @@ fun sendVelocity(linearX: Double, angularZ: Double) {
 
 ---
 
-## What We Need to Add
+## Why LIDAR-Only Failed
 
-### 1. People Count
+We attempted people detection with LIDAR alone (ObstacleClassifier.kt). It failed because:
 
-**Current**: Binary (someone/no one)
-**Need**: Actual count from `/detected_people_array`
+1. **Standing person = wall**: Both are 3-4 dots at similar distances
+2. **Chair = person**: Human-width (0.3-1.2m) objects get misclassified
+3. **Movement detection only works when robot stopped**: During navigation, can't tell if points moved
 
-**Where to add**: `RobotWebSocketClient.kt`
+The robot HAS a depth camera that reliably detects people. The data exists - we just need to wire it up.
+
+---
+
+## Current Wiring Status
+
+### Working (Depth Camera → Boolean)
+```
+/people_detected ─► RobotWebSocketClient._peopleDetected ─► Used in:
+                                                            ├─ motion_standby (wait for person)
+                                                            ├─ button_standby (rising edge greeting)
+                                                            └─ sendVelocity (treatAsCrowd decision)
+```
+
+### Partially Working (Subscribed but only logging)
+```
+/detected_people_array ─► RobotWebSocketClient.parseStatusUpdate() ─► Log.d() only
+                          (line 638-657)                               ↓
+                                                                  NOT STORED
+```
+
+### Not Working (LIDAR guessing, unreliable)
+```
+/scan ─► ObstacleClassifier ─► Guess MOVING_PERSON based on:
+                               ├─ Width 0.3-1.2m (fails: chairs)
+                               ├─ Movement (fails: standing person)
+                               └─ Not on map (fails: parked wheelchair)
+```
+
+---
+
+## What Needs Wiring
+
+### 1. Parse People Count from Depth Camera Array
+
+**Current code** (RobotWebSocketClient.kt:638-657):
 ```kotlin
-// Add state
+ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY -> {
+    val people = msg.get("people")?.asJsonArray
+        ?: msg.get("data")?.asJsonArray
+        ?: msg.get("detections")?.asJsonArray
+        ?: msg.get("persons")?.asJsonArray
+    if (people != null && people.size() > 0) {
+        Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${people.size()} people detected")
+        // ^^^ LOGGING ONLY - NOT STORED
+    }
+}
+```
+
+**Fix** - add StateFlow and store it:
+```kotlin
+// Add near line 77
 private val _peopleCount = MutableStateFlow(0)
 val peopleCount: StateFlow<Int> = _peopleCount
 
-// In TOPIC_DETECTED_PEOPLE_ARRAY handler
-val people = msg.get("people")?.asJsonArray ?: ...
+// In handler
 _peopleCount.value = people?.size() ?: 0
 ```
 
-**Use case**: "I see 3 people. Follow me!" vs "I see someone approaching."
+**Total change**: ~5 lines
 
-### 2. Group Distance Tracking
+### 2. Parse People Positions for Distance
 
-**Current**: `minFrontDistance` - closest obstacle
-**Need**: Average/median distance of detected people
-
-**Where to add**: `RobotWebSocketClient.kt`
+**Need to examine message format** - likely has position per person:
 ```kotlin
-// Add state
-@Volatile
-var avgPeopleDistance: Float = Float.MAX_VALUE
-    private set
-
-// In TOPIC_DETECTED_PEOPLE_ARRAY handler
-// Parse person positions, calculate distances, average them
+// Pseudocode - actual fields depend on message format
+val distances = people.map { person ->
+    val x = person.get("position")?.get("x")?.asDouble ?: 0.0
+    val y = person.get("position")?.get("y")?.asDouble ?: 0.0
+    sqrt(x*x + y*y)  // Distance from robot
+}
+avgPeopleDistance = distances.average().toFloat()
 ```
 
-**Use case**: Know if group is close (< 2m), following (2-4m), or falling behind (> 4m).
+**Blocker**: Need to see actual message format from live robot. Logging already in place.
+
+### 3. Feed Depth Camera Truth to ObstacleClassifier (Optional)
+
+Instead of guessing "is this LIDAR blob a human?", just ask the depth camera:
+
+```kotlin
+// In ObstacleClassifier, add:
+var depthCameraSeesHuman: Boolean = false
+
+// In classification logic:
+val isHuman = if (depthCameraSeesHuman) {
+    true  // Trust the depth camera
+} else {
+    // Fall back to LIDAR guessing for non-human obstacles
+    clusterWidth in HUMAN_MIN_WIDTH..HUMAN_MAX_WIDTH && isMoving
+}
+```
+
+This makes LIDAR classification subordinate to depth camera, not authoritative.
 
 ### 3. Tour Group State Machine
 
