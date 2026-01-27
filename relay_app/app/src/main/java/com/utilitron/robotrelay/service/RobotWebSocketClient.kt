@@ -77,6 +77,13 @@ class RobotWebSocketClient(
     private val _peopleDetected = MutableStateFlow(false)
     val peopleDetected: StateFlow<Boolean> = _peopleDetected
 
+    // Rich people data from /detected_people_array
+    private val _peopleCount = MutableStateFlow(0)
+    val peopleCount: StateFlow<Int> = _peopleCount
+
+    private val _avgPeopleDistance = MutableStateFlow(Float.MAX_VALUE)
+    val avgPeopleDistance: StateFlow<Float> = _avgPeopleDistance
+
     private val safetyZone = AtomicReference(SafetyZone.CLEAR)
 
     // Detach mode: relaxed safety for pile/charger proximity
@@ -636,22 +643,53 @@ class RobotWebSocketClient(
                     }
                 }
                 ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY -> {
-                    // Rich people detection data - log summary only (once per second max)
-                    if (lastPeopleArrayLogTime == 0L || System.currentTimeMillis() - lastPeopleArrayLogTime > 1000) {
-                        lastPeopleArrayLogTime = System.currentTimeMillis()
-                        // Try to find array field
-                        val people = msg.get("people")?.asJsonArray
-                            ?: msg.get("data")?.asJsonArray
-                            ?: msg.get("detections")?.asJsonArray
-                            ?: msg.get("persons")?.asJsonArray
-                        if (people != null && people.size() > 0) {
-                            Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${people.size()} people detected")
+                    // Rich people detection data - parse count and positions
+                    // Try multiple possible field names for the array
+                    val people = msg.get("people")?.asJsonArray
+                        ?: msg.get("data")?.asJsonArray
+                        ?: msg.get("detections")?.asJsonArray
+                        ?: msg.get("persons")?.asJsonArray
+
+                    val count = people?.size() ?: 0
+                    _peopleCount.value = count
+
+                    // Calculate average distance to people if positions available
+                    if (people != null && count > 0) {
+                        val distances = mutableListOf<Float>()
+                        for (i in 0 until people.size()) {
+                            val person = people[i].asJsonObject
+                            // Try various position field names
+                            val pos = person.get("position")?.asJsonObject
+                                ?: person.get("pose")?.asJsonObject?.get("position")?.asJsonObject
+                                ?: person.get("center")?.asJsonObject
+                                ?: person.get("centroid")?.asJsonObject
+
+                            if (pos != null) {
+                                val x = pos.get("x")?.asDouble ?: 0.0
+                                val y = pos.get("y")?.asDouble ?: 0.0
+                                val dist = kotlin.math.sqrt(x * x + y * y).toFloat()
+                                if (dist > 0.1f) distances.add(dist)  // Filter noise
+                            }
+                        }
+                        if (distances.isNotEmpty()) {
+                            _avgPeopleDistance.value = distances.average().toFloat()
+                        }
+
+                        // Log periodically (once per second max)
+                        if (lastPeopleArrayLogTime == 0L || System.currentTimeMillis() - lastPeopleArrayLogTime > 1000) {
+                            lastPeopleArrayLogTime = System.currentTimeMillis()
+                            val avgDist = if (distances.isNotEmpty()) String.format("%.2f", distances.average()) else "unknown"
+                            Log.d(TAG, ">>> PEOPLE: $count detected, avgDist=${avgDist}m")
                             // Log first person's structure ONCE to understand format
                             if (lastPeopleArrayLogTime < 5000) {
                                 Log.d(TAG, ">>> First person structure: ${people.firstOrNull()}")
                             }
-                        } else {
-                            // Log the keys to understand the message format
+                        }
+                    } else {
+                        _avgPeopleDistance.value = Float.MAX_VALUE
+                        // Log keys periodically when empty to understand format
+                        if (lastPeopleArrayLogTime == 0L || System.currentTimeMillis() - lastPeopleArrayLogTime > 5000) {
+                            lastPeopleArrayLogTime = System.currentTimeMillis()
                             Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY keys: ${msg.keySet()}")
                         }
                     }

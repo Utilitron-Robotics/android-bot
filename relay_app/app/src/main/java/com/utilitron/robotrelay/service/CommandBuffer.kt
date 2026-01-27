@@ -390,7 +390,11 @@ class CommandBuffer(
                 "y" to (status?.y ?: 0.0),
                 "theta" to (status?.theta ?: 0.0),
                 // CRITICAL: Data freshness so Flutter knows if we're serving stale data
-                "data_age_ms" to robotDataAge
+                "data_age_ms" to robotDataAge,
+                // People detection from depth camera
+                "people_detected" to robotClient.peopleDetected.value,
+                "people_count" to robotClient.peopleCount.value,
+                "avg_people_distance" to robotClient.avgPeopleDistance.value
             ),
             "crowd_config" to mapOf(
                 "safe_distance_meters" to crowdConfig.safeDistanceMeters,
