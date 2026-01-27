@@ -38,7 +38,25 @@ object ChassisProtocol {
     const val TOPIC_HANDPOSE = "/handpose"  // Hand gesture detection
     const val TOPIC_LOCAL_COSTMAP = "/move_base/local_costmap/costmap"  // Real-time obstacle blocks
 
+    // === BODY TRACKING / SKELETON TOPICS ===
+    // These provide the "Minecraft-like" block visualization of humans with arms/hands
+    const val TOPIC_BODY_TRACKER = "/body_tracker/people"  // cob_perception_msgs/People (skeleton array)
+    const val TOPIC_BODY_TRACKER_SKELETON = "/body_tracker/skeleton"  // Skeleton keypoints
+    const val TOPIC_BODY_TRACKER_MARKER = "/body_tracker/marker"  // Visualization markers
+    const val TOPIC_BODY_TRACKER_POSITION = "/body_tracker/position"  // Position info
+    const val TOPIC_SKELETON_3D = "/skeleton_3d"  // 3D skeleton data
+    const val TOPIC_HUMANS_BODIES_TRACKED = "/humans/bodies/tracked"  // REP 155 standard
+    const val TOPIC_HUMANS_BODIES_LIST = "/humans/bodies/list"  // REP 155 body list
+    const val TOPIC_PERSON_TRACKER = "/person_tracker/people"  // Alternative tracker
+    const val TOPIC_DETECTED_OBJECTS = "/detected_objects"  // Object detection (includes people)
+    const val TOPIC_DETECTED_PERSONS = "/detected_persons"  // Person-specific detections
+    const val TOPIC_BOUNDING_BOXES = "/bounding_boxes"  // 3D bounding boxes
+    const val TOPIC_DEPTH_REGISTERED_POINTS = "/camera/depth_registered/points"  // Point cloud
+    const val TOPIC_RGBD_DETECTIONS = "/rgbd_detections"  // RGB-D person detections
+
     // Services
+    const val SERVICE_ROSAPI_TOPICS = "/rosapi/topics"  // List all available topics
+    const val SERVICE_ROSAPI_TOPIC_TYPE = "/rosapi/topic_type"  // Get topic type
     const val SERVICE_POI = "/poi"
     const val SERVICE_NODE_MANAGER = "/node_manager_control"
     const val SERVICE_VELOCITY_CONTROL = "/velocity_control"
@@ -159,6 +177,114 @@ object ChassisProtocol {
         topic = TOPIC_MAP,
         type = "nav_msgs/OccupancyGrid",
         throttleRate = 5000
+    ))
+
+    // === BODY TRACKING SUBSCRIPTIONS ===
+    // These topics may provide the detailed human shape data for map visualization
+
+    /**
+     * Subscribe to body tracker skeleton data (cob_perception_msgs style).
+     * This provides full skeleton with joint positions - the "Minecraft blocks" for limbs.
+     */
+    fun subscribeBodyTrackerPeople(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_body_tracker_people",
+        topic = TOPIC_BODY_TRACKER,
+        type = "cob_perception_msgs/People",  // May also be body_tracker_msgs/BodyArray
+        throttleRate = 100
+    ))
+
+    fun subscribeBodyTrackerSkeleton(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_body_tracker_skeleton",
+        topic = TOPIC_BODY_TRACKER_SKELETON,
+        type = "body_tracker_msgs/Skeleton",
+        throttleRate = 100
+    ))
+
+    /**
+     * Subscribe to 3D skeleton data (OpenPose / depth camera style).
+     */
+    fun subscribeSkeleton3D(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_skeleton_3d",
+        topic = TOPIC_SKELETON_3D,
+        type = "openpose_ros_msgs/PersonArray",  // Common format
+        throttleRate = 100
+    ))
+
+    /**
+     * Subscribe to REP 155 standard human tracking topics.
+     */
+    fun subscribeHumansBodiesTracked(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_humans_bodies_tracked",
+        topic = TOPIC_HUMANS_BODIES_TRACKED,
+        type = "hri_msgs/IdsList",
+        throttleRate = 200
+    ))
+
+    /**
+     * Subscribe to detected objects (may include people with bounding boxes).
+     */
+    fun subscribeDetectedObjects(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_detected_objects",
+        topic = TOPIC_DETECTED_OBJECTS,
+        type = "vision_msgs/Detection3DArray",  // Standard 3D detection format
+        throttleRate = 100
+    ))
+
+    /**
+     * Subscribe to person-specific detections with 3D bounding boxes.
+     */
+    fun subscribeDetectedPersons(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_detected_persons",
+        topic = TOPIC_DETECTED_PERSONS,
+        type = "spencer_tracking_msgs/DetectedPersons",  // SPENCER framework
+        throttleRate = 100
+    ))
+
+    /**
+     * Subscribe to depth camera point cloud for person visualization.
+     * This raw data shows people as 3D point clusters.
+     */
+    fun subscribeDepthPoints(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_depth_points",
+        topic = TOPIC_DEPTH_REGISTERED_POINTS,
+        type = "sensor_msgs/PointCloud2",
+        throttleRate = 500  // Heavy data, throttle hard
+    ))
+
+    // === ROSAPI SERVICE CALLS ===
+
+    /**
+     * Call /rosapi/topics to discover ALL available topics on the robot.
+     * Response: { "topics": ["/topic1", "/topic2", ...], "types": ["type1", "type2", ...] }
+     */
+    fun callGetAllTopics(): String = """{"op":"call_service","id":"rosapi_topics","service":"/rosapi/topics"}"""
+
+    /**
+     * Call /rosapi/topic_type to get the message type for a specific topic.
+     */
+    fun callGetTopicType(topic: String): String = toJson(ServiceCallMsg(
+        op = OP_CALL_SERVICE,
+        id = "rosapi_topic_type",
+        service = SERVICE_ROSAPI_TOPIC_TYPE,
+        args = mapOf("topic" to topic)
+    ))
+
+    /**
+     * Generic subscription with any topic/type - for discovered topics.
+     */
+    fun subscribeGeneric(topic: String, msgType: String, throttleMs: Int = 200): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "sub_${topic.replace("/", "_")}",
+        topic = topic,
+        type = msgType,
+        throttleRate = throttleMs
     ))
 
     fun unsubscribe(topic: String, id: String): String = toJson(UnsubscribeMsg(

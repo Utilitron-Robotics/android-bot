@@ -100,9 +100,14 @@ class RobotWebSocketClient(
 
     // === HUMAN DETECTION TOPIC DISCOVERY ===
     // Log ANY topic that might be related to people/human detection
+    // Expanded list to catch all potential body tracking / skeleton topics
     private val humanTopicKeywords = listOf(
         "people", "person", "human", "body", "skeleton", "leg", "track",
-        "detect", "face", "gesture", "hand", "pose", "pedestrian", "obstacle"
+        "detect", "face", "gesture", "hand", "pose", "pedestrian", "obstacle",
+        "bone", "joint", "limb", "torso", "head", "arm", "foot", "knee",
+        "shoulder", "elbow", "wrist", "hip", "ankle", "spine", "neck",
+        "tracker", "rgbd", "depth", "openni", "nuitrack", "kinect", "orbbec",
+        "astra", "realsense", "zed", "object", "bbox", "bounding"
     )
 
     // Raw LIDAR points for visualization (in robot frame)
@@ -161,6 +166,69 @@ class RobotWebSocketClient(
             // Handle map fragments (chassis sends fragmented PNG per protocol docs)
             if (text.contains("\"op\":\"fragment\"") || text.contains("\"op\": \"fragment\"")) {
                 handleMapFragment(text)
+                return
+            }
+
+            // Handle rosapi/topics service response - discover ALL robot topics
+            if (text.contains("\"service_response\"") && text.contains("rosapi_topics")) {
+                try {
+                    val obj = com.google.gson.JsonParser.parseString(text).asJsonObject
+                    if (obj.get("result")?.asBoolean == true) {
+                        val values = obj.getAsJsonObject("values")
+                        val topicsArray = values?.getAsJsonArray("topics")
+                        val typesArray = values?.getAsJsonArray("types")
+
+                        Log.i(TAG, ">>> ======= ALL ROBOT TOPICS (${topicsArray?.size() ?: 0}) =======")
+
+                        // Log all topics and find human-related ones
+                        val humanTopics = mutableListOf<Pair<String, String>>()
+                        if (topicsArray != null && typesArray != null) {
+                            for (i in 0 until topicsArray.size()) {
+                                val topic = topicsArray[i].asString
+                                val type = if (i < typesArray.size()) typesArray[i].asString else "unknown"
+
+                                // Check if this is a human-related topic
+                                val topicLower = topic.lowercase()
+                                if (humanTopicKeywords.any { topicLower.contains(it) }) {
+                                    Log.i(TAG, ">>> HUMAN_TOPIC FOUND: $topic [$type]")
+                                    humanTopics.add(Pair(topic, type))
+                                } else {
+                                    Log.d(TAG, ">>> Topic: $topic [$type]")
+                                }
+                            }
+                        }
+
+                        Log.i(TAG, ">>> ======= HUMAN-RELATED TOPICS (${humanTopics.size}) =======")
+                        for ((topic, type) in humanTopics) {
+                            Log.i(TAG, ">>> $topic [$type]")
+                        }
+
+                        // Auto-subscribe to human topics we haven't subscribed to yet
+                        scope.launch {
+                            delay(1000)  // Wait for existing subscriptions to settle
+                            for ((topic, type) in humanTopics) {
+                                // Skip topics we already subscribe to
+                                if (topic in listOf(
+                                    ChassisProtocol.TOPIC_PEOPLE_DETECTED,
+                                    ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY,
+                                    ChassisProtocol.TOPIC_HANDPOSE,
+                                    ChassisProtocol.TOPIC_LOCAL_COSTMAP,
+                                    ChassisProtocol.TOPIC_BODY_TRACKER,
+                                    ChassisProtocol.TOPIC_BODY_TRACKER_SKELETON,
+                                    ChassisProtocol.TOPIC_SKELETON_3D,
+                                    ChassisProtocol.TOPIC_HUMANS_BODIES_TRACKED,
+                                    ChassisProtocol.TOPIC_DETECTED_OBJECTS,
+                                    ChassisProtocol.TOPIC_DETECTED_PERSONS
+                                )) continue
+
+                                Log.i(TAG, ">>> Auto-subscribing to discovered human topic: $topic")
+                                send(ChassisProtocol.subscribeGeneric(topic, type, 200))
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse rosapi/topics response: ${e.message}")
+                }
                 return
             }
 
@@ -277,6 +345,24 @@ class RobotWebSocketClient(
         send(ChassisProtocol.subscribeDetectedPeopleArray())  // Rich people detection data
         send(ChassisProtocol.subscribeHandpose())  // Hand gesture detection
         send(ChassisProtocol.subscribeLocalCostmap())  // Real-time obstacle blocks (OEM-style)
+
+        // === BODY TRACKING SUBSCRIPTIONS ===
+        // These provide detailed human shape data (skeleton, bounding boxes)
+        Log.i(TAG, ">>> Subscribing to body tracking topics for human visualization...")
+        send(ChassisProtocol.subscribeBodyTrackerPeople())
+        send(ChassisProtocol.subscribeBodyTrackerSkeleton())
+        send(ChassisProtocol.subscribeSkeleton3D())
+        send(ChassisProtocol.subscribeHumansBodiesTracked())
+        send(ChassisProtocol.subscribeDetectedObjects())
+        send(ChassisProtocol.subscribeDetectedPersons())
+        // Point cloud is heavy - only if we need raw 3D person shapes
+        // send(ChassisProtocol.subscribeDepthPoints())
+
+        // === DISCOVER ALL TOPICS ===
+        // Call rosapi/topics to find ALL available topics on the robot
+        Log.i(TAG, ">>> Requesting topic list from rosapi...")
+        send(ChassisProtocol.callGetAllTopics())
+
         // Subscribe to /map (raw OccupancyGrid, no fragmentation - works on our robots)
         val mapSubMsg = ChassisProtocol.subscribeMap()
         val mapSent = send(mapSubMsg)
@@ -592,6 +678,82 @@ class RobotWebSocketClient(
                         Log.d(TAG, ">>> LOCAL_COSTMAP: Receiving ${width}x${height} grid (logging once per 10s)")
                         lastCostmapLogTime = System.currentTimeMillis()
                     }
+                }
+
+                // === BODY TRACKING TOPICS ===
+                // These provide the detailed human shape data that OEM map shows as "Minecraft blocks"
+
+                ChassisProtocol.TOPIC_BODY_TRACKER, "/body_tracker/people" -> {
+                    // cob_perception_msgs/People - array of skeletons
+                    Log.i(TAG, ">>> BODY_TRACKER_PEOPLE received!")
+                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
+                    val people = msg.get("people")?.asJsonArray ?: msg.get("persons")?.asJsonArray
+                    if (people != null && people.size() > 0) {
+                        Log.i(TAG, ">>> Found ${people.size()} people with skeleton data")
+                        // Log the first person's structure to understand the format
+                        val firstPerson = people[0].asJsonObject
+                        Log.i(TAG, ">>> Person structure: ${firstPerson.keySet()}")
+                        // Look for skeleton/joints data
+                        val skeleton = firstPerson.get("skeleton")?.asJsonObject
+                            ?: firstPerson.get("joints")?.asJsonArray
+                        if (skeleton != null) {
+                            Log.i(TAG, ">>> SKELETON DATA: $skeleton")
+                        }
+                    }
+                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
+                }
+
+                ChassisProtocol.TOPIC_BODY_TRACKER_SKELETON, "/body_tracker/skeleton" -> {
+                    Log.i(TAG, ">>> BODY_TRACKER_SKELETON received!")
+                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
+                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
+                }
+
+                ChassisProtocol.TOPIC_SKELETON_3D, "/skeleton_3d" -> {
+                    Log.i(TAG, ">>> SKELETON_3D received!")
+                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
+                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
+                }
+
+                ChassisProtocol.TOPIC_HUMANS_BODIES_TRACKED, "/humans/bodies/tracked" -> {
+                    Log.i(TAG, ">>> HUMANS_BODIES_TRACKED received!")
+                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
+                    val ids = msg.get("ids")?.asJsonArray
+                    if (ids != null) {
+                        Log.i(TAG, ">>> Tracked body IDs: ${ids.map { it.asString }}")
+                    }
+                    Log.i(TAG, ">>> Full msg: $msg")
+                }
+
+                ChassisProtocol.TOPIC_DETECTED_OBJECTS, "/detected_objects" -> {
+                    Log.i(TAG, ">>> DETECTED_OBJECTS received!")
+                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
+                    val detections = msg.get("detections")?.asJsonArray
+                        ?: msg.get("objects")?.asJsonArray
+                    if (detections != null && detections.size() > 0) {
+                        Log.i(TAG, ">>> Found ${detections.size()} detected objects")
+                        // Look for person/human class detections
+                        for (det in detections) {
+                            val obj = det.asJsonObject
+                            val label = obj.get("label")?.asString
+                                ?: obj.get("class_name")?.asString
+                                ?: obj.get("class")?.asString
+                            if (label != null && label.lowercase().contains("person")) {
+                                Log.i(TAG, ">>> PERSON DETECTION: $obj")
+                            }
+                        }
+                    }
+                }
+
+                ChassisProtocol.TOPIC_DETECTED_PERSONS, "/detected_persons" -> {
+                    Log.i(TAG, ">>> DETECTED_PERSONS received!")
+                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
+                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
+                }
+
+                // Catch any other human-related topic dynamically subscribed
+                else -> {
+                    // Already logged by the HUMAN_TOPIC check above
                 }
             }
         } catch (e: Exception) {
