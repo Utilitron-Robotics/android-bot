@@ -203,25 +203,27 @@ class RobotWebSocketClient(
                             Log.i(TAG, ">>> $topic [$type]")
                         }
 
-                        // Auto-subscribe to human topics we haven't subscribed to yet
+                        // Auto-subscribe to human topics we haven't already subscribed to
                         scope.launch {
                             delay(1000)  // Wait for existing subscriptions to settle
                             for ((topic, type) in humanTopics) {
-                                // Skip topics we already subscribe to
+                                // Skip topics we already subscribe to in setupSubscriptions
                                 if (topic in listOf(
                                     ChassisProtocol.TOPIC_PEOPLE_DETECTED,
                                     ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY,
                                     ChassisProtocol.TOPIC_HANDPOSE,
                                     ChassisProtocol.TOPIC_LOCAL_COSTMAP,
-                                    ChassisProtocol.TOPIC_BODY_TRACKER,
-                                    ChassisProtocol.TOPIC_BODY_TRACKER_SKELETON,
-                                    ChassisProtocol.TOPIC_SKELETON_3D,
-                                    ChassisProtocol.TOPIC_HUMANS_BODIES_TRACKED,
-                                    ChassisProtocol.TOPIC_DETECTED_OBJECTS,
-                                    ChassisProtocol.TOPIC_DETECTED_PERSONS
+                                    ChassisProtocol.TOPIC_UPCAMERA_DEPTH_POINTS,
+                                    ChassisProtocol.TOPIC_UP_CAMERA_POINTS,
+                                    ChassisProtocol.TOPIC_UP_CAMERA_SCAN,
+                                    ChassisProtocol.TOPIC_OBSTACLE_REGION,
+                                    ChassisProtocol.TOPIC_UPCAM_DATA,
+                                    ChassisProtocol.TOPIC_DOWNCAM_DATA,
+                                    ChassisProtocol.TOPIC_UP_CAMERA_AFTER_MAP,
+                                    "/scan", "/laser_data"
                                 )) continue
 
-                                Log.i(TAG, ">>> Auto-subscribing to discovered human topic: $topic")
+                                Log.i(TAG, ">>> Auto-subscribing to discovered human topic: $topic [$type]")
                                 send(ChassisProtocol.subscribeGeneric(topic, type, 200))
                             }
                         }
@@ -346,22 +348,16 @@ class RobotWebSocketClient(
         send(ChassisProtocol.subscribeHandpose())  // Hand gesture detection
         send(ChassisProtocol.subscribeLocalCostmap())  // Real-time obstacle blocks (OEM-style)
 
-        // === BODY TRACKING SUBSCRIPTIONS ===
-        // These provide detailed human shape data (skeleton, bounding boxes)
-        Log.i(TAG, ">>> Subscribing to body tracking topics for human visualization...")
-        send(ChassisProtocol.subscribeBodyTrackerPeople())
-        send(ChassisProtocol.subscribeBodyTrackerSkeleton())
-        send(ChassisProtocol.subscribeSkeleton3D())
-        send(ChassisProtocol.subscribeHumansBodiesTracked())
-        send(ChassisProtocol.subscribeDetectedObjects())
-        send(ChassisProtocol.subscribeDetectedPersons())
-        // Point cloud is heavy - only if we need raw 3D person shapes
-        // send(ChassisProtocol.subscribeDepthPoints())
-
-        // === DISCOVER ALL TOPICS ===
-        // Call rosapi/topics to find ALL available topics on the robot
-        Log.i(TAG, ">>> Requesting topic list from rosapi...")
-        send(ChassisProtocol.callGetAllTopics())
+        // === DEPTH CAMERA / POINT CLOUD SUBSCRIPTIONS ===
+        // These are the ACTUAL CIOT robot topics that provide human shape data
+        Log.i(TAG, ">>> Subscribing to depth camera topics for human visualization...")
+        send(ChassisProtocol.subscribeUpcameraDepthPoints())  // 3D point cloud - RAW human shapes
+        send(ChassisProtocol.subscribeUpCameraPoints())  // Processed points
+        send(ChassisProtocol.subscribeUpCameraScan())  // Camera converted to 2D scan
+        send(ChassisProtocol.subscribeObstacleRegion())  // Detected obstacle shapes
+        send(ChassisProtocol.subscribeUpcamData())  // Processed camera data
+        send(ChassisProtocol.subscribeDowncamData())  // Down camera data
+        send(ChassisProtocol.subscribeUpCameraAfterMap())  // Post-transform points
 
         // Subscribe to /map (raw OccupancyGrid, no fragmentation - works on our robots)
         val mapSubMsg = ChassisProtocol.subscribeMap()
@@ -680,80 +676,56 @@ class RobotWebSocketClient(
                     }
                 }
 
-                // === BODY TRACKING TOPICS ===
-                // These provide the detailed human shape data that OEM map shows as "Minecraft blocks"
+                // === DEPTH CAMERA / POINT CLOUD TOPICS ===
+                // These provide the human shape data that the OEM map shows as "Minecraft blocks"
 
-                ChassisProtocol.TOPIC_BODY_TRACKER, "/body_tracker/people" -> {
-                    // cob_perception_msgs/People - array of skeletons
-                    Log.i(TAG, ">>> BODY_TRACKER_PEOPLE received!")
+                ChassisProtocol.TOPIC_UPCAMERA_DEPTH_POINTS, "/upcamera/depth/points" -> {
+                    // sensor_msgs/PointCloud2 - RAW 3D point cloud from depth camera
+                    // This is the source of human body shapes!
+                    val height = msg.get("height")?.asInt ?: 0
+                    val width = msg.get("width")?.asInt ?: 0
+                    val pointStep = msg.get("point_step")?.asInt ?: 0
+                    val dataSize = msg.get("data")?.asString?.length ?: 0
+                    Log.i(TAG, ">>> DEPTH_POINTS: ${width}x${height} cloud, pointStep=$pointStep, dataSize=$dataSize")
                     Log.i(TAG, ">>> Keys: ${msg.keySet()}")
-                    val people = msg.get("people")?.asJsonArray ?: msg.get("persons")?.asJsonArray
-                    if (people != null && people.size() > 0) {
-                        Log.i(TAG, ">>> Found ${people.size()} people with skeleton data")
-                        // Log the first person's structure to understand the format
-                        val firstPerson = people[0].asJsonObject
-                        Log.i(TAG, ">>> Person structure: ${firstPerson.keySet()}")
-                        // Look for skeleton/joints data
-                        val skeleton = firstPerson.get("skeleton")?.asJsonObject
-                            ?: firstPerson.get("joints")?.asJsonArray
-                        if (skeleton != null) {
-                            Log.i(TAG, ">>> SKELETON DATA: $skeleton")
-                        }
-                    }
-                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
                 }
 
-                ChassisProtocol.TOPIC_BODY_TRACKER_SKELETON, "/body_tracker/skeleton" -> {
-                    Log.i(TAG, ">>> BODY_TRACKER_SKELETON received!")
+                ChassisProtocol.TOPIC_UP_CAMERA_POINTS, "/up_camera_points" -> {
+                    Log.i(TAG, ">>> UP_CAMERA_POINTS received!")
                     Log.i(TAG, ">>> Keys: ${msg.keySet()}")
-                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
+                    Log.i(TAG, ">>> Preview: ${msg.toString().take(500)}")
                 }
 
-                ChassisProtocol.TOPIC_SKELETON_3D, "/skeleton_3d" -> {
-                    Log.i(TAG, ">>> SKELETON_3D received!")
-                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
-                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
+                ChassisProtocol.TOPIC_UP_CAMERA_SCAN, "/up_camera_scan" -> {
+                    // Camera converted to 2D laser scan format
+                    val ranges = msg.get("ranges")?.asJsonArray
+                    Log.i(TAG, ">>> UP_CAMERA_SCAN: ${ranges?.size() ?: 0} ranges")
                 }
 
-                ChassisProtocol.TOPIC_HUMANS_BODIES_TRACKED, "/humans/bodies/tracked" -> {
-                    Log.i(TAG, ">>> HUMANS_BODIES_TRACKED received!")
+                ChassisProtocol.TOPIC_OBSTACLE_REGION, "/obstacle_region" -> {
+                    // Detected obstacle shapes/regions - THIS MAY BE THE KEY DATA
+                    Log.i(TAG, ">>> OBSTACLE_REGION received!")
                     Log.i(TAG, ">>> Keys: ${msg.keySet()}")
-                    val ids = msg.get("ids")?.asJsonArray
-                    if (ids != null) {
-                        Log.i(TAG, ">>> Tracked body IDs: ${ids.map { it.asString }}")
-                    }
-                    Log.i(TAG, ">>> Full msg: $msg")
+                    Log.i(TAG, ">>> Full msg: ${msg.toString().take(1000)}")
                 }
 
-                ChassisProtocol.TOPIC_DETECTED_OBJECTS, "/detected_objects" -> {
-                    Log.i(TAG, ">>> DETECTED_OBJECTS received!")
+                ChassisProtocol.TOPIC_UPCAM_DATA, "/upcam_data" -> {
+                    Log.i(TAG, ">>> UPCAM_DATA received!")
                     Log.i(TAG, ">>> Keys: ${msg.keySet()}")
-                    val detections = msg.get("detections")?.asJsonArray
-                        ?: msg.get("objects")?.asJsonArray
-                    if (detections != null && detections.size() > 0) {
-                        Log.i(TAG, ">>> Found ${detections.size()} detected objects")
-                        // Look for person/human class detections
-                        for (det in detections) {
-                            val obj = det.asJsonObject
-                            val label = obj.get("label")?.asString
-                                ?: obj.get("class_name")?.asString
-                                ?: obj.get("class")?.asString
-                            if (label != null && label.lowercase().contains("person")) {
-                                Log.i(TAG, ">>> PERSON DETECTION: $obj")
-                            }
-                        }
-                    }
+                    Log.i(TAG, ">>> Preview: ${msg.toString().take(500)}")
                 }
 
-                ChassisProtocol.TOPIC_DETECTED_PERSONS, "/detected_persons" -> {
-                    Log.i(TAG, ">>> DETECTED_PERSONS received!")
+                ChassisProtocol.TOPIC_DOWNCAM_DATA, "/downcam_data" -> {
+                    Log.i(TAG, ">>> DOWNCAM_DATA received!")
                     Log.i(TAG, ">>> Keys: ${msg.keySet()}")
-                    Log.i(TAG, ">>> Full msg preview: ${msg.toString().take(1000)}")
+                    Log.i(TAG, ">>> Preview: ${msg.toString().take(500)}")
                 }
 
-                // Catch any other human-related topic dynamically subscribed
-                else -> {
-                    // Already logged by the HUMAN_TOPIC check above
+                ChassisProtocol.TOPIC_UP_CAMERA_AFTER_MAP, "/up_camera_after_to_map" -> {
+                    // Points transformed to map frame - ready for visualization
+                    Log.i(TAG, ">>> UP_CAMERA_AFTER_MAP received!")
+                    Log.i(TAG, ">>> Keys: ${msg.keySet()}")
+                    Log.i(TAG, ">>> Preview: ${msg.toString().take(500)}")
                 }
             }
         } catch (e: Exception) {

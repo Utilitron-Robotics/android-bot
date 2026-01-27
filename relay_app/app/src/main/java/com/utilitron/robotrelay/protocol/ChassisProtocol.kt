@@ -38,21 +38,22 @@ object ChassisProtocol {
     const val TOPIC_HANDPOSE = "/handpose"  // Hand gesture detection
     const val TOPIC_LOCAL_COSTMAP = "/move_base/local_costmap/costmap"  // Real-time obstacle blocks
 
-    // === BODY TRACKING / SKELETON TOPICS ===
-    // These provide the "Minecraft-like" block visualization of humans with arms/hands
-    const val TOPIC_BODY_TRACKER = "/body_tracker/people"  // cob_perception_msgs/People (skeleton array)
-    const val TOPIC_BODY_TRACKER_SKELETON = "/body_tracker/skeleton"  // Skeleton keypoints
-    const val TOPIC_BODY_TRACKER_MARKER = "/body_tracker/marker"  // Visualization markers
-    const val TOPIC_BODY_TRACKER_POSITION = "/body_tracker/position"  // Position info
-    const val TOPIC_SKELETON_3D = "/skeleton_3d"  // 3D skeleton data
-    const val TOPIC_HUMANS_BODIES_TRACKED = "/humans/bodies/tracked"  // REP 155 standard
-    const val TOPIC_HUMANS_BODIES_LIST = "/humans/bodies/list"  // REP 155 body list
-    const val TOPIC_PERSON_TRACKER = "/person_tracker/people"  // Alternative tracker
-    const val TOPIC_DETECTED_OBJECTS = "/detected_objects"  // Object detection (includes people)
-    const val TOPIC_DETECTED_PERSONS = "/detected_persons"  // Person-specific detections
-    const val TOPIC_BOUNDING_BOXES = "/bounding_boxes"  // 3D bounding boxes
-    const val TOPIC_DEPTH_REGISTERED_POINTS = "/camera/depth_registered/points"  // Point cloud
-    const val TOPIC_RGBD_DETECTIONS = "/rgbd_detections"  // RGB-D person detections
+    // === DEPTH CAMERA & POINT CLOUD TOPICS ===
+    // These are the ACTUAL topics on CIOT robots that provide human shape data
+    // The "Minecraft blocks" come from depth camera → point cloud → costmap projection
+    const val TOPIC_UPCAMERA_DEPTH_POINTS = "/upcamera/depth/points"  // sensor_msgs/PointCloud2 - RAW 3D point cloud
+    const val TOPIC_UPCAMERA_DEPTH_IMAGE = "/upcamera/depth/image_raw"  // sensor_msgs/Image - depth image
+    const val TOPIC_UPCAMERA_DEPTH_INFO = "/upcamera/depth/camera_info"  // sensor_msgs/CameraInfo
+    const val TOPIC_UP_CAMERA_POINTS = "/up_camera_points"  // Processed camera points
+    const val TOPIC_UP_CAMERA_SCAN = "/up_camera_scan"  // Camera converted to 2D scan
+    const val TOPIC_UP_CAMERA_POINTCLOUD_BUFF = "/up_camera_pointcloud_buff"  // Buffered point cloud
+    const val TOPIC_OVER_CAMERA_POINTCLOUD_BUFF = "/over_camera_pointcloud_buff"  // Over camera buffer
+    const val TOPIC_UP_CAMERA_BEFORE_MAP = "/up_camera_before_to_map"  // Pre-transform points
+    const val TOPIC_UP_CAMERA_AFTER_MAP = "/up_camera_after_to_map"  // Post-transform points
+    const val TOPIC_OVER_CAMERA_BEFORE_MAP = "/over_camera_before_to_map"  // Over camera pre-transform
+    const val TOPIC_OBSTACLE_REGION = "/obstacle_region"  // Detected obstacle shapes/regions
+    const val TOPIC_UPCAM_DATA = "/upcam_data"  // Processed up camera data
+    const val TOPIC_DOWNCAM_DATA = "/downcam_data"  // Processed down camera data
 
     // Services
     const val SERVICE_ROSAPI_TOPICS = "/rosapi/topics"  // List all available topics
@@ -179,112 +180,71 @@ object ChassisProtocol {
         throttleRate = 5000
     ))
 
-    // === BODY TRACKING SUBSCRIPTIONS ===
-    // These topics may provide the detailed human shape data for map visualization
+    // === DEPTH CAMERA SUBSCRIPTIONS ===
+    // These are the ACTUAL CIOT robot topics for human visualization
 
-    /**
-     * Subscribe to body tracker skeleton data (cob_perception_msgs style).
-     * This provides full skeleton with joint positions - the "Minecraft blocks" for limbs.
-     */
-    fun subscribeBodyTrackerPeople(): String = toJson(SubscribeMsg(
+    fun subscribeUpcameraDepthPoints(): String = toJson(SubscribeMsg(
         op = OP_SUBSCRIBE,
-        id = "get_body_tracker_people",
-        topic = TOPIC_BODY_TRACKER,
-        type = "cob_perception_msgs/People",  // May also be body_tracker_msgs/BodyArray
-        throttleRate = 100
-    ))
-
-    fun subscribeBodyTrackerSkeleton(): String = toJson(SubscribeMsg(
-        op = OP_SUBSCRIBE,
-        id = "get_body_tracker_skeleton",
-        topic = TOPIC_BODY_TRACKER_SKELETON,
-        type = "body_tracker_msgs/Skeleton",
-        throttleRate = 100
-    ))
-
-    /**
-     * Subscribe to 3D skeleton data (OpenPose / depth camera style).
-     */
-    fun subscribeSkeleton3D(): String = toJson(SubscribeMsg(
-        op = OP_SUBSCRIBE,
-        id = "get_skeleton_3d",
-        topic = TOPIC_SKELETON_3D,
-        type = "openpose_ros_msgs/PersonArray",  // Common format
-        throttleRate = 100
-    ))
-
-    /**
-     * Subscribe to REP 155 standard human tracking topics.
-     */
-    fun subscribeHumansBodiesTracked(): String = toJson(SubscribeMsg(
-        op = OP_SUBSCRIBE,
-        id = "get_humans_bodies_tracked",
-        topic = TOPIC_HUMANS_BODIES_TRACKED,
-        type = "hri_msgs/IdsList",
+        id = "get_upcamera_depth_points",
+        topic = TOPIC_UPCAMERA_DEPTH_POINTS,
+        type = "sensor_msgs/PointCloud2",
         throttleRate = 200
     ))
 
-    /**
-     * Subscribe to detected objects (may include people with bounding boxes).
-     */
-    fun subscribeDetectedObjects(): String = toJson(SubscribeMsg(
+    fun subscribeUpcameraDepthImage(): String = toJson(SubscribeMsg(
         op = OP_SUBSCRIBE,
-        id = "get_detected_objects",
-        topic = TOPIC_DETECTED_OBJECTS,
-        type = "vision_msgs/Detection3DArray",  // Standard 3D detection format
-        throttleRate = 100
+        id = "get_upcamera_depth_image",
+        topic = TOPIC_UPCAMERA_DEPTH_IMAGE,
+        type = "sensor_msgs/Image",
+        throttleRate = 500
     ))
 
-    /**
-     * Subscribe to person-specific detections with 3D bounding boxes.
-     */
-    fun subscribeDetectedPersons(): String = toJson(SubscribeMsg(
+    fun subscribeUpCameraPoints(): String = toJson(SubscribeMsg(
         op = OP_SUBSCRIBE,
-        id = "get_detected_persons",
-        topic = TOPIC_DETECTED_PERSONS,
-        type = "spencer_tracking_msgs/DetectedPersons",  // SPENCER framework
-        throttleRate = 100
-    ))
-
-    /**
-     * Subscribe to depth camera point cloud for person visualization.
-     * This raw data shows people as 3D point clusters.
-     */
-    fun subscribeDepthPoints(): String = toJson(SubscribeMsg(
-        op = OP_SUBSCRIBE,
-        id = "get_depth_points",
-        topic = TOPIC_DEPTH_REGISTERED_POINTS,
+        id = "get_up_camera_points",
+        topic = TOPIC_UP_CAMERA_POINTS,
         type = "sensor_msgs/PointCloud2",
-        throttleRate = 500  // Heavy data, throttle hard
+        throttleRate = 200
     ))
 
-    // === ROSAPI SERVICE CALLS ===
-
-    /**
-     * Call /rosapi/topics to discover ALL available topics on the robot.
-     * Response: { "topics": ["/topic1", "/topic2", ...], "types": ["type1", "type2", ...] }
-     */
-    fun callGetAllTopics(): String = """{"op":"call_service","id":"rosapi_topics","service":"/rosapi/topics"}"""
-
-    /**
-     * Call /rosapi/topic_type to get the message type for a specific topic.
-     */
-    fun callGetTopicType(topic: String): String = toJson(ServiceCallMsg(
-        op = OP_CALL_SERVICE,
-        id = "rosapi_topic_type",
-        service = SERVICE_ROSAPI_TOPIC_TYPE,
-        args = mapOf("topic" to topic)
-    ))
-
-    /**
-     * Generic subscription with any topic/type - for discovered topics.
-     */
-    fun subscribeGeneric(topic: String, msgType: String, throttleMs: Int = 200): String = toJson(SubscribeMsg(
+    fun subscribeUpCameraScan(): String = toJson(SubscribeMsg(
         op = OP_SUBSCRIBE,
-        id = "sub_${topic.replace("/", "_")}",
-        topic = topic,
-        type = msgType,
-        throttleRate = throttleMs
+        id = "get_up_camera_scan",
+        topic = TOPIC_UP_CAMERA_SCAN,
+        type = "sensor_msgs/LaserScan",
+        throttleRate = 150
+    ))
+
+    fun subscribeObstacleRegion(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_obstacle_region",
+        topic = TOPIC_OBSTACLE_REGION,
+        type = "unknown",  // Will log actual type
+        throttleRate = 200
+    ))
+
+    fun subscribeUpcamData(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_upcam_data",
+        topic = TOPIC_UPCAM_DATA,
+        type = "unknown",
+        throttleRate = 200
+    ))
+
+    fun subscribeDowncamData(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_downcam_data",
+        topic = TOPIC_DOWNCAM_DATA,
+        type = "unknown",
+        throttleRate = 200
+    ))
+
+    fun subscribeUpCameraAfterMap(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_up_camera_after_map",
+        topic = TOPIC_UP_CAMERA_AFTER_MAP,
+        type = "sensor_msgs/PointCloud2",
+        throttleRate = 200
     ))
 
     fun unsubscribe(topic: String, id: String): String = toJson(UnsubscribeMsg(
