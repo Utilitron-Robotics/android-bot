@@ -305,6 +305,176 @@ if (blockedByPerson && blockedDuration > 13000 && askedToMoveRecently) {
 
 ---
 
+## Alternative Implementation Approaches
+
+### Approach 1: Inline in Navigate Command (Simple)
+
+Add people tracking directly inside the existing navigation while loop in `CommandBuffer.kt:489-685`.
+
+```kotlin
+while (waitingForNavArrival && System.currentTimeMillis() < deadline) {
+    delay(100)
+
+    // Existing recovery logic...
+
+    // NEW: People tracking
+    val peopleCount = robotClient.peopleCount.value
+    val groupDist = robotClient.avgPeopleDistance
+    if (groupDist > 5.0) { /* call out */ }
+    if (peopleCount == 0 && wasTrackingGroup) { /* pause */ }
+}
+```
+
+**Pros**:
+- Minimal code changes
+- All logic in one place
+- Easy to understand
+
+**Cons**:
+- Navigate loop already 230+ lines
+- Mixes navigation with people tracking
+- Can't reuse for other commands (speak at waypoint, etc.)
+
+**Time**: Fast to implement
+**Security**: Same as current (navigate command is trusted)
+**Elegance**: Low - bloated function
+
+---
+
+### Approach 2: Separate TourAwareness Coroutine
+
+Launch a dedicated coroutine when tour starts that monitors people state independently.
+
+```kotlin
+class TourAwareness(
+    private val robotClient: RobotWebSocketClient,
+    private val onGroupFallingBehind: () -> Unit,
+    private val onGroupLost: () -> Unit,
+    private val onBlockedByPerson: () -> Unit
+) {
+    private var job: Job? = null
+
+    fun startTracking() {
+        job = scope.launch {
+            var lastSeenPeople = System.currentTimeMillis()
+            while (isActive) {
+                delay(200)
+                val count = robotClient.peopleCount.value
+                val dist = robotClient.avgPeopleDistance
+
+                when {
+                    count == 0 && System.currentTimeMillis() - lastSeenPeople > 10_000 ->
+                        onGroupLost()
+                    dist > 5.0 && count > 0 ->
+                        onGroupFallingBehind()
+                    dist < 1.0 && robotClient.robotStatus.value?.navStatus == 601 ->
+                        onBlockedByPerson()
+                }
+
+                if (count > 0) lastSeenPeople = System.currentTimeMillis()
+            }
+        }
+    }
+
+    fun stopTracking() { job?.cancel() }
+}
+```
+
+**Pros**:
+- Clean separation of concerns
+- Reusable across commands
+- Testable in isolation
+- Navigate command stays focused on navigation
+
+**Cons**:
+- New class/file
+- Coordination between coroutines
+- Callbacks can get messy
+
+**Time**: Medium
+**Security**: Good - isolated component
+**Elegance**: High - clean architecture
+
+---
+
+### Approach 3: Reactive Kotlin Flow
+
+Use Flow operators to combine streams and react to state changes.
+
+```kotlin
+// In RobotWebSocketClient
+val tourGroupState: Flow<TourGroupState> = combine(
+    peopleCount,
+    peopleDistance,
+    robotStatus.map { it?.navStatus }
+) { count, dist, navStatus ->
+    when {
+        count == 0 -> TourGroupState.LOST
+        dist > 5.0 -> TourGroupState.FALLING_BEHIND
+        dist > 3.0 -> TourGroupState.LAGGING
+        dist < 1.0 && navStatus == 601 -> TourGroupState.BLOCKING
+        else -> TourGroupState.FOLLOWING
+    }
+}
+.distinctUntilChanged()
+.debounce(500)  // Don't spam on flicker
+
+// In CommandBuffer, collect during tour
+tourGroupState.collect { state ->
+    when (state) {
+        TourGroupState.FALLING_BEHIND -> speak("Take your time!")
+        TourGroupState.LOST -> { cancelNav(); speak("I lost you") }
+        // etc.
+    }
+}
+```
+
+**Pros**:
+- Most elegant/idiomatic Kotlin
+- Automatic debouncing prevents spam
+- `distinctUntilChanged` = only react to real changes
+- Declarative - state logic in one place
+
+**Cons**:
+- Flow collection requires coroutine scope management
+- Harder to debug flow pipelines
+- Overkill if we only need this in one place
+
+**Time**: Medium
+**Security**: Good - reactive pipeline is predictable
+**Elegance**: Highest - this is how Kotlin wants you to do it
+
+---
+
+### Recommendation: Approach 2 (TourAwareness Coroutine)
+
+**Why not Approach 1**: The navigate command is already complex with recovery logic. Adding people tracking would make it harder to maintain and test.
+
+**Why not Approach 3**: While most elegant, Flows add complexity for debugging. We're not building a reactive UI - we're building a robot controller where we need to understand exactly what's happening and when.
+
+**Why Approach 2**:
+1. **Time-efficient**: Can implement incrementally - start with just "falling behind", add features later
+2. **Secure**: Isolated component can't break navigation. Easy to disable if issues arise.
+3. **Elegant for Alan**: Clean class with clear responsibilities. Easy to read, easy to modify, easy to test.
+
+```
+CommandBuffer                    TourAwareness
+    │                                │
+    ├─ startTour() ───────────────► startTracking()
+    │                                │
+    │   navigate()                   ├─ monitors peopleCount
+    │   speak()                      ├─ monitors peopleDistance
+    │   navigate()                   ├─ monitors blocked state
+    │                                │
+    ├─ onGroupFallingBehind() ◄─────┤ callback
+    ├─ onGroupLost() ◄──────────────┤ callback
+    ├─ onBlockedByPerson() ◄────────┤ callback
+    │                                │
+    └─ endTour() ─────────────────► stopTracking()
+```
+
+---
+
 ## Implementation Priority
 
 ### Phase 1: Parse People Data (Required First)
