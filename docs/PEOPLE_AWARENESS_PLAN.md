@@ -1,321 +1,358 @@
 # People Awareness for Tour Bot
 
-## Overview
+## Purpose
 
-Use depth camera and people detection data to make the tour bot aware of humans - their count, position, orientation, and whether they're following. This enables natural tour guide behavior.
+Safe, natural interaction with tour groups. The robot must:
+- Know when people are present before starting
+- Track the group throughout the tour
+- Never leave people behind
+- Communicate clearly when it needs space to move
 
----
-
-## Data Sources (from robot)
-
-| Topic | Data | Use Case |
-|-------|------|----------|
-| `/people_detected` | Boolean | Trigger tour offer greeting |
-| `/detected_people_array` | Array of people with positions | Count, tracking, following detection |
-| `/upcamera/depth/points` | 3D point cloud | Body shape, facing direction |
-| `/up_camera_after_to_map` | Points in map frame | Person positions on map |
-| `/obstacle_region` | Obstacle shapes | Person blocking path |
-| `/move_base/local_costmap/costmap` | 2D grid with obstacles | Visualize people as blocks |
+This is a public-facing robot that will interact with children and adults. Safety and predictability are paramount.
 
 ---
 
-## Feature 1: Greeting & Tour Offer
+## Current System Analysis
 
-**Trigger**: `/people_detected` goes TRUE (or person appears in `/detected_people_array`)
+### What We Have Working
 
-**Behavior**:
-```
-1. Robot detects human approaching
-2. Speaks: "Welcome to the Robotics Floor! Would you like a tour?"
-3. Wait for response (hand gesture via /handpose, or timeout)
-4. If yes → start tour sequence
-5. If no response after 10s → "No problem, let me know if you change your mind"
-```
+#### 1. People Detection (RobotWebSocketClient.kt)
 
-**Implementation**: Already partially exists in `CommandBuffer.kt` motion standby mode. Extend with:
-- Configurable greeting text per venue
-- Gesture recognition for "yes" (wave, thumbs up)
-- Timeout handling
-
----
-
-## Feature 2: Tour Group Tracking
-
-**Goal**: Know how many people are in the tour group and track them throughout
-
-**Data needed from `/detected_people_array`**:
-- Person count
-- Person positions (x, y relative to robot)
-- Person IDs (for tracking same person across frames)
-
-**State to maintain**:
+**Topic**: `/people_detected` (std_msgs/Bool)
 ```kotlin
-data class TourGroup(
-    val peopleCount: Int,
-    val people: List<TrackedPerson>,
-    val startedAt: Long,
-    val lastSeenAt: Long
-)
+// Line 77-78
+private val _peopleDetected = MutableStateFlow(false)
+val peopleDetected: StateFlow<Boolean> = _peopleDetected
 
-data class TrackedPerson(
-    val id: String,           // Tracking ID from detection
-    val position: Point2D,    // Position in robot frame
-    val distanceFromRobot: Double,
-    val isFollowing: Boolean,
-    val lastSeenAt: Long
-)
-```
-
-**Logic**:
-- At tour start: snapshot initial group size
-- During tour: track if same people are still visible
-- Alert if group size drops significantly
-
----
-
-## Feature 3: Following Detection
-
-**Goal**: Detect if people are following the robot or falling behind
-
-**Metrics**:
-- Distance from robot (from `/detected_people_array` positions)
-- Movement direction (compare positions over time)
-- Relative velocity (are they keeping up?)
-
-**Thresholds**:
-| Status | Distance | Action |
-|--------|----------|--------|
-| Close | < 1.5m | Normal, continue |
-| Following | 1.5m - 3m | Normal, continue |
-| Falling behind | 3m - 5m | Slow down, gentle reminder |
-| Lost | > 5m | Stop, call out loudly |
-| Gone | Not detected for 10s | Stop tour, announce |
-
-**Announcements**:
-- Falling behind: "Take your time, I'll wait for you!"
-- Lost: "Hello? Is everyone still with me?"
-- Gone: "It looks like I've lost my tour group. Tour paused."
-
----
-
-## Feature 4: Facing Direction Detection
-
-**Goal**: Know which way people are facing (toward robot or away)
-
-**Method 1: From depth point cloud**
-- Human body is not symmetric front-to-back
-- Chest/face side has different depth profile than back
-- Compare point cloud shape to known patterns
-
-**Method 2: From `/detected_people_array` if it includes orientation**
-- Some people trackers include facing angle
-- Check message format when we get real data
-
-**Method 3: Movement-based inference**
-- If person is moving toward robot → probably facing it
-- If person is moving away → probably facing away
-
-**Use cases**:
-- Don't start tour until people are facing robot (paying attention)
-- Detect when people turn away (losing interest)
-- Know if blocking person is facing robot (can see it) or not (might not know)
-
----
-
-## Feature 5: Path Blocking Detection
-
-**Goal**: Detect when a person is blocking the robot's intended path
-
-**Data sources**:
-- `/obstacle_region` - detected obstacles
-- `/global_path` - robot's planned path
-- Person positions from `/detected_people_array`
-
-**Logic**:
-```
-1. Get robot's current navigation goal path
-2. Get positions of detected people
-3. Check if any person intersects with path corridor (within 0.5m of path)
-4. If blocking:
-   - First: slow down, wait 3 seconds
-   - Then: politely ask to move
-   - Finally: plan around if possible
-```
-
-**Announcements**:
-- Polite: "Excuse me, may I pass through?"
-- Informative: "I need to get to [destination], could you step aside?"
-- Urgent: "Please clear the path, I need to move through"
-
----
-
-## Feature 6: Smart Tour Pacing
-
-**Goal**: Adjust tour speed based on group behavior
-
-**Factors**:
-- Group distance from robot
-- Group movement speed
-- Number of people still following
-- Whether anyone is struggling to keep up
-
-**Speed adjustments**:
-```
-base_speed = 0.4 m/s (comfortable walking)
-
-if (avg_group_distance > 3m):
-    speed = 0.2  # slow down
-if (anyone_falling_behind):
-    speed = 0.1  # crawl
-if (group_lost):
-    speed = 0    # stop
-
-if (group_close && all_following):
-    speed = base_speed  # normal
-```
-
----
-
-## Feature 7: Tour Narration Timing
-
-**Goal**: Only speak when people are paying attention
-
-**Checks before speaking**:
-- Are people still detected?
-- Are they facing the robot (or the point of interest)?
-- Are they within hearing distance?
-- Has the group settled (not still walking)?
-
-**Logic**:
-```
-fun shouldSpeak(): Boolean {
-    val peopleDetected = peopleCount > 0
-    val peopleClose = avgDistance < 4m
-    val groupSettled = groupVelocity < 0.1 m/s
-    val facingCorrectly = anyoneFacingRobot || anyoneFacingPOI
-
-    return peopleDetected && peopleClose && groupSettled
+// Line 548-555 - parsing
+ChassisProtocol.TOPIC_PEOPLE_DETECTED -> {
+    val detected = msg.get("data")?.asBoolean ?: false
+    if (detected != _peopleDetected.value) {
+        Log.d(TAG, ">>> PEOPLE_DETECTED: $detected")
+        _peopleDetected.value = detected
+    }
 }
 ```
 
----
+**What it tells us**: Binary yes/no - someone is in front of the robot's depth camera.
 
-## Implementation Phases
+**Limitation**: No count, no position, no distance.
 
-### Phase 1: Data Collection (NOW)
-- [x] Subscribe to all depth camera topics
-- [ ] Log actual message formats
-- [ ] Understand `/detected_people_array` structure
-- [ ] Determine which topics have useful data
+#### 2. Rich People Array (RobotWebSocketClient.kt)
 
-### Phase 2: Basic Awareness
-- [ ] Parse people positions from detection array
-- [ ] Calculate distance from robot
-- [ ] Expose people count to CommandBuffer
-- [ ] Simple "people nearby" boolean
+**Topic**: `/detected_people_array` (yutong_assistance/PersonArray)
+```kotlin
+// Line 556-576 - we subscribe but only log, don't parse fully yet
+ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY -> {
+    val people = msg.get("people")?.asJsonArray
+        ?: msg.get("data")?.asJsonArray
+        ?: msg.get("detections")?.asJsonArray
+        ?: msg.get("persons")?.asJsonArray
+    if (people != null && people.size() > 0) {
+        Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${people.size()} people detected")
+    }
+}
+```
 
-### Phase 3: Tour Integration
-- [ ] Greeting trigger on person detection
-- [ ] Group count at tour start
-- [ ] Following detection during tour
-- [ ] Speed adjustment based on group distance
+**What it should tell us**: Count, positions, possibly tracking IDs. Message format needs verification from live robot data.
 
-### Phase 4: Advanced Features
-- [ ] Facing direction detection
-- [ ] Path blocking detection
-- [ ] Individual person tracking (IDs)
-- [ ] Narration timing based on attention
+#### 3. Obstacle Classification (ObstacleClassifier.kt)
 
-### Phase 5: Polish
-- [ ] Configurable thresholds per venue
-- [ ] Natural language variations
-- [ ] Learn typical group behavior
-- [ ] Handle edge cases (person leaves, new person joins)
+Classifies LIDAR obstacles:
+- `MOVING_PERSON` - Human-sized (0.3-1.2m width), moving
+- `CROWD` - Multiple moving entities
+- `STATIC_PERSON` - Person standing still
+- `STATIC_EXPECTED` - Wall/mapped obstacle
+- `STATIC_UNEXPECTED` - Unknown static object
 
----
+**Used by**: `RobotWebSocketClient.sendVelocity()` for intelligent speed decisions.
 
-## Message Format Discovery
+#### 4. Crowd Control Speed Ramping (RobotWebSocketClient.kt:678-712)
 
-When we get real data, document the actual formats here:
+```kotlin
+fun sendVelocity(linearX: Double, angularZ: Double) {
+    // During nav, move_base controls - don't interfere
+    val isNavigating = _robotStatus.value?.navStatus == 601
+    if (isNavigating) return
 
-### `/detected_people_array`
-```json
-// TODO: Log actual message and paste here
-{
-    "people": [
-        {
-            "id": "?",
-            "position": { "x": ?, "y": ?, "z": ? },
-            "velocity": { "x": ?, "y": ?, "z": ? },
-            "orientation": ?
+    var adjustedLinear = linearX
+
+    if (linearX > 0) {
+        val distance = minFrontDistance.toDouble()
+        val obstacleType = _robotStatus.value?.obstacleType ?: "CLEAR"
+        val peopleNearby = _peopleDetected.value
+
+        // Wall: hard stop (don't push through)
+        // Human/crowd: gradient push-through (they'll move)
+        val isWall = obstacleType == "STATIC_EXPECTED"
+        val isHuman = obstacleType in listOf("MOVING_PERSON", "CROWD", "STATIC_PERSON")
+        val treatAsCrowd = isHuman || (peopleNearby && obstacleType == "UNKNOWN")
+
+        if (distance < crowdSafeDistance) {
+            if (isWall && !_detachMode.value) {
+                adjustedLinear = 0.0  // Hard stop for walls
+            } else {
+                // Gradient ramp for people
+                val fraction = (distance / crowdSafeDistance).coerceIn(0.0, 1.0)
+                val rampedFraction = Math.pow(fraction, crowdRampRate)
+                val minFraction = CREEP_SPEED / linearX.coerceAtLeast(CREEP_SPEED)
+                adjustedLinear = linearX * rampedFraction.coerceAtLeast(minFraction)
+            }
         }
-    ]
+    }
+    send(ChassisProtocol.publishVelocity(adjustedLinear, angularZ))
 }
 ```
 
-### `/obstacle_region`
-```json
-// TODO: Log actual message and paste here
+**Key insight**: Robot already distinguishes people from walls. Slows down for people (they'll move), hard stops for walls.
+
+#### 5. Motion Standby (CommandBuffer.kt:817-861)
+
+```kotlin
+"motion_standby" -> {
+    val greeting = cmd.data["greeting"] as? String ?: "Hello! Would you like a tour?"
+
+    // Wait for person detected
+    while (currentCommand != null && !robotClient.peopleDetected.value) {
+        delay(200)
+    }
+
+    // Speak greeting
+    taskExecutor?.speakText(greeting) { ttsComplete.complete(Unit) }
+    ttsComplete.await()
+
+    // Auto-start tour
+    taskExecutor?.startTourMode(pin)
+    completeCommand(cmd.id, "success")
+}
 ```
 
-### `/upcamera/depth/points`
-```json
-// PointCloud2 format
-{
-    "height": ?,
-    "width": ?,
-    "fields": [...],
-    "point_step": ?,
-    "data": "base64..."
+**What it does**: Waits for `/people_detected` to go true, speaks greeting, auto-starts tour.
+
+#### 6. Button Standby with Greeting (CommandBuffer.kt:863-950)
+
+```kotlin
+"button_standby" -> {
+    // Show button immediately
+    taskExecutor?.notifyTourStandby(sequenceId, buttonText)
+
+    // RISING EDGE detection - greet on approach, not departure
+    var wasDetectedLastCycle = false
+
+    while (currentCommand != null) {
+        delay(500)
+        val peopleDetected = robotClient.peopleDetected.value
+        val risingEdge = peopleDetected && !wasDetectedLastCycle
+
+        if (risingEdge && timeSinceStart > initialDelayMs) {
+            if (lastGreetingTime == 0L || now - lastGreetingTime > greetingCooldownMs) {
+                taskExecutor?.speakText(greetingText) { }
+                lastGreetingTime = now
+            }
+        }
+        wasDetectedLastCycle = peopleDetected
+    }
+}
+```
+
+**Key insight**: Already uses rising-edge detection to greet people approaching, not leaving. 30-second cooldown prevents spam.
+
+---
+
+## What We Need to Add
+
+### 1. People Count
+
+**Current**: Binary (someone/no one)
+**Need**: Actual count from `/detected_people_array`
+
+**Where to add**: `RobotWebSocketClient.kt`
+```kotlin
+// Add state
+private val _peopleCount = MutableStateFlow(0)
+val peopleCount: StateFlow<Int> = _peopleCount
+
+// In TOPIC_DETECTED_PEOPLE_ARRAY handler
+val people = msg.get("people")?.asJsonArray ?: ...
+_peopleCount.value = people?.size() ?: 0
+```
+
+**Use case**: "I see 3 people. Follow me!" vs "I see someone approaching."
+
+### 2. Group Distance Tracking
+
+**Current**: `minFrontDistance` - closest obstacle
+**Need**: Average/median distance of detected people
+
+**Where to add**: `RobotWebSocketClient.kt`
+```kotlin
+// Add state
+@Volatile
+var avgPeopleDistance: Float = Float.MAX_VALUE
+    private set
+
+// In TOPIC_DETECTED_PEOPLE_ARRAY handler
+// Parse person positions, calculate distances, average them
+```
+
+**Use case**: Know if group is close (< 2m), following (2-4m), or falling behind (> 4m).
+
+### 3. Tour Group State Machine
+
+**Add to**: `CommandBuffer.kt`
+
+```kotlin
+enum class TourGroupState {
+    WAITING_FOR_PEOPLE,  // No one detected yet
+    GROUP_PRESENT,       // People detected, ready to start
+    GROUP_FOLLOWING,     // Tour active, group keeping up
+    GROUP_FALLING_BEHIND,// Group > 4m away, slow down
+    GROUP_LOST,          // No detection for 10s, stop
+    BLOCKING_PATH        // Person in front during nav
+}
+```
+
+### 4. Following Detection During Navigation
+
+**Modify**: `CommandBuffer.kt` navigate command (line 455-699)
+
+```kotlin
+// Inside navigation while loop, add:
+val peopleCount = robotClient.peopleCount.value
+val groupDistance = robotClient.avgPeopleDistance
+
+when {
+    groupDistance > 5.0 && peopleCount > 0 -> {
+        // Group falling way behind - stop and call out
+        if (!calledOutRecently) {
+            robotClient.stop()
+            taskExecutor?.speakText("Hello? Is everyone still with me?")
+            calledOutRecently = true
+            delay(5000)  // Wait for them to catch up
+        }
+    }
+    groupDistance > 3.0 && peopleCount > 0 -> {
+        // Group falling behind - slow down
+        // (handled by crowd control, but announce once)
+        if (!slowedDownAnnounced) {
+            taskExecutor?.speakText("Take your time, I'll wait for you!")
+            slowedDownAnnounced = true
+        }
+    }
+    peopleCount == 0 && wasTrackingGroup -> {
+        // Lost the group entirely
+        lostGroupTime = lostGroupTime ?: System.currentTimeMillis()
+        if (System.currentTimeMillis() - lostGroupTime > 10_000) {
+            robotClient.cancelNavigation()
+            taskExecutor?.speakText("I seem to have lost my tour group. Tour paused.")
+            // Wait for people to return or manual intervention
+        }
+    }
+}
+```
+
+### 5. Path Blocking Communication
+
+**Current**: Robot slows/stops for people in path (crowd control handles this)
+**Need**: Verbal communication when blocked during tour
+
+**Modify**: `RobotWebSocketClient.kt` or `CommandBuffer.kt`
+
+```kotlin
+// When obstacle classifier detects MOVING_PERSON or STATIC_PERSON in path
+// AND robot is navigating AND velocity is near zero for > 3 seconds:
+if (blockedByPerson && blockedDuration > 3000 && !askedToMoveRecently) {
+    taskExecutor?.speakText("Excuse me, may I pass through?")
+    askedToMoveRecently = true
+    askedToMoveAt = System.currentTimeMillis()
+}
+
+// If still blocked after 10 more seconds:
+if (blockedByPerson && blockedDuration > 13000 && askedToMoveRecently) {
+    taskExecutor?.speakText("I need to get to our next stop. Could you please step aside?")
 }
 ```
 
 ---
 
-## Announcements Library
+## Safety Considerations
 
-### Greetings
-- "Welcome to the Robotics Floor! Would you like a tour?"
-- "Hello there! I'm your tour guide robot. Ready for a tour?"
-- "Hi! I can show you around if you'd like."
+### 1. Never Surprise People
+- Always announce before moving
+- "Follow me to our next stop!" before navigation starts
+- Don't start moving until people have had time to hear and react
 
-### Following
-- "Take your time, I'll wait!"
-- "No rush, I'm right here."
-- "Hello? Still with me?"
-- "I seem to have lost my tour group. I'll wait here."
+### 2. Never Leave People Behind
+- Track group distance continuously
+- Stop and call out if group > 5m away
+- Pause tour if group lost for > 10 seconds
 
-### Blocking
-- "Excuse me, may I pass through?"
-- "Pardon me, I need to get by."
-- "Could you step aside please? I need to move that way."
+### 3. Never Push Through
+- Crowd control already handles this (gradient slowdown)
+- Add verbal communication so people understand why robot stopped
+- Robot should never feel aggressive or pushy
 
-### Tour Progress
-- "Follow me to our next stop!"
-- "Right this way, everyone."
-- "We're heading to [destination] next."
-- "Almost there!"
+### 4. Clear Communication
+- Use simple, friendly language
+- Don't talk too much (annoying)
+- Speak loud enough to be heard
+- Give people time to respond
 
-### Attention
-- "Over here, everyone!"
-- "If I could have your attention..."
-- "Take a look at this..."
-
----
-
-## Open Questions
-
-1. **What's in `/detected_people_array`?** - Need real data to know format
-2. **Does it include facing direction?** - Or do we need to infer?
-3. **How reliable is person tracking?** - Do IDs persist across frames?
-4. **What's `/obstacle_region` format?** - Polygons? Bounding boxes?
-5. **Can we distinguish people from other obstacles?** - Or just "obstacle near path"?
+### 5. Predictable Behavior
+- Same stimulus = same response
+- Don't make sudden movements
+- Telegraph intentions before acting
 
 ---
 
-## Related Files
+## Implementation Priority
 
-- `relay_app/.../RobotWebSocketClient.kt` - Topic subscriptions
-- `relay_app/.../CommandBuffer.kt` - Tour execution, motion standby
-- `relay_app/.../ChassisProtocol.kt` - Topic constants
-- `flutter_app/.../audio_announcer.dart` - Speech output
+### Phase 1: Parse People Data (Required First)
+1. Parse `/detected_people_array` to get count and positions
+2. Expose `peopleCount` and `avgPeopleDistance` from RobotWebSocketClient
+3. Verify message format with live robot data
+
+### Phase 2: Following Detection
+1. Add distance tracking during navigate command
+2. Add "falling behind" slowdown + announcement
+3. Add "group lost" stop + announcement
+
+### Phase 3: Blocking Communication
+1. Detect when stopped by person (not wall)
+2. Add polite "excuse me" after 3 seconds
+3. Add more direct request after 10+ seconds
+
+### Phase 4: Tour Start Enhancement
+1. Announce group count: "I see 3 people ready for the tour!"
+2. "Follow me!" announcement before first movement
+3. Brief pause after announcement before moving
+
+---
+
+## File Locations
+
+| Feature | File | Lines |
+|---------|------|-------|
+| People detection state | `RobotWebSocketClient.kt` | 77-78, 548-555 |
+| Rich people array parsing | `RobotWebSocketClient.kt` | 556-576 |
+| Obstacle classifier | `ObstacleClassifier.kt` | Full file |
+| Crowd control speed ramping | `RobotWebSocketClient.kt` | 678-712 |
+| Motion standby | `CommandBuffer.kt` | 817-861 |
+| Button standby with greeting | `CommandBuffer.kt` | 863-950 |
+| Navigation execution | `CommandBuffer.kt` | 455-699 |
+| TTS output | `RelayServer.TaskExecutor` | `speakText()` |
+
+---
+
+## Testing Checklist
+
+- [ ] Robot announces group count before tour starts
+- [ ] Robot announces "Follow me!" before moving
+- [ ] Robot slows down when group falls behind (3-4m)
+- [ ] Robot stops and calls out when group far behind (>5m)
+- [ ] Robot pauses tour if group lost for 10+ seconds
+- [ ] Robot says "Excuse me" when blocked by person
+- [ ] Robot never pushes through people
+- [ ] Robot never starts moving without warning
+- [ ] Announcements are audible but not too frequent
+- [ ] Works with 1 person, 3 people, 10 people
