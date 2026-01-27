@@ -1016,10 +1016,13 @@ class CommandBuffer(
                 completeCommand(cmd.id, "success")
 
                 // Reload stored commands for autonomous looping
+                // Skip first navigate since loop already brought us back to start
                 if (storedLoopCommands.isNotEmpty()) {
-                    Log.i(TAG, "Reloading ${storedLoopCommands.size} stored commands")
-                    // Generate fresh IDs to avoid duplicate ID issues
-                    storedLoopCommands.forEach { stored ->
+                    val skipFirst = storedLoopCommands.firstOrNull()?.type == "navigate"
+                    val commandsToLoad = if (skipFirst) storedLoopCommands.drop(1) else storedLoopCommands
+                    Log.i(TAG, "Reloading ${commandsToLoad.size} commands (skipped initial nav: $skipFirst)")
+
+                    commandsToLoad.forEach { stored ->
                         val fresh = stored.copy(id = UUID.randomUUID().toString())
                         pendingQueue.add(fresh)
                     }
