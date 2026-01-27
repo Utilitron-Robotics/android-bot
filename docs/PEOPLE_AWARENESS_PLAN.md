@@ -579,6 +579,112 @@ CommandBuffer                    TourAwareness
 
 ---
 
+## Crowd Control Settings (Relay-Held for Safety)
+
+The relay must hold crowd control settings independently of Flutter. If Flutter crashes or disconnects, the relay continues enforcing safety thresholds.
+
+### Current Implementation
+
+#### CrowdLogicConfig (CommandBuffer.kt:1144-1147)
+```kotlin
+data class CrowdLogicConfig(
+    val safeDistanceMeters: Double = 0.9,  // Distance where ramping begins (~3 feet)
+    val rampRate: Double = 0.5             // 0.1 = gentle, 1.0 = aggressive
+)
+```
+
+#### Where Settings Live
+| Setting | Location | Default | Updated By |
+|---------|----------|---------|------------|
+| `crowdConfig` | CommandBuffer.kt:74 | 0.9m, 0.5 rate | `set_crowd_config` command |
+| `crowdSafeDistance` | RobotWebSocketClient | synced from crowdConfig | `setCrowdConfig()` |
+| `crowdRampRate` | RobotWebSocketClient | synced from crowdConfig | `setCrowdConfig()` |
+
+#### How It Works
+1. **Flutter sends** `set_crowd_config` with distance and ramp rate
+2. **CommandBuffer stores** config locally (survives Flutter disconnect)
+3. **RobotWebSocketClient receives** via `setCrowdConfig()` call
+4. **sendVelocity()** uses these values for speed ramping (lines 678-712)
+
+#### Safety Flow Without Flutter
+```
+Flutter disconnects
+       │
+       ▼
+CommandBuffer still has crowdConfig
+       │
+       ▼
+RobotWebSocketClient still has crowdSafeDistance/crowdRampRate
+       │
+       ▼
+sendVelocity() still enforces ramping when obstacles detected
+       │
+       ▼
+Robot slows/stops for people even without Flutter
+```
+
+### Settings Needed for Tour Mode
+
+When a tour starts, Flutter should send these settings:
+- **Safe distance**: 1.0-1.5m for crowded areas (people walking around)
+- **Ramp rate**: 0.3-0.5 (gentle slowdown, not abrupt)
+- **People-specific behavior**: Different from wall behavior
+
+### Current Gap
+
+The crowd control settings work for **all obstacles** - no distinction between people and walls. The relay holds the settings, but it can't tell the joystick operator "there's a person at 2m" vs "there's a wall at 2m."
+
+For tour mode with audio cues, we need:
+1. `_peopleCount` StateFlow (from `/detected_people_array`)
+2. `_avgPeopleDistance` StateFlow (calculated from array positions)
+3. Audio messages that mention "people" vs generic "obstacle"
+
+---
+
+## Implementation Punchlist
+
+### ✅ DONE - Working Today
+
+| Feature | File | Lines | Status |
+|---------|------|-------|--------|
+| `/people_detected` subscription | RobotWebSocketClient.kt | 77-78, 548-555 | ✅ Working |
+| `peopleDetected` StateFlow | RobotWebSocketClient.kt | 77-78 | ✅ Exposed |
+| `motion_standby` waits for person | CommandBuffer.kt | 817-861 | ✅ Working |
+| `button_standby` rising-edge greeting | CommandBuffer.kt | 863-950 | ✅ Working |
+| Crowd control speed ramping | RobotWebSocketClient.kt | 678-712 | ✅ Working |
+| Crowd config held in relay | CommandBuffer.kt | 74, 979-994 | ✅ Working |
+| `/detected_people_array` subscribed | RobotWebSocketClient.kt | 556-576 | ✅ Subscribed |
+
+### ⏳ PARTIAL - Needs Wiring
+
+| Feature | What Exists | What's Missing |
+|---------|-------------|----------------|
+| People count | Logged in handler | `_peopleCount` StateFlow not created |
+| People positions | Message received | Not parsed, no distance calculation |
+| `/detected_people_array` format | Subscription works | Actual field names unknown |
+
+### ❌ NOT DONE - Needs Implementation
+
+| Feature | Description | Effort |
+|---------|-------------|--------|
+| `peopleCount` StateFlow | Parse array size, expose count | Small (5 lines) |
+| `avgPeopleDistance` StateFlow | Calculate from positions | Medium (15 lines) |
+| Group tracking during nav | Monitor distance, announce fallback | Medium |
+| "Excuse me" when blocked | Detect blocked by person, TTS | Medium |
+| TourAwareness coroutine | Callbacks for group state changes | Medium |
+| Audio cues distinguish people | "Person ahead" vs "Obstacle ahead" | Small |
+
+### 🔬 NEEDS VERIFICATION
+
+| Item | How to Verify |
+|------|---------------|
+| `/detected_people_array` message format | Read robot logs when person detected |
+| Position field names in array | Check for `position`, `pose`, `center`, etc. |
+| Distance units in array | Meters? Centimeters? Millimeters? |
+| Tracking IDs in array | Does robot assign stable IDs per person? |
+
+---
+
 ## Testing Checklist
 
 - [ ] Robot announces group count before tour starts
