@@ -73,6 +73,9 @@ class CommandBuffer(
     // Crowd logic configuration for speed ramping
     private var crowdConfig = CrowdLogicConfig()
 
+    // Tour awareness for group tracking during navigation
+    private var tourAwareness: TourAwareness? = null
+
     // === Bidirectional Heartbeat: Messenger receives heartbeats FROM Flutter ===
     private val flutterMessenger = Messenger(
         expectedSource = "flutter",
@@ -110,6 +113,43 @@ class CommandBuffer(
         startHeartbeat()
         startExecutionLoop()
         flutterMessenger.start()  // Start monitoring Flutter heartbeats
+        initTourAwareness()
+    }
+
+    /**
+     * Initialize tour awareness for group tracking during navigation.
+     * Callbacks trigger TTS announcements via TaskExecutor.
+     */
+    private fun initTourAwareness() {
+        tourAwareness = TourAwareness(
+            peopleDetected = robotClient.peopleDetected,
+            peopleCount = robotClient.peopleCount,
+            avgPeopleDistance = robotClient.avgPeopleDistance,
+            navStatus = { robotClient.robotStatus.value?.navStatus ?: 0 },
+            onGroupFallingBehind = { distance ->
+                Log.i(TAG, "TourAwareness: Group falling behind at ${distance}m")
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    taskExecutor?.speakText("Please keep up with the tour!") { }
+                }
+            },
+            onPathBlockedByPerson = {
+                Log.i(TAG, "TourAwareness: Path blocked by person")
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    taskExecutor?.speakText("Excuse me, may I please get through?") { }
+                }
+            },
+            onGroupLost = {
+                Log.i(TAG, "TourAwareness: Group lost")
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    taskExecutor?.speakText("Hello? Is anyone still following?") { }
+                }
+            },
+            onPersonApproaching = { distance ->
+                Log.i(TAG, "TourAwareness: Person approaching at ${distance}m")
+                // Greeting handled by button_standby, just log here
+            }
+        )
+        Log.i(TAG, "TourAwareness initialized")
     }
 
     /**
@@ -120,6 +160,8 @@ class CommandBuffer(
         heartbeatJob?.cancel()
         executionJob?.cancel()
         flutterMessenger.stop()  // Stop monitoring Flutter heartbeats
+        tourAwareness?.destroy()
+        tourAwareness = null
         scope.cancel()
     }
 
@@ -468,6 +510,9 @@ class CommandBuffer(
                 triggerRecovery = false
                 stuckAnnouncementPending = false
 
+                // Start group tracking during navigation
+                tourAwareness?.startMonitoring()
+
                 // Check if navigating to/from charger - be less paranoid about obstacles
                 val isChargingRelated = waypoint.contains("Pile", ignoreCase = true) ||
                                        waypoint.contains("Charger", ignoreCase = true) ||
@@ -700,6 +745,8 @@ class CommandBuffer(
                 if (isChargingRelated) {
                     robotClient.setDetachMode(false)
                 }
+                // Stop group tracking when navigation ends
+                tourAwareness?.stopMonitoring()
             }
 
             "speak" -> {
