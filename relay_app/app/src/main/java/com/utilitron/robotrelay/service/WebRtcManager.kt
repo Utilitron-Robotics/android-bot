@@ -31,12 +31,14 @@ class WebRtcManager(
     companion object {
         private const val TAG = "WebRtcManager"
         private const val MAP_DATA_CHANNEL_NAME = "map_data_channel"
+        private const val DEPTH_DATA_CHANNEL_NAME = "depth_data_channel"
     }
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var peerConnectionFactory: PeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
     private var mapDataChannel: DataChannel? = null
+    private var depthDataChannel: DataChannel? = null
     private val gson = Gson()
 
     private val iceServers = listOf(
@@ -117,12 +119,12 @@ class WebRtcManager(
         }
 
         // Create the data channel for sending map data
-        val dataChannelInit = DataChannel.Init().apply {
+        val mapChannelInit = DataChannel.Init().apply {
             ordered = true // Ensure map chunks arrive in order
             negotiated = false
             id = 0
         }
-        mapDataChannel = peerConnection!!.createDataChannel(MAP_DATA_CHANNEL_NAME, dataChannelInit)
+        mapDataChannel = peerConnection!!.createDataChannel(MAP_DATA_CHANNEL_NAME, mapChannelInit)
         mapDataChannel?.registerObserver(object : DataChannel.Observer {
             override fun onBufferedAmountChange(p0: Long) {}
             override fun onStateChange() {
@@ -130,6 +132,25 @@ class WebRtcManager(
                 if (mapDataChannel?.state() == DataChannel.State.OPEN) {
                     Log.v(TAG, "WebRTC Map Data Channel OPEN. Starting map data subscription.")
                     subscribeToMapData()
+                }
+            }
+            override fun onMessage(p0: DataChannel.Buffer?) {}
+        })
+
+        // Create the data channel for sending depth camera images
+        val depthChannelInit = DataChannel.Init().apply {
+            ordered = false // Depth frames can arrive out of order, we want latest
+            negotiated = false
+            id = 1
+        }
+        depthDataChannel = peerConnection!!.createDataChannel(DEPTH_DATA_CHANNEL_NAME, depthChannelInit)
+        depthDataChannel?.registerObserver(object : DataChannel.Observer {
+            override fun onBufferedAmountChange(p0: Long) {}
+            override fun onStateChange() {
+                Log.d(TAG, "DepthDataChannel state changed: ${depthDataChannel?.state()}")
+                if (depthDataChannel?.state() == DataChannel.State.OPEN) {
+                    Log.v(TAG, "WebRTC Depth Data Channel OPEN. Starting depth data subscription.")
+                    subscribeToDepthData()
                 }
             }
             override fun onMessage(p0: DataChannel.Buffer?) {}
@@ -208,6 +229,50 @@ class WebRtcManager(
         }
     }
 
+    private fun subscribeToDepthData() {
+        scope.launch {
+            robotWebSocketClient.incomingMessages
+                .filter { it.contains("\"topic\":\"/upcamera/depth/image_raw\"") }
+                .collect { jsonString ->
+                    try {
+                        // Parse the depth image message
+                        val depthMessage = gson.fromJson(jsonString, DepthImageMessage::class.java)
+                        val msg = depthMessage.msg ?: return@collect
+
+                        val width = msg.width ?: 0
+                        val height = msg.height ?: 0
+                        val encoding = msg.encoding ?: ""
+                        val dataBase64 = msg.data ?: return@collect
+
+                        if (width <= 0 || height <= 0) return@collect
+
+                        // Create a compact message with metadata + raw data
+                        // Format: [width:2][height:2][encoding_len:1][encoding:N][data...]
+                        val encodingBytes = encoding.toByteArray(Charsets.UTF_8)
+                        val imageBytes = android.util.Base64.decode(dataBase64, android.util.Base64.DEFAULT)
+
+                        val headerSize = 2 + 2 + 1 + encodingBytes.size
+                        val packet = ByteArray(headerSize + imageBytes.size)
+
+                        // Write header
+                        packet[0] = (width shr 8).toByte()
+                        packet[1] = width.toByte()
+                        packet[2] = (height shr 8).toByte()
+                        packet[3] = height.toByte()
+                        packet[4] = encodingBytes.size.toByte()
+                        System.arraycopy(encodingBytes, 0, packet, 5, encodingBytes.size)
+                        System.arraycopy(imageBytes, 0, packet, headerSize, imageBytes.size)
+
+                        val buffer = ByteBuffer.wrap(packet)
+                        depthDataChannel?.send(DataChannel.Buffer(buffer, true))
+                        Log.d(TAG, "Sent depth image: ${width}x${height} $encoding (${packet.size} bytes)")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to process depth image: ${e.message}")
+                    }
+                }
+        }
+    }
+
     private fun compress(data: List<Int>): ByteArray {
         // The OccupancyGrid data is a list of integers from -1 to 100.
         // Converting to ByteArray is more efficient than string representation.
@@ -223,6 +288,7 @@ class WebRtcManager(
     fun close() {
         Log.i(TAG, "Closing WebRTC Manager")
         mapDataChannel?.close()
+        depthDataChannel?.close()
         peerConnection?.close()
         peerConnectionFactory?.dispose()
         peerConnection = null
@@ -232,4 +298,13 @@ class WebRtcManager(
     // Helper data class for parsing the /map message from JSON
     private data class MapMessage(val msg: MapData?)
     private data class MapData(val data: List<Int>?)
+
+    // Helper data class for parsing depth image message from JSON
+    private data class DepthImageMessage(val msg: DepthImageData?)
+    private data class DepthImageData(
+        val width: Int?,
+        val height: Int?,
+        val encoding: String?,
+        val data: String?  // base64 encoded
+    )
 }

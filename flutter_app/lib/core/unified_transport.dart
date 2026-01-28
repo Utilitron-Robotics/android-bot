@@ -219,6 +219,8 @@ class UnifiedTransportManager extends ChangeNotifier {
   Stream<CommandAck> get commandResults => _commandResultController.stream;
   Stream<model.OccupancyGrid>? get mapStream =>
       (_webrtc != null && _webrtc!.isConnected) ? _webrtc!.mapStream : null;
+  Stream<DepthImage>? get depthStream =>
+      (_webrtc != null && _webrtc!.isConnected) ? _webrtc!.depthStream : null;
   bool get isConnected => _status.hasAnyConnection;
   String? get lastError => _lastError;
   PredictiveController get predictiveController => _predictiveController;

@@ -577,8 +577,8 @@ class _HudScreenState extends State<HudScreen>
                           children: [
                             MapView(
                               fullscreen: true,
-                              mapStream:
-                                  manager.mapStream, // <-- PASS THE STREAM
+                              mapStream: manager.mapStream,
+                              depthStream: manager.depthStream,
                               onMapUpdate: (info, x, y) {
                                 if (mounted &&
                                     (info != _mapInfo ||

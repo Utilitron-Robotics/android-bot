@@ -27,6 +27,10 @@ class WebRtcTransport extends ChangeNotifier {
       StreamController<model.OccupancyGrid>.broadcast();
   Stream<model.OccupancyGrid> get mapStream => _mapStreamController.stream;
 
+  // Depth camera image stream
+  final _depthStreamController = StreamController<DepthImage>.broadcast();
+  Stream<DepthImage> get depthStream => _depthStreamController.stream;
+
   // Additional streams and getters for unified_transport.dart compatibility
   final _stateStreamController = StreamController<WebRtcState>.broadcast();
   Stream<WebRtcState> get stateStream => _stateStreamController.stream;
@@ -87,6 +91,16 @@ class WebRtcTransport extends ChangeNotifier {
           } else if (state == RTCDataChannelState.RTCDataChannelClosed) {
             _setState(WebRtcState.disconnected);
           }
+        };
+      } else if (channel.label == 'depth_data_channel') {
+        debugPrint('$_tag: Depth data channel received');
+        channel.onMessage = (message) {
+          if (message.isBinary) {
+            _handleDepthData(message.binary);
+          }
+        };
+        channel.onDataChannelState = (state) {
+          debugPrint('$_tag: Depth data channel state: $state');
         };
       }
     };
@@ -161,6 +175,33 @@ class WebRtcTransport extends ChangeNotifier {
     }
   }
 
+  void _handleDepthData(Uint8List packet) {
+    try {
+      // Parse header: [width:2][height:2][encoding_len:1][encoding:N][data...]
+      if (packet.length < 5) return;
+
+      final width = (packet[0] << 8) | packet[1];
+      final height = (packet[2] << 8) | packet[3];
+      final encodingLen = packet[4];
+
+      if (packet.length < 5 + encodingLen) return;
+
+      final encoding = String.fromCharCodes(packet.sublist(5, 5 + encodingLen));
+      final imageData = packet.sublist(5 + encodingLen);
+
+      debugPrint('$_tag: Received depth image: ${width}x$height $encoding (${imageData.length} bytes)');
+
+      _depthStreamController.add(DepthImage(
+        width: width,
+        height: height,
+        encoding: encoding,
+        data: Uint8List.fromList(imageData),
+      ));
+    } catch (e) {
+      debugPrint('$_tag: Failed to parse depth data: $e');
+    }
+  }
+
   Future<void> disconnect() async {
     debugPrint('$_tag: Disconnecting...');
     await _grpcSignalSubscription?.cancel();
@@ -224,6 +265,7 @@ class WebRtcTransport extends ChangeNotifier {
   void dispose() {
     disconnect();
     _mapStreamController.close();
+    _depthStreamController.close();
     _stateStreamController.close();
     _dataMessagesController.close();
     super.dispose();
@@ -235,4 +277,19 @@ enum WebRtcState {
   connecting,
   connected,
   failed,
+}
+
+/// Depth camera image data
+class DepthImage {
+  final int width;
+  final int height;
+  final String encoding;
+  final Uint8List data;
+
+  DepthImage({
+    required this.width,
+    required this.height,
+    required this.encoding,
+    required this.data,
+  });
 }

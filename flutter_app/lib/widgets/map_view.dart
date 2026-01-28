@@ -8,7 +8,41 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
 import '../core/rosbridge_client.dart';
+import '../core/webrtc_transport.dart';
 import '../models/occupancy_grid.dart' as model;
+
+/// Tracked person from depth camera with stable ID
+class TrackedPerson {
+  final int id;
+  final double x;
+  final double y;
+  final double vx;
+  final double vy;
+  final double heading;
+  final double confidence;
+
+  TrackedPerson({
+    required this.id,
+    required this.x,
+    required this.y,
+    this.vx = 0,
+    this.vy = 0,
+    this.heading = 0,
+    this.confidence = 1,
+  });
+
+  factory TrackedPerson.fromJson(Map<String, dynamic> json) {
+    return TrackedPerson(
+      id: (json['id'] as num).toInt(),
+      x: (json['x'] as num).toDouble(),
+      y: (json['y'] as num).toDouble(),
+      vx: (json['vx'] as num?)?.toDouble() ?? 0,
+      vy: (json['vy'] as num?)?.toDouble() ?? 0,
+      heading: (json['heading'] as num?)?.toDouble() ?? 0,
+      confidence: (json['confidence'] as num?)?.toDouble() ?? 1,
+    );
+  }
+}
 
 /// Real-time map visualization from /map topic
 class MapView extends StatefulWidget {
@@ -22,11 +56,15 @@ class MapView extends StatefulWidget {
   /// instead of the legacy HTTP polling or WebSocket subscriptions.
   final Stream<model.OccupancyGrid>? mapStream;
 
+  /// A real-time stream of depth camera images from WebRTC.
+  final Stream<DepthImage>? depthStream;
+
   const MapView({
     super.key,
     this.fullscreen = false,
     this.onMapUpdate,
     this.mapStream,
+    this.depthStream,
   });
 
   @override
@@ -67,6 +105,18 @@ class _MapViewState extends State<MapView> {
   List<double> _lidarPy = [];
   Timer? _lidarTimer;
 
+  // Tracked people from depth camera (with IDs and heading)
+  List<TrackedPerson> _trackedPeople = [];
+  Timer? _peopleTimer;
+
+  // Depth camera raw image
+  Uint8List? _depthImageBytes;
+  int _depthWidth = 0;
+  int _depthHeight = 0;
+  String _depthEncoding = '';
+  Timer? _depthTimer;
+  StreamSubscription? _depthStreamSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -101,6 +151,12 @@ class _MapViewState extends State<MapView> {
 
       // Start LIDAR polling for real-time obstacle visualization
       _startLidarPolling();
+
+      // Start people detection polling for depth camera visualization
+      _startPeoplePolling();
+
+      // Start depth camera image polling
+      _startDepthPolling();
     });
   }
 
@@ -137,6 +193,110 @@ class _MapViewState extends State<MapView> {
       }
     } catch (e) {
       // Silent fail - LIDAR is optional visualization
+    }
+  }
+
+  /// Poll people detection data from depth camera for visualization
+  void _startPeoplePolling() {
+    _peopleTimer?.cancel();
+    if (_httpBaseUrl == null) return;
+
+    // Poll people every 200ms (same as LIDAR for smooth visualization)
+    _peopleTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+      _fetchPeopleData();
+    });
+  }
+
+  Future<void> _fetchPeopleData() async {
+    if (_httpBaseUrl == null) return;
+
+    try {
+      final response = await http.get(
+        Uri.parse('$_httpBaseUrl/people'),
+      ).timeout(const Duration(milliseconds: 500));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final peopleJson = data['people'] as List?;
+
+        if (mounted && peopleJson != null) {
+          setState(() {
+            _trackedPeople = peopleJson
+                .map((p) => TrackedPerson.fromJson(p as Map<String, dynamic>))
+                .toList();
+          });
+        }
+      } else {
+        // No people data - clear the list
+        if (mounted && _trackedPeople.isNotEmpty) {
+          setState(() {
+            _trackedPeople = [];
+          });
+        }
+      }
+    } catch (e) {
+      // Silent fail - people detection is optional visualization
+    }
+  }
+
+  /// Subscribe to depth camera images (WebRTC preferred, HTTP fallback)
+  void _startDepthPolling() {
+    _depthTimer?.cancel();
+    _depthStreamSubscription?.cancel();
+
+    // Prefer WebRTC stream if available
+    if (widget.depthStream != null) {
+      debugPrint('MapView: Using WebRTC depth stream');
+      _depthStreamSubscription = widget.depthStream!.listen((depthImage) {
+        if (mounted) {
+          setState(() {
+            _depthImageBytes = depthImage.data;
+            _depthWidth = depthImage.width;
+            _depthHeight = depthImage.height;
+            _depthEncoding = depthImage.encoding;
+          });
+        }
+      }, onError: (e) {
+        debugPrint('MapView: Depth stream error: $e');
+      });
+      return;
+    }
+
+    // Fall back to HTTP polling
+    if (_httpBaseUrl == null) return;
+
+    debugPrint('MapView: Using HTTP depth polling');
+    _depthTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      _fetchDepthData();
+    });
+  }
+
+  Future<void> _fetchDepthData() async {
+    if (_httpBaseUrl == null) return;
+
+    try {
+      final response = await http.get(
+        Uri.parse('$_httpBaseUrl/depth'),
+      ).timeout(const Duration(milliseconds: 500));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final dataBase64 = data['data'] as String?;
+        final width = data['width'] as int?;
+        final height = data['height'] as int?;
+        final encoding = data['encoding'] as String? ?? '';
+
+        if (mounted && dataBase64 != null && width != null && height != null) {
+          setState(() {
+            _depthImageBytes = base64Decode(dataBase64);
+            _depthWidth = width;
+            _depthHeight = height;
+            _depthEncoding = encoding;
+          });
+        }
+      }
+    } catch (e) {
+      // Silent fail
     }
   }
 
@@ -239,11 +399,14 @@ class _MapViewState extends State<MapView> {
   void dispose() {
     debugPrint('MapView: DISPOSE called');
     _mapStreamSubscription?.cancel();
+    _depthStreamSubscription?.cancel();
     _robot?.removeListener(_onConnectionChanged);
     _wsStateSubscription?.cancel();
     _poseSubscription?.cancel();
     _pollTimer?.cancel();
     _lidarTimer?.cancel();
+    _peopleTimer?.cancel();
+    _depthTimer?.cancel();
     if (_mapImage != null && _mapImage != _MapCache.image) {
       _mapImage?.dispose();
     }
@@ -595,25 +758,128 @@ class _MapViewState extends State<MapView> {
   }
 
   Widget _buildFullscreenMap() {
-    return Container(
-      color: const Color(0xFF0A0E14),
-      child: _mapImage == null
-          ? const SizedBox.expand()
-          : CustomPaint(
-              key: ValueKey('${_mapImage.hashCode}_${_lidarPx.length}'),
-              painter: _MapPainter(
-                mapImage: _mapImage!,
-                mapInfo: _mapInfo!,
-                robotX: _robotX,
-                robotY: _robotY,
-                robotTheta: _robotTheta,
-                fillMode: true,
-                lidarPx: _lidarPx,
-                lidarPy: _lidarPy,
-              ),
-              size: Size.infinite,
+    return Stack(
+      children: [
+        Container(
+          color: const Color(0xFF0A0E14),
+          child: _mapImage == null
+              ? const SizedBox.expand()
+              : CustomPaint(
+                  key: ValueKey('${_mapImage.hashCode}_${_lidarPx.length}_${_trackedPeople.length}'),
+                  painter: _MapPainter(
+                    mapImage: _mapImage!,
+                    mapInfo: _mapInfo!,
+                    robotX: _robotX,
+                    robotY: _robotY,
+                    robotTheta: _robotTheta,
+                    fillMode: true,
+                    lidarPx: _lidarPx,
+                    lidarPy: _lidarPy,
+                    trackedPeople: _trackedPeople,
+                  ),
+                  size: Size.infinite,
+                ),
+        ),
+        // Depth camera overlay - top right
+        Positioned(
+          top: 8,
+          right: 8,
+          child: Container(
+            width: 160,
+            height: 120,
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              border: Border.all(color: Colors.white24),
+              borderRadius: BorderRadius.circular(8),
             ),
+            child: _depthImageBytes != null
+                ? Column(
+                    children: [
+                      Expanded(
+                        child: ClipRRect(
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+                          child: _buildDepthImage(),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          '$_depthWidth x $_depthHeight $_depthEncoding',
+                          style: const TextStyle(color: Colors.white70, fontSize: 9),
+                        ),
+                      ),
+                    ],
+                  )
+                : Center(
+                    child: Text(
+                      widget.depthStream != null ? 'NO STREAM' : 'No depth',
+                      style: const TextStyle(color: Colors.white38, fontSize: 10),
+                    ),
+                  ),
+          ),
+        ),
+      ],
     );
+  }
+
+  Widget _buildDepthImage() {
+    if (_depthImageBytes == null || _depthWidth == 0 || _depthHeight == 0) {
+      return const SizedBox();
+    }
+
+    // Convert depth data to displayable image
+    // 16UC1 = 16-bit unsigned single channel (depth in mm)
+    // We'll normalize to grayscale for display
+    final pixels = Uint8List(_depthWidth * _depthHeight * 4);
+
+    if (_depthEncoding == '16UC1' && _depthImageBytes!.length >= _depthWidth * _depthHeight * 2) {
+      // 16-bit depth - normalize to 8-bit grayscale
+      for (var i = 0; i < _depthWidth * _depthHeight; i++) {
+        final lo = _depthImageBytes![i * 2];
+        final hi = _depthImageBytes![i * 2 + 1];
+        final depth = (hi << 8) | lo; // Little endian
+        // Normalize: 0-5000mm -> 0-255
+        final gray = ((depth / 5000.0) * 255).clamp(0, 255).toInt();
+        pixels[i * 4] = gray;
+        pixels[i * 4 + 1] = gray;
+        pixels[i * 4 + 2] = gray;
+        pixels[i * 4 + 3] = 255;
+      }
+    } else {
+      // Unknown encoding - just show raw bytes as grayscale
+      for (var i = 0; i < _depthWidth * _depthHeight && i < _depthImageBytes!.length; i++) {
+        final gray = _depthImageBytes![i];
+        pixels[i * 4] = gray;
+        pixels[i * 4 + 1] = gray;
+        pixels[i * 4 + 2] = gray;
+        pixels[i * 4 + 3] = 255;
+      }
+    }
+
+    return FutureBuilder<ui.Image>(
+      future: _createImageFromPixels(pixels, _depthWidth, _depthHeight),
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          return RawImage(
+            image: snapshot.data,
+            fit: BoxFit.contain,
+          );
+        }
+        return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+      },
+    );
+  }
+
+  Future<ui.Image> _createImageFromPixels(Uint8List pixels, int width, int height) {
+    final completer = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      pixels,
+      width,
+      height,
+      ui.PixelFormat.rgba8888,
+      (image) => completer.complete(image),
+    );
+    return completer.future;
   }
 
   Widget _buildMapContent() {
@@ -666,7 +932,7 @@ class _MapViewState extends State<MapView> {
     }
 
     return CustomPaint(
-      key: ValueKey('${_mapImage.hashCode}_${_lidarPx.length}'),
+      key: ValueKey('${_mapImage.hashCode}_${_lidarPx.length}_${_trackedPeople.length}'),
       painter: _MapPainter(
         mapImage: _mapImage!,
         mapInfo: _mapInfo!,
@@ -675,6 +941,7 @@ class _MapViewState extends State<MapView> {
         robotTheta: _robotTheta,
         lidarPx: _lidarPx,
         lidarPy: _lidarPy,
+        trackedPeople: _trackedPeople,
       ),
       size: Size.infinite,
     );
@@ -706,6 +973,7 @@ class _MapPainter extends CustomPainter {
   final bool fillMode; // When true, centers map and fills available space
   final List<double> lidarPx;
   final List<double> lidarPy;
+  final List<TrackedPerson> trackedPeople;
 
   _MapPainter({
     required this.mapImage,
@@ -716,6 +984,7 @@ class _MapPainter extends CustomPainter {
     this.fillMode = false,
     this.lidarPx = const [],
     this.lidarPy = const [],
+    this.trackedPeople = const [],
   });
 
   @override
@@ -783,6 +1052,94 @@ class _MapPainter extends CustomPainter {
         final screenY = (centerY + scaledHeight) - (pixelY * scale);
 
         canvas.drawCircle(Offset(screenX, screenY), 2.0, lidarPaint);
+      }
+    }
+
+    // Draw tracked people from depth camera - Minecraft-style blocky icons with IDs
+    if (trackedPeople.isNotEmpty) {
+      final peoplePaint = Paint()
+        ..color = Colors.green.withOpacity(0.9)
+        ..style = PaintingStyle.fill;
+      final peopleOutlinePaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.0;
+      final headingPaint = Paint()
+        ..color = Colors.yellow
+        ..style = PaintingStyle.fill;
+      final textPainter = TextPainter(
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.center,
+      );
+
+      for (final person in trackedPeople) {
+        final worldX = person.x;
+        final worldY = person.y;
+
+        // Skip invalid points
+        if (worldX.isNaN || worldY.isNaN) continue;
+
+        // Convert to screen coordinates
+        final pixelX = (worldX - mapInfo.originX) / mapInfo.resolution;
+        final pixelY = (worldY - mapInfo.originY) / mapInfo.resolution;
+        final screenX = centerX + (pixelX * scale);
+        final screenY = (centerY + scaledHeight) - (pixelY * scale);
+
+        // Draw person as Minecraft-style blocky rectangle with heading
+        canvas.save();
+        canvas.translate(screenX, screenY);
+
+        // Fade out low-confidence people
+        final alpha = (person.confidence * 255).clamp(100, 255).toInt();
+        final bodyPaint = Paint()
+          ..color = Colors.green.withAlpha(alpha)
+          ..style = PaintingStyle.fill;
+
+        // Body size (blocky rectangle)
+        final bodyWidth = fillMode ? 16.0 : 12.0;
+        final bodyHeight = fillMode ? 20.0 : 16.0;
+
+        // Rotate to show heading direction
+        canvas.rotate(-person.heading);
+
+        // Draw blocky body (rectangle)
+        final bodyRect = Rect.fromCenter(
+          center: Offset.zero,
+          width: bodyWidth,
+          height: bodyHeight,
+        );
+        canvas.drawRect(bodyRect, bodyPaint);
+        canvas.drawRect(bodyRect, peopleOutlinePaint);
+
+        // Draw heading indicator (arrow pointing forward)
+        final arrowSize = fillMode ? 8.0 : 6.0;
+        final headingPath = Path()
+          ..moveTo(0, -bodyHeight / 2 - arrowSize)
+          ..lineTo(-arrowSize / 2, -bodyHeight / 2)
+          ..lineTo(arrowSize / 2, -bodyHeight / 2)
+          ..close();
+        canvas.drawPath(headingPath, headingPaint);
+
+        canvas.restore();
+
+        // Draw ID number above person (not rotated)
+        textPainter.text = TextSpan(
+          text: '${person.id}',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: fillMode ? 12.0 : 10.0,
+            fontWeight: FontWeight.bold,
+            shadows: const [Shadow(color: Colors.black, blurRadius: 2)],
+          ),
+        );
+        textPainter.layout();
+        textPainter.paint(
+          canvas,
+          Offset(
+            screenX - textPainter.width / 2,
+            screenY - (fillMode ? 28.0 : 22.0),
+          ),
+        );
       }
     }
 
