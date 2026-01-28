@@ -45,9 +45,6 @@ class CommandBuffer(
     private val completedHistory = mutableListOf<CompletedCommand>()
     private val maxHistory = 10
 
-    // Stored commands for autonomous looping - relay can loop without Flutter
-    private var storedLoopCommands: List<BufferCommand> = emptyList()
-
     // State
     private val _paused = MutableStateFlow(false)
     val paused: StateFlow<Boolean> = _paused
@@ -156,12 +153,6 @@ class CommandBuffer(
             Log.i(TAG, "Cleared existing commands + cancelled current")
         }
 
-        // Store commands for autonomous looping if this sequence has a loop command
-        if (commands.any { it.type == "loop" }) {
-            storedLoopCommands = commands.toList()
-            Log.i(TAG, "Stored ${commands.size} commands for autonomous looping")
-        }
-
         commands.forEach { cmd ->
             pendingQueue.add(cmd)
             Log.i(TAG, "Queued: ${cmd.type} (id=${cmd.id})")
@@ -176,7 +167,6 @@ class CommandBuffer(
      */
     fun clear() {
         pendingQueue.clear()
-        storedLoopCommands = emptyList()  // Clear stored loop commands too
         waitingForNavArrival = false
         navArrivalPending = false
         pendingNavWaypoint = null
@@ -1004,33 +994,19 @@ class CommandBuffer(
             }
 
             "loop" -> {
-                // Loop command - restart the sequence autonomously (no Flutter needed)
-                Log.i(TAG, "Loop command - reloading sequence autonomously")
+                // Loop command - restart the sequence from the beginning
+                // IMPORTANT: Clear any motion trigger state to prevent auto-triggering
+                Log.i(TAG, "Loop command received - restarting sequence")
 
                 // Clear motion detection state if it was active
                 withContext(Dispatchers.Main) {
-                    taskExecutor?.stopTourMode()
+                    taskExecutor?.stopTourMode()  // Ensure we're not in motion standby
                 }
 
-                // Mark this command as complete before reloading
+                // Mark this command as complete
                 completeCommand(cmd.id, "success")
 
-                // Reload stored commands for autonomous looping
-                // Skip first navigate since loop already brought us back to start
-                if (storedLoopCommands.isNotEmpty()) {
-                    val skipFirst = storedLoopCommands.firstOrNull()?.type == "navigate"
-                    val commandsToLoad = if (skipFirst) storedLoopCommands.drop(1) else storedLoopCommands
-                    Log.i(TAG, "Reloading ${commandsToLoad.size} commands (skipped initial nav: $skipFirst)")
-
-                    commandsToLoad.forEach { stored ->
-                        val fresh = stored.copy(id = UUID.randomUUID().toString())
-                        pendingQueue.add(fresh)
-                    }
-                    Log.i(TAG, "Loop reloaded - queue has ${pendingQueue.size} commands")
-                    sendStatusUpdate()
-                } else {
-                    Log.w(TAG, "Loop command but no stored commands - tour ends")
-                }
+                // The buffer executor will reload commands after this completes
             }
 
             else -> {
