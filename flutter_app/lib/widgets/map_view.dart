@@ -1128,11 +1128,18 @@ class _MapPainter extends CustomPainter {
       );
 
       for (final person in trackedPeople) {
-        final worldX = person.x;
-        final worldY = person.y;
+        // People positions are in robot frame - transform to world frame
+        final localX = person.x;
+        final localY = person.y;
 
         // Skip invalid points
-        if (worldX.isNaN || worldY.isNaN) continue;
+        if (localX.isNaN || localY.isNaN) continue;
+
+        // Rotate by robot heading and add robot position (same as LIDAR)
+        final cosTheta = cos(robotTheta);
+        final sinTheta = sin(robotTheta);
+        final worldX = robotX + localX * cosTheta - localY * sinTheta;
+        final worldY = robotY + localX * sinTheta + localY * cosTheta;
 
         // Convert to screen coordinates
         final pixelX = (worldX - mapInfo.originX) / mapInfo.resolution;

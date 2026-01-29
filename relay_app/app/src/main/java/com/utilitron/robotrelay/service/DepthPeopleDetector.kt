@@ -29,8 +29,8 @@ class DepthPeopleDetector {
         private const val MAX_HEIGHT = 2.0   // Filter out ceiling
 
         // Clustering parameters
-        private const val CLUSTER_DISTANCE = 0.4  // Max distance between points in cluster
-        private const val MIN_CLUSTER_POINTS = 10 // Minimum points to be a person
+        private const val CLUSTER_DISTANCE = 0.5  // Max distance between points in cluster (relaxed)
+        private const val MIN_CLUSTER_POINTS = 5  // Minimum points to be a person (lowered for sparse depth data)
         private const val MIN_CLUSTER_WIDTH = 0.3 // Minimum human width
         private const val MAX_CLUSTER_WIDTH = 1.2 // Maximum human width
 

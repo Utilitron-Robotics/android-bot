@@ -15,10 +15,12 @@ class PeopleTracker {
 
     companion object {
         // Maximum distance (meters) to associate detection with existing track
-        private const val MAX_ASSOCIATION_DISTANCE = 0.8
+        // 1.5m covers human body width + detection jitter from depth camera
+        private const val MAX_ASSOCIATION_DISTANCE = 1.5
 
         // Frames without detection before track is removed
-        private const val MAX_MISSING_FRAMES = 15  // ~3 seconds at 5Hz
+        // Keep people visible longer - detection is sporadic from depth camera
+        private const val MAX_MISSING_FRAMES = 50  // ~10 seconds at 5Hz
 
         // Position smoothing factor (0-1, higher = more smoothing)
         private const val SMOOTHING_ALPHA = 0.3
