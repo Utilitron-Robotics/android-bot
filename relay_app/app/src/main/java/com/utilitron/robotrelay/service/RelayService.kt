@@ -135,6 +135,11 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     private var alertSoundPlayer: android.media.MediaPlayer? = null
     private var pendingSoundRunnables = mutableListOf<Runnable>()
 
+    // Emergency stop alarm - loud continuous siren until switch deactivated
+    private var estopAlarmTrack: android.media.AudioTrack? = null
+    private var estopAlarmJob: Job? = null
+    private var lastHardEstopState: Boolean = false
+
     // Robot connection settings - tablet is WIRED to robot base
     // Defaults loaded from strings.xml, can be overridden via SharedPreferences
     private var robotIp = ""
@@ -338,11 +343,29 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             }
         }
 
+        // Monitor emergency stop switch - scream bloody murder when activated!
+        scope.launch {
+            robotClient.robotStatus.collect { status ->
+                val hardEstop = status?.hardEstop ?: false
+                if (hardEstop != lastHardEstopState) {
+                    lastHardEstopState = hardEstop
+                    if (hardEstop) {
+                        Log.w(TAG, "🚨 EMERGENCY STOP ACTIVATED - STARTING ALARM 🚨")
+                        startEmergencyAlarm()
+                    } else {
+                        Log.i(TAG, "✅ Emergency stop deactivated - stopping alarm")
+                        stopEmergencyAlarm()
+                    }
+                }
+            }
+        }
+
         return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
         Log.i(TAG, "Service destroying")
+        stopEmergencyAlarm()  // Stop screaming when service dies
         fleetSyncJob?.cancel()
         fleetClient.destroy()
         discoveryService?.destroy()
@@ -1047,6 +1070,134 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         Thread.sleep(durationMs.toLong() + 50)
         audioTrack.stop()
         audioTrack.release()
+    }
+
+    /**
+     * Start the emergency stop alarm - a loud, terrifying siren that loops until stopped.
+     * This is designed to be IMPOSSIBLE TO IGNORE. The kid who hits the switch will regret it.
+     *
+     * Now with bonus Life Alert energy: "Help me! I've fallen and I can't get up!"
+     */
+    private fun startEmergencyAlarm() {
+        // Cancel any existing alarm first
+        stopEmergencyAlarm()
+
+        estopAlarmJob = scope.launch(Dispatchers.Default) {
+            Log.i(TAG, "🔊 Emergency alarm starting - MAXIMUM VOLUME SIREN + LIFE ALERT")
+
+            // Pre-generate the alarm waveform (loud two-tone siren)
+            val sampleRate = 44100
+            val sirenCycleDurationMs = 400  // One high-low cycle
+            val numSamples = sampleRate * sirenCycleDurationMs / 1000
+
+            // Generate siren: high tone (1000Hz) then low tone (600Hz)
+            val samples = ShortArray(numSamples)
+            val halfPoint = numSamples / 2
+
+            for (i in 0 until numSamples) {
+                // First half: high pitch (1000Hz), second half: low pitch (600Hz)
+                val frequency = if (i < halfPoint) 1000.0 else 600.0
+                val angle = 2.0 * Math.PI * i / (sampleRate / frequency)
+
+                // MAXIMUM AMPLITUDE - we want this LOUD
+                val amplitude = 32767.0 * 0.95
+
+                // Add slight warble for more piercing effect
+                val warble = 1.0 + 0.1 * Math.sin(2.0 * Math.PI * i * 8.0 / sampleRate)
+
+                samples[i] = (Math.sin(angle) * amplitude * warble).toInt().coerceIn(-32767, 32767).toShort()
+            }
+
+            // Create AudioTrack with MAXIMUM volume settings
+            val bufferSize = android.media.AudioTrack.getMinBufferSize(
+                sampleRate,
+                android.media.AudioFormat.CHANNEL_OUT_MONO,
+                android.media.AudioFormat.ENCODING_PCM_16BIT
+            )
+
+            try {
+                val track = android.media.AudioTrack.Builder()
+                    .setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .setFlags(android.media.AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        android.media.AudioFormat.Builder()
+                            .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(maxOf(bufferSize, samples.size * 2))
+                    .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                    .build()
+
+                estopAlarmTrack = track
+                track.write(samples, 0, samples.size)
+
+                Log.i(TAG, "🔊 EMERGENCY ALARM ACTIVE - CYCLING SIREN + VOICE")
+
+                // Cycle: siren for 3 seconds, then Life Alert voice, repeat
+                var cycleCount = 0
+                while (isActive && estopAlarmTrack != null) {
+                    // Play siren for ~3 seconds (looping)
+                    track.setLoopPoints(0, numSamples, 7)  // 7 loops ≈ 3.2 seconds
+                    track.play()
+                    delay(3200)
+                    track.pause()
+                    track.flush()
+
+                    // Check if we should still be running
+                    if (!isActive || estopAlarmTrack == null) break
+
+                    // Cry for help using TTS (alternating messages for variety)
+                    val helpMessage = when (cycleCount % 3) {
+                        0 -> "Help me! Help me! I've fallen and I can't get up!"
+                        1 -> "Emergency! Someone pressed my emergency stop button!"
+                        else -> "Help! I need assistance! Please help me!"
+                    }
+                    cycleCount++
+
+                    // Use main thread for TTS
+                    val ttsComplete = CompletableDeferred<Unit>()
+                    withContext(Dispatchers.Main) {
+                        cloudTts?.speak(helpMessage) {
+                            ttsComplete.complete(Unit)
+                        } ?: ttsComplete.complete(Unit)
+                    }
+
+                    // Wait for TTS to finish (with timeout)
+                    withTimeoutOrNull(5000) { ttsComplete.await() }
+
+                    // Small pause before siren restarts
+                    delay(300)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start emergency alarm: ${e.message}", e)
+            }
+        }
+    }
+
+    /**
+     * Stop the emergency stop alarm immediately.
+     */
+    private fun stopEmergencyAlarm() {
+        estopAlarmJob?.cancel()
+        estopAlarmJob = null
+
+        estopAlarmTrack?.let { track ->
+            try {
+                track.stop()
+                track.release()
+                Log.i(TAG, "🔇 Emergency alarm stopped")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping emergency alarm: ${e.message}")
+            }
+        }
+        estopAlarmTrack = null
     }
 
     private fun cancelPendingSounds() {
