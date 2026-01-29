@@ -141,6 +141,9 @@ class RobotWebSocketClient(
     // People tracker - assigns stable IDs, smooths jitter, tracks individuals
     val peopleTracker = PeopleTracker()
 
+    // Depth-based people detector - processes raw depth data to find humans
+    private val depthPeopleDetector = DepthPeopleDetector()
+
     // Crowd control config: distance-proportional speed limiting
     private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here
     private var crowdRampRate: Double = 0.5      // 0.1=gentle, 1.0=aggressive
@@ -572,6 +575,20 @@ class RobotWebSocketClient(
                         // Feed coordinate data to obstacle classifier
                         obstacleClassifier?.processLidarScan(px, py)
 
+                        // FALLBACK: If no people data from dedicated topics, try detecting from LIDAR
+                        // This works because LIDAR can see human-shaped clusters
+                        val staleThreshold = System.currentTimeMillis() - 2000  // 2 seconds
+                        if (lastPeopleTime < staleThreshold && px.size > 20) {
+                            val lidarPeople = depthPeopleDetector.processPointArrays(px, py)
+                            if (lidarPeople.isNotEmpty()) {
+                                detectedPeopleX = lidarPeople.map { it.x }
+                                detectedPeopleY = lidarPeople.map { it.y }
+                                lastPeopleTime = System.currentTimeMillis()
+                                val tracked = peopleTracker.update(detectedPeopleX, detectedPeopleY)
+                                Log.i("PEOPLE_DEBUG", "LIDAR fallback: ${px.size} pts → ${lidarPeople.size} people → ${tracked.size} tracked")
+                            }
+                        }
+
                         // Convert to distances for safety zone check
                         // Filter > 0.05m to eliminate ground reflections and sensor noise
                         val distances = px.zip(py).map { (x, y) ->
@@ -742,23 +759,33 @@ class RobotWebSocketClient(
                     }
                 }
                 ChassisProtocol.TOPIC_UP_CAMERA_POINTS -> {
-                    // Processed points from up camera - log structure to discover format
-                    // Filter: adb logcat -s PEOPLE_DEBUG
-                    Log.i("PEOPLE_DEBUG", "=== UP_CAMERA_POINTS ===")
-                    Log.i("PEOPLE_DEBUG", "Keys: ${msg.keySet()}")
+                    // Processed points from up camera - use DepthPeopleDetector to find humans
+                    // Filter: adb logcat -s PEOPLE_DEBUG or DEPTH_PEOPLE
+                    Log.d("PEOPLE_DEBUG", "UP_CAMERA_POINTS received, keys: ${msg.keySet()}")
+
                     // Try parsing as point_array format (like laser_data)
-                    val px = msg.getAsJsonArray("px")?.map { it.asFloat } ?: emptyList()
-                    val py = msg.getAsJsonArray("py")?.map { it.asFloat } ?: emptyList()
+                    val px = msg.getAsJsonArray("px")?.map { it.asFloat.toDouble() } ?: emptyList()
+                    val py = msg.getAsJsonArray("py")?.map { it.asFloat.toDouble() } ?: emptyList()
+
                     if (px.isNotEmpty()) {
-                        Log.i("PEOPLE_DEBUG", "UP_CAMERA_POINTS: ${px.size} points - px[0]=${px.firstOrNull()}, py[0]=${py.firstOrNull()}")
-                        // Feed to people tracker if this looks like person positions
-                        detectedPeopleX = px.map { it.toDouble() }
-                        detectedPeopleY = py.map { it.toDouble() }
-                        lastPeopleTime = System.currentTimeMillis()
-                        val tracked = peopleTracker.update(detectedPeopleX, detectedPeopleY)
-                        Log.i("PEOPLE_DEBUG", "Tracked ${tracked.size} people from UP_CAMERA_POINTS")
+                        // Use DepthPeopleDetector to cluster points and find humans
+                        val detectedPeople = depthPeopleDetector.processPointArrays(px, py)
+
+                        if (detectedPeople.isNotEmpty()) {
+                            // Extract x,y positions from detected people
+                            detectedPeopleX = detectedPeople.map { it.x }
+                            detectedPeopleY = detectedPeople.map { it.y }
+                            lastPeopleTime = System.currentTimeMillis()
+
+                            // Feed to people tracker for stable IDs and smoothing
+                            val tracked = peopleTracker.update(detectedPeopleX, detectedPeopleY)
+                            Log.i("PEOPLE_DEBUG", "UP_CAMERA_POINTS: ${px.size} raw pts → ${detectedPeople.size} detected → ${tracked.size} tracked")
+
+                            // Also feed to ObstacleClassifier for intelligent crowd handling
+                            obstacleClassifier?.processLidarScan(detectedPeopleX, detectedPeopleY)
+                        }
                     } else {
-                        Log.i("PEOPLE_DEBUG", "UP_CAMERA_POINTS: No px/py arrays. Raw: ${msg.toString().take(500)}")
+                        Log.d("PEOPLE_DEBUG", "UP_CAMERA_POINTS: No px/py arrays. Raw: ${msg.toString().take(300)}")
                     }
                 }
                 ChassisProtocol.TOPIC_UPCAM_DATA -> {
