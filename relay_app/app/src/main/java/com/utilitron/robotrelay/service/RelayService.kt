@@ -1075,13 +1075,15 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     /**
      * Start the emergency stop alarm - a loud, terrifying siren that loops until stopped.
      * This is designed to be IMPOSSIBLE TO IGNORE. The kid who hits the switch will regret it.
+     *
+     * Now with bonus Life Alert energy: "Help me! I've fallen and I can't get up!"
      */
     private fun startEmergencyAlarm() {
         // Cancel any existing alarm first
         stopEmergencyAlarm()
 
         estopAlarmJob = scope.launch(Dispatchers.Default) {
-            Log.i(TAG, "🔊 Emergency alarm starting - MAXIMUM VOLUME SIREN")
+            Log.i(TAG, "🔊 Emergency alarm starting - MAXIMUM VOLUME SIREN + LIFE ALERT")
 
             // Pre-generate the alarm waveform (loud two-tone siren)
             val sampleRate = 44100
@@ -1136,15 +1138,42 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                 estopAlarmTrack = track
                 track.write(samples, 0, samples.size)
 
-                // Set to loop forever (-1 = infinite loop)
-                track.setLoopPoints(0, numSamples, -1)
-                track.play()
+                Log.i(TAG, "🔊 EMERGENCY ALARM ACTIVE - CYCLING SIREN + VOICE")
 
-                Log.i(TAG, "🔊 EMERGENCY ALARM ACTIVE - LOOPING UNTIL SWITCH DEACTIVATED")
-
-                // Keep this job alive while alarm is playing
+                // Cycle: siren for 3 seconds, then Life Alert voice, repeat
+                var cycleCount = 0
                 while (isActive && estopAlarmTrack != null) {
-                    delay(100)
+                    // Play siren for ~3 seconds (looping)
+                    track.setLoopPoints(0, numSamples, 7)  // 7 loops ≈ 3.2 seconds
+                    track.play()
+                    delay(3200)
+                    track.pause()
+                    track.flush()
+
+                    // Check if we should still be running
+                    if (!isActive || estopAlarmTrack == null) break
+
+                    // Cry for help using TTS (alternating messages for variety)
+                    val helpMessage = when (cycleCount % 3) {
+                        0 -> "Help me! Help me! I've fallen and I can't get up!"
+                        1 -> "Emergency! Someone pressed my emergency stop button!"
+                        else -> "Help! I need assistance! Please help me!"
+                    }
+                    cycleCount++
+
+                    // Use main thread for TTS
+                    val ttsComplete = CompletableDeferred<Unit>()
+                    withContext(Dispatchers.Main) {
+                        cloudTts?.speak(helpMessage) {
+                            ttsComplete.complete(Unit)
+                        } ?: ttsComplete.complete(Unit)
+                    }
+
+                    // Wait for TTS to finish (with timeout)
+                    withTimeoutOrNull(5000) { ttsComplete.await() }
+
+                    // Small pause before siren restarts
+                    delay(300)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start emergency alarm: ${e.message}", e)
