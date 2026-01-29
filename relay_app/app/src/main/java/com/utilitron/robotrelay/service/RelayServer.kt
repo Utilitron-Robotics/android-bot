@@ -76,10 +76,14 @@ class RelayServer(
     fun start() {
         try {
             // Initialize command buffer
-            commandBuffer = CommandBuffer(robotClient, taskExecutor) { statusJson ->
-                // Broadcast buffer status to all connected Flutter clients
-                wsServer?.broadcast(statusJson)
-            }
+            commandBuffer = CommandBuffer(
+                robotClient,
+                taskExecutor,
+                onStatusUpdate = { statusJson ->
+                    // Broadcast buffer status to all connected Flutter clients
+                    wsServer?.broadcast(statusJson)
+                }
+            )
             commandBuffer.start()
 
             // Start HTTP server on port
@@ -288,6 +292,10 @@ class RelayHttpServer(
             uri == "/map/refresh" && method == Method.POST -> handleRefreshMap()
             // LIDAR endpoint - real-time scan points for visualization (shows people silhouettes!)
             uri == "/lidar" && method == Method.GET -> handleGetLidar()
+            // Depth camera people detection - positions of detected people for map overlay
+            uri == "/people" && method == Method.GET -> handleGetPeople()
+            // Depth camera raw image
+            uri == "/depth" && method == Method.GET -> handleGetDepth()
             // Task endpoints
             uri == "/speak" && method == Method.POST -> handleSpeak(session)
             uri == "/display" && method == Method.POST -> handleDisplay(session)
@@ -504,6 +512,83 @@ class RelayHttpServer(
             addHeader("X-Lidar-Age-Ms", age.toString())
             addHeader("X-Point-Count", px.size.toString())
         }
+    }
+
+    /**
+     * GET /people - Tracked people from depth camera with stable IDs
+     * Returns tracked individuals with smoothed positions and velocity estimates
+     */
+    private fun handleGetPeople(): Response {
+        val trackedPeople = robotClient.peopleTracker.getTrackedPeople()
+        val age = System.currentTimeMillis() - robotClient.lastPeopleTime
+
+        // Empty array is valid (no people detected) - only stale is an error
+        if (robotClient.lastPeopleTime == 0L || age > 5000) {
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json",
+                gson.toJson(mapOf(
+                    "error" to "No people detection data available",
+                    "age_ms" to age,
+                    "hint" to "Robot may not be publishing /detected_people_array"
+                )))
+        }
+
+        // Include robot pose so Flutter can transform to world coordinates
+        val status = robotClient.robotStatus.value
+
+        // Build tracked people array with IDs, velocity, and heading
+        val people = trackedPeople.map { person ->
+            mapOf(
+                "id" to person.id,
+                "x" to person.x,
+                "y" to person.y,
+                "vx" to person.vx,
+                "vy" to person.vy,
+                "heading" to person.heading,  // radians, 0 = robot forward
+                "confidence" to person.confidence
+            )
+        }
+
+        val data = mapOf(
+            "people" to people,
+            "robot_x" to (status?.x ?: 0.0),
+            "robot_y" to (status?.y ?: 0.0),
+            "robot_theta" to (status?.theta ?: 0.0),
+            "age_ms" to age,
+            "count" to trackedPeople.size,
+            "people_detected" to robotClient.peopleDetected.value
+        )
+
+        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(data)).apply {
+            addHeader("X-People-Age-Ms", age.toString())
+            addHeader("X-People-Count", trackedPeople.size.toString())
+        }
+    }
+
+    /**
+     * GET /depth - Raw depth camera image
+     */
+    private fun handleGetDepth(): Response {
+        val imageBytes = robotClient.latestDepthImage
+        val info = robotClient.latestDepthImageInfo
+        val age = System.currentTimeMillis() - robotClient.latestDepthImageTime
+
+        if (imageBytes == null || info == null || age > 5000) {
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json",
+                gson.toJson(mapOf(
+                    "error" to "No depth image available",
+                    "age_ms" to age
+                )))
+        }
+
+        val data = mapOf(
+            "data" to android.util.Base64.encodeToString(imageBytes, android.util.Base64.NO_WRAP),
+            "width" to info["width"],
+            "height" to info["height"],
+            "encoding" to info["encoding"],
+            "age_ms" to age
+        )
+
+        return newFixedLengthResponse(Response.Status.OK, "application/json", gson.toJson(data))
     }
 
     private fun handleRefreshMap(): Response {

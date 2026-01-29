@@ -128,6 +128,73 @@ Flutter (display/control layer)  ←── gRPC stream ──→  Relay (data/op
 
 ---
 
+## People Detection & Depth Camera Topics
+
+**Discovered via rosapi/topics service (2026-01-28): Robot has 294 available topics.**
+
+### `/detected_people_array` - PEOPLE POSITIONS (NOT PUBLISHING)
+- **Publisher**: Robot base (depth camera people detection node)
+- **Subscriber**: Relay app (`ChassisProtocol.subscribeDetectedPeopleArray()`)
+- **Message type**: UNKNOWN - guessing `yutong_assistance/PersonArray` based on other types
+- **Expected format**: `px`/`py` arrays of detected person positions in robot frame
+- **Status**: ⚠️ Topic EXISTS on robot but NOT ACTIVELY PUBLISHING data
+- **Data flow**: Robot → Relay → `PeopleTracker` → HTTP `/people` endpoint → Flutter map
+- **Throttle**: 200ms
+
+### `/people_detected` (std_msgs/Bool)
+- **Publisher**: Robot base (people detection node)
+- **Subscriber**: Relay app (`ChassisProtocol.subscribePeopleDetected()`)
+- **Message format**: Boolean `true` when any person detected
+- **Status**: EXISTS on robot, simple presence flag
+- **Data flow**: Robot → Relay → obstacle classification logic
+
+### `/handpose` (std_msgs/Int32)
+- **Publisher**: Robot base (hand gesture detection)
+- **Subscriber**: Relay app (`ChassisProtocol.subscribeHandpose()`)
+- **Message format**: Gesture ID integer
+- **Status**: EXISTS on robot
+
+### Depth Camera Topics (up-facing camera)
+**Now subscribing to discover which provides people positions:**
+- `/upcamera/depth/image_raw` - ✅ WORKS - Raw depth image (streaming via WebRTC)
+- `/up_camera_points` - 🔍 TESTING - May have processed person positions (yutong_assistance/point_array)
+- `/upcam_data` - 🔍 TESTING - Unknown format, logging to discover
+
+**Not yet subscribed:**
+- `/upcamera/depth/points` - Point cloud data (PointCloud2)
+- `/upcamera/depth/camera_info` - Camera calibration
+- `/up_camera_scan` - Processed scan data (LaserScan format)
+- `/up_camera_before_to_map` / `/up_camera_after_to_map` - Map transforms
+
+**Testing with logcat:**
+```bash
+adb logcat -s PEOPLE_DEBUG
+```
+This shows raw message structure from `/up_camera_points` and `/upcam_data` to identify which provides usable people positions.
+
+### `/move_base/local_costmap/costmap` (nav_msgs/OccupancyGrid)
+- **Publisher**: Robot base (move_base local costmap)
+- **Subscriber**: Relay app (`ChassisProtocol.subscribeLocalCostmap()`)
+- **Message format**: OccupancyGrid showing inflated obstacles as "blocks"
+- **OEM visualization**: This is what the OEM software uses for obstacle rectangles on map
+- **Throttle**: 500ms (costmap is heavy)
+- **Status**: EXISTS and subscribed
+
+### Topic Discovery
+
+**How to discover new topics**:
+1. Relay calls `ChassisProtocol.callListTopics()` on connect
+2. Uses rosapi service: `/rosapi/topics`
+3. Response logged with filter: `ROSAPI_TOPICS`
+4. Keywords highlighted: people, person, human, body, skeleton, depth, camera, detect, track
+
+**Logcat filters**:
+- `ROSAPI_TOPICS` - One-time dump of all 294 available topics on connect
+- `ROS_TOPICS` - Every incoming message's topic name
+- `PEOPLE_DEBUG` - People detection data processing
+
+---
+
 ## Navigation Service
 
 ### `/poi` (ROS service call)

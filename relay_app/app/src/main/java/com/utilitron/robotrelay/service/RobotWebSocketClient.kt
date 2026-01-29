@@ -102,8 +102,20 @@ class RobotWebSocketClient(
     // Log ANY topic that might be related to people/human detection
     private val humanTopicKeywords = listOf(
         "people", "person", "human", "body", "skeleton", "leg", "track",
-        "detect", "face", "gesture", "hand", "pose", "pedestrian", "obstacle"
+        "detect", "face", "gesture", "hand", "pose", "pedestrian", "obstacle",
+        "camera", "upcamera", "depth"
     )
+
+    // Latest depth camera image (for HTTP serving)
+    @Volatile
+    var latestDepthImage: ByteArray? = null
+        private set
+    @Volatile
+    var latestDepthImageInfo: Map<String, Any>? = null
+        private set
+    @Volatile
+    var latestDepthImageTime: Long = 0
+        private set
 
     // Raw LIDAR points for visualization (in robot frame)
     // These are the px/py coordinates that show people/obstacles as silhouettes
@@ -113,6 +125,21 @@ class RobotWebSocketClient(
     @Volatile
     var lidarPointsY: List<Double> = emptyList()
         private set
+
+    // Detected people positions from depth camera (in robot frame)
+    // These come from /detected_people_array topic - positions of actual people
+    @Volatile
+    var detectedPeopleX: List<Double> = emptyList()
+        private set
+    @Volatile
+    var detectedPeopleY: List<Double> = emptyList()
+        private set
+    @Volatile
+    var lastPeopleTime: Long = 0
+        private set
+
+    // People tracker - assigns stable IDs, smooths jitter, tracks individuals
+    val peopleTracker = PeopleTracker()
 
     // Crowd control config: distance-proportional speed limiting
     private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here
@@ -187,6 +214,33 @@ class RobotWebSocketClient(
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to parse static_map response: ${e.message}")
+                }
+                return
+            }
+
+            // Handle rosapi/topics response - logs ALL available ROS topics (filter: ROSAPI_TOPICS)
+            if (text.contains("\"service_response\"") && text.contains("list_topics")) {
+                try {
+                    val obj = com.google.gson.JsonParser.parseString(text).asJsonObject
+                    val values = obj.getAsJsonObject("values")
+                    val topics = values?.getAsJsonArray("topics")
+                    if (topics != null) {
+                        Log.i("ROSAPI_TOPICS", "=== ALL AVAILABLE ROS TOPICS (${topics.size()}) ===")
+                        topics.forEach { topic ->
+                            val name = topic.asString
+                            // Highlight potential people/depth camera topics
+                            val highlight = if (name.lowercase().let { n ->
+                                n.contains("people") || n.contains("person") || n.contains("human") ||
+                                n.contains("body") || n.contains("skeleton") || n.contains("leg") ||
+                                n.contains("depth") || n.contains("rgbd") || n.contains("track") ||
+                                n.contains("detect") || n.contains("camera")
+                            }) " <<< POSSIBLE PEOPLE TOPIC" else ""
+                            Log.i("ROSAPI_TOPICS", "  $name$highlight")
+                        }
+                        Log.i("ROSAPI_TOPICS", "=== END TOPIC LIST ===")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to parse rosapi/topics response: ${e.message}")
                 }
                 return
             }
@@ -277,6 +331,11 @@ class RobotWebSocketClient(
         send(ChassisProtocol.subscribeDetectedPeopleArray())  // Rich people detection data
         send(ChassisProtocol.subscribeHandpose())  // Hand gesture detection
         send(ChassisProtocol.subscribeLocalCostmap())  // Real-time obstacle blocks (OEM-style)
+        send(ChassisProtocol.subscribeUpCameraDepthRaw())  // Raw depth image - filter: DEPTH_CAMERA
+        send(ChassisProtocol.subscribeUpCameraPoints())  // Processed points - may have people positions (PEOPLE_DEBUG)
+        send(ChassisProtocol.subscribeUpcamData())  // Unknown format - log to discover (PEOPLE_DEBUG)
+        // List ALL available topics via rosapi - helps discover depth camera topic names
+        send(ChassisProtocol.callListTopics())
         // Subscribe to /map (raw OccupancyGrid, no fragmentation - works on our robots)
         val mapSubMsg = ChassisProtocol.subscribeMap()
         val mapSent = send(mapSubMsg)
@@ -405,6 +464,9 @@ class RobotWebSocketClient(
             val topic = obj.get("topic")?.asString ?: return
             val msg = obj.get("msg")?.asJsonObject ?: return
             val current = _robotStatus.value ?: RobotStatusData()
+
+            // === DUMP ALL ROS TOPICS (filter: ROS_TOPICS) ===
+            Log.d("ROS_TOPICS", "topic=$topic keys=${msg.keySet()}")
 
             // === LOG ANY HUMAN-RELATED TOPICS ===
             val topicLower = topic.lowercase()
@@ -554,23 +616,96 @@ class RobotWebSocketClient(
                     }
                 }
                 ChassisProtocol.TOPIC_DETECTED_PEOPLE_ARRAY -> {
-                    // Rich people detection data - log summary only (once per second max)
-                    if (lastPeopleArrayLogTime == 0L || System.currentTimeMillis() - lastPeopleArrayLogTime > 1000) {
-                        lastPeopleArrayLogTime = System.currentTimeMillis()
-                        // Try to find array field
-                        val people = msg.get("people")?.asJsonArray
-                            ?: msg.get("data")?.asJsonArray
-                            ?: msg.get("detections")?.asJsonArray
-                            ?: msg.get("persons")?.asJsonArray
-                        if (people != null && people.size() > 0) {
-                            Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY: ${people.size()} people detected")
-                            // Log first person's structure ONCE to understand format
-                            if (lastPeopleArrayLogTime < 5000) {
-                                Log.d(TAG, ">>> First person structure: ${people.firstOrNull()}")
+                    // Rich people detection data - extract positions for map visualization
+                    // Filter in logcat: adb logcat -s PEOPLE_DEBUG
+                    lastPeopleTime = System.currentTimeMillis()
+
+                    // DUMP FIRST: Log raw message structure once (filter: PEOPLE_DEBUG)
+                    if (lastPeopleArrayLogTime == 0L) {
+                        Log.i("PEOPLE_DEBUG", "=== RAW MESSAGE STRUCTURE ===")
+                        Log.i("PEOPLE_DEBUG", "Keys: ${msg.keySet()}")
+                        Log.i("PEOPLE_DEBUG", "Full msg (first 2000 chars): ${msg.toString().take(2000)}")
+                    }
+
+                    // Try to find array field (unknown format, try common patterns)
+                    val people = msg.get("people")?.asJsonArray
+                        ?: msg.get("data")?.asJsonArray
+                        ?: msg.get("detections")?.asJsonArray
+                        ?: msg.get("persons")?.asJsonArray
+                        ?: msg.get("tracks")?.asJsonArray
+                        ?: msg.get("bodies")?.asJsonArray
+
+                    if (people != null && people.size() > 0) {
+                        val xPositions = mutableListOf<Double>()
+                        val yPositions = mutableListOf<Double>()
+                        val headings = mutableListOf<Double>()
+
+                        // Log first person's structure ONCE to understand full format
+                        if (lastPeopleArrayLogTime == 0L) {
+                            Log.i("PEOPLE_DEBUG", "=== FIRST PERSON STRUCTURE ===")
+                            Log.i("PEOPLE_DEBUG", "${people.firstOrNull()}")
+                        }
+
+                        for (person in people) {
+                            if (person.isJsonObject) {
+                                val obj = person.asJsonObject
+
+                                // Try common position field patterns
+                                val x = obj.get("x")?.asDouble
+                                    ?: obj.get("position")?.asJsonObject?.get("x")?.asDouble
+                                    ?: obj.get("pose")?.asJsonObject?.get("position")?.asJsonObject?.get("x")?.asDouble
+                                    ?: obj.get("centroid")?.asJsonObject?.get("x")?.asDouble
+                                    ?: obj.get("center")?.asJsonObject?.get("x")?.asDouble
+                                val y = obj.get("y")?.asDouble
+                                    ?: obj.get("position")?.asJsonObject?.get("y")?.asDouble
+                                    ?: obj.get("pose")?.asJsonObject?.get("position")?.asJsonObject?.get("y")?.asDouble
+                                    ?: obj.get("centroid")?.asJsonObject?.get("y")?.asDouble
+                                    ?: obj.get("center")?.asJsonObject?.get("y")?.asDouble
+
+                                // Try to extract heading/orientation (radians or degrees)
+                                val heading = obj.get("theta")?.asDouble
+                                    ?: obj.get("heading")?.asDouble
+                                    ?: obj.get("orientation")?.asDouble
+                                    ?: obj.get("yaw")?.asDouble
+                                    ?: obj.get("pose")?.asJsonObject?.get("theta")?.asDouble
+                                    ?: obj.get("pose")?.asJsonObject?.get("orientation")?.asJsonObject?.get("z")?.asDouble
+
+                                if (x != null && y != null) {
+                                    xPositions.add(x)
+                                    yPositions.add(y)
+                                    headings.add(heading ?: 0.0)
+                                }
                             }
-                        } else {
-                            // Log the keys to understand the message format
-                            Log.d(TAG, ">>> DETECTED_PEOPLE_ARRAY keys: ${msg.keySet()}")
+                        }
+
+                        detectedPeopleX = xPositions
+                        detectedPeopleY = yPositions
+
+                        // Feed positions to tracker for ID assignment and smoothing
+                        val hasHeadings = headings.any { it != 0.0 }
+                        val trackedPeople = peopleTracker.update(
+                            xPositions,
+                            yPositions,
+                            if (hasHeadings) headings else null
+                        )
+
+                        // Log periodically for debugging (filter: PEOPLE_DEBUG)
+                        if (lastPeopleArrayLogTime == 0L || System.currentTimeMillis() - lastPeopleArrayLogTime > 1000) {
+                            lastPeopleArrayLogTime = System.currentTimeMillis()
+                            Log.i("PEOPLE_DEBUG", "raw=${people.size()} tracked=${trackedPeople.size} IDs=${trackedPeople.map { it.id }} hasHeading=$hasHeadings")
+                            if (xPositions.isNotEmpty()) {
+                                Log.i("PEOPLE_DEBUG", "pos[0]=(${xPositions[0]}, ${yPositions[0]}) heading=${headings.getOrNull(0)}")
+                            }
+                        }
+                    } else {
+                        // No people - still update tracker (it will age out stale tracks)
+                        peopleTracker.update(emptyList(), emptyList())
+                        detectedPeopleX = emptyList()
+                        detectedPeopleY = emptyList()
+                        // Log the keys to understand the message format
+                        if (lastPeopleArrayLogTime == 0L || System.currentTimeMillis() - lastPeopleArrayLogTime > 5000) {
+                            lastPeopleArrayLogTime = System.currentTimeMillis()
+                            Log.i("PEOPLE_DEBUG", "no people array found, keys: ${msg.keySet()}")
                         }
                     }
                 }
@@ -592,6 +727,46 @@ class RobotWebSocketClient(
                         Log.d(TAG, ">>> LOCAL_COSTMAP: Receiving ${width}x${height} grid (logging once per 10s)")
                         lastCostmapLogTime = System.currentTimeMillis()
                     }
+                }
+                ChassisProtocol.TOPIC_UPCAMERA_DEPTH_RAW -> {
+                    // Depth camera image - store for HTTP serving
+                    val width = msg.get("width")?.asInt ?: 0
+                    val height = msg.get("height")?.asInt ?: 0
+                    val encoding = msg.get("encoding")?.asString ?: ""
+                    val dataBase64 = msg.get("data")?.asString
+                    if (dataBase64 != null && width > 0 && height > 0) {
+                        latestDepthImage = android.util.Base64.decode(dataBase64, android.util.Base64.DEFAULT)
+                        latestDepthImageInfo = mapOf("width" to width, "height" to height, "encoding" to encoding)
+                        latestDepthImageTime = System.currentTimeMillis()
+                        Log.d("DEPTH_CAMERA", "Stored ${width}x${height} $encoding image (${latestDepthImage?.size} bytes)")
+                    }
+                }
+                ChassisProtocol.TOPIC_UP_CAMERA_POINTS -> {
+                    // Processed points from up camera - log structure to discover format
+                    // Filter: adb logcat -s PEOPLE_DEBUG
+                    Log.i("PEOPLE_DEBUG", "=== UP_CAMERA_POINTS ===")
+                    Log.i("PEOPLE_DEBUG", "Keys: ${msg.keySet()}")
+                    // Try parsing as point_array format (like laser_data)
+                    val px = msg.getAsJsonArray("px")?.map { it.asFloat } ?: emptyList()
+                    val py = msg.getAsJsonArray("py")?.map { it.asFloat } ?: emptyList()
+                    if (px.isNotEmpty()) {
+                        Log.i("PEOPLE_DEBUG", "UP_CAMERA_POINTS: ${px.size} points - px[0]=${px.firstOrNull()}, py[0]=${py.firstOrNull()}")
+                        // Feed to people tracker if this looks like person positions
+                        detectedPeopleX = px.map { it.toDouble() }
+                        detectedPeopleY = py.map { it.toDouble() }
+                        lastPeopleTime = System.currentTimeMillis()
+                        val tracked = peopleTracker.update(detectedPeopleX, detectedPeopleY)
+                        Log.i("PEOPLE_DEBUG", "Tracked ${tracked.size} people from UP_CAMERA_POINTS")
+                    } else {
+                        Log.i("PEOPLE_DEBUG", "UP_CAMERA_POINTS: No px/py arrays. Raw: ${msg.toString().take(500)}")
+                    }
+                }
+                ChassisProtocol.TOPIC_UPCAM_DATA -> {
+                    // Unknown format - log to discover structure
+                    // Filter: adb logcat -s PEOPLE_DEBUG
+                    Log.i("PEOPLE_DEBUG", "=== UPCAM_DATA ===")
+                    Log.i("PEOPLE_DEBUG", "Keys: ${msg.keySet()}")
+                    Log.i("PEOPLE_DEBUG", "Raw (500 chars): ${msg.toString().take(500)}")
                 }
             }
         } catch (e: Exception) {

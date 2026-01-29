@@ -11,21 +11,38 @@ import '../generated/robot_control.pbgrpc.dart';
 /// - Built-in keepalive (HTTP/2 PING frames)
 /// - Automatic reconnect with exponential backoff
 /// - Bidirectional streaming over one connection
+/// Configuration for GrpcRobotClient timing parameters
+class GrpcClientConfig {
+  final Duration keepaliveInterval;
+  final Duration keepaliveTimeout;
+  final Duration connectionTimeout;
+  final Duration idleTimeout;
+  final Duration minReconnectDelay;
+  final Duration maxReconnectDelay;
+  final double backoffMultiplier;
+  final int maxReconnectAttempts;
+  final int defaultPort;
+
+  const GrpcClientConfig({
+    this.keepaliveInterval = const Duration(seconds: 10),
+    this.keepaliveTimeout = const Duration(seconds: 5),
+    this.connectionTimeout = const Duration(seconds: 10),
+    this.idleTimeout = const Duration(minutes: 5),
+    this.minReconnectDelay = const Duration(seconds: 1),
+    this.maxReconnectDelay = const Duration(minutes: 1),
+    this.backoffMultiplier = 1.5,
+    this.maxReconnectAttempts = 10,
+    this.defaultPort = 50051,
+  });
+}
+
 class GrpcRobotClient extends ChangeNotifier {
   static const String _tag = 'GrpcRobotClient';
 
-  // Connection configuration
-  static const int _defaultPort = 50051;
-  static const Duration _keepaliveInterval = Duration(seconds: 10);
-  static const Duration _keepaliveTimeout = Duration(seconds: 5);
-  static const Duration _connectionTimeout = Duration(seconds: 10);
-  static const Duration _idleTimeout = Duration(minutes: 5);
+  // Configuration - injectable, not hardcoded
+  final GrpcClientConfig config;
 
-  // Reconnect configuration with exponential backoff
-  static const Duration _minReconnectDelay = Duration(seconds: 1);
-  static const Duration _maxReconnectDelay = Duration(minutes: 1);
-  static const double _backoffMultiplier = 1.5;
-  static const int _maxReconnectAttempts = 10;
+  GrpcRobotClient({GrpcClientConfig? config}) : config = config ?? const GrpcClientConfig();
 
   // State
   ClientChannel? _channel;
@@ -37,11 +54,13 @@ class GrpcRobotClient extends ChangeNotifier {
   bool _isReconnecting =
       false; // Track reconnection state separately from UI-visible connection state
   String _currentHost = '';
-  int _currentPort = _defaultPort;
+  late int _currentPort;
   String? _lastError;
   int _reconnectAttempts = 0;
   Timer? _reconnectTimer;
   Timer? _heartbeatTimer;
+  DateTime? _lastHeartbeatSent;
+  double _lastRtt = 0;
 
   // Streams for UI updates
   final _robotStatusController = StreamController<RobotStatus>.broadcast();
@@ -59,9 +78,11 @@ class GrpcRobotClient extends ChangeNotifier {
   bool get isConnected => _isConnected;
   String? get lastError => _lastError;
   String get connectionInfo => '$_currentHost:$_currentPort';
+  double get lastRtt => _lastRtt;
 
   /// Connect to the gRPC server
-  Future<void> connect(String host, {int port = _defaultPort}) async {
+  Future<void> connect(String host, {int? port}) async {
+    port ??= config.defaultPort;
     if (_isConnected && _currentHost == host && _currentPort == port) {
       debugPrint('$_tag: Already connected to $host:$port');
       return;
@@ -85,14 +106,14 @@ class GrpcRobotClient extends ChangeNotifier {
       _channel = ClientChannel(
         _currentHost,
         port: _currentPort,
-        options: const ChannelOptions(
-          credentials: ChannelCredentials.insecure(),
-          connectionTimeout: _connectionTimeout,
-          idleTimeout: _idleTimeout,
+        options: ChannelOptions(
+          credentials: const ChannelCredentials.insecure(),
+          connectionTimeout: config.connectionTimeout,
+          idleTimeout: config.idleTimeout,
           // These are the KEY settings for WAN stability!
           keepAlive: ClientKeepAliveOptions(
-            pingInterval: _keepaliveInterval,
-            timeout: _keepaliveTimeout,
+            pingInterval: config.keepaliveInterval,
+            timeout: config.keepaliveTimeout,
             permitWithoutCalls: true, // Keep alive even when idle
           ),
         ),
@@ -189,6 +210,15 @@ class GrpcRobotClient extends ChangeNotifier {
 
   /// Handle heartbeat messages
   void _handleHeartbeat(Heartbeat heartbeat) {
+    // Calculate RTT from heartbeat round-trip - only once per request
+    // Clear _lastHeartbeatSent after calculating so pushed heartbeats don't
+    // keep recalculating against the stale timestamp
+    if (_lastHeartbeatSent != null) {
+      _lastRtt = DateTime.now().difference(_lastHeartbeatSent!).inMilliseconds.toDouble();
+      _lastHeartbeatSent = null; // Only measure RTT on first response
+      notifyListeners(); // Notify UI of RTT update
+    }
+
     // Update all states from heartbeat
     if (heartbeat.hasRobot()) {
       _robotStatusController.add(heartbeat.robot);
@@ -206,7 +236,7 @@ class GrpcRobotClient extends ChangeNotifier {
     _lastError = error.toString();
 
     // Check if we've exceeded max reconnect attempts
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
+    if (_reconnectAttempts >= config.maxReconnectAttempts) {
       debugPrint('$_tag: Max reconnect attempts reached, giving up');
       _disconnect();
       return;
@@ -246,7 +276,7 @@ class GrpcRobotClient extends ChangeNotifier {
   /// Start periodic heartbeat
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(_keepaliveInterval, (_) {
+    _heartbeatTimer = Timer.periodic(config.keepaliveInterval, (_) {
       if (_isConnected) {
         _sendHeartbeatRequest();
       }
@@ -255,6 +285,7 @@ class GrpcRobotClient extends ChangeNotifier {
 
   /// Send heartbeat request
   void _sendHeartbeatRequest() {
+    _lastHeartbeatSent = DateTime.now();
     final message = ClientMessage()..heartbeatRequest = HeartbeatRequest();
     _sendMessage(message);
   }
@@ -266,13 +297,13 @@ class GrpcRobotClient extends ChangeNotifier {
     _reconnectAttempts++;
 
     // Calculate delay with exponential backoff
-    final delayMs = (_minReconnectDelay.inMilliseconds *
-            (_backoffMultiplier * _reconnectAttempts))
+    final delayMs = (config.minReconnectDelay.inMilliseconds *
+            (config.backoffMultiplier * _reconnectAttempts))
         .round();
     final delay = Duration(
       milliseconds: delayMs.clamp(
-        _minReconnectDelay.inMilliseconds,
-        _maxReconnectDelay.inMilliseconds,
+        config.minReconnectDelay.inMilliseconds,
+        config.maxReconnectDelay.inMilliseconds,
       ),
     );
 
@@ -395,7 +426,7 @@ class GrpcRobotClient extends ChangeNotifier {
   Future<void> disconnect() async {
     await _disconnect();
     _currentHost = '';
-    _currentPort = _defaultPort;
+    _currentPort = config.defaultPort;
   }
 
   /// Internal disconnect

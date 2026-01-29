@@ -104,10 +104,13 @@ class _MapViewState extends State<MapView> {
   List<double> _lidarPx = [];
   List<double> _lidarPy = [];
   Timer? _lidarTimer;
+  int _lidarFailCount = 0;  // Track consecutive failures to implement backoff
 
   // Tracked people from depth camera (with IDs and heading)
   List<TrackedPerson> _trackedPeople = [];
   Timer? _peopleTimer;
+  int _peopleFailCount = 0;  // Track consecutive failures to implement backoff
+  static const int _maxPollFailures = 5;  // Stop polling after this many failures
 
   // Depth camera raw image
   Uint8List? _depthImageBytes;
@@ -116,6 +119,7 @@ class _MapViewState extends State<MapView> {
   String _depthEncoding = '';
   Timer? _depthTimer;
   StreamSubscription? _depthStreamSubscription;
+  int _depthFailCount = 0;  // Track consecutive failures to implement backoff
 
   @override
   void initState() {
@@ -180,6 +184,7 @@ class _MapViewState extends State<MapView> {
       ).timeout(const Duration(milliseconds: 500));
 
       if (response.statusCode == 200) {
+        _lidarFailCount = 0;  // Reset on success
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final px = (data['px'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
         final py = (data['py'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
@@ -190,9 +195,23 @@ class _MapViewState extends State<MapView> {
             _lidarPy = py;
           });
         }
+      } else {
+        // 404 or other error - track failures
+        _lidarFailCount++;
+        if (_lidarFailCount >= _maxPollFailures) {
+          debugPrint('MapView: Stopping LIDAR polling after $_lidarFailCount failures');
+          _lidarTimer?.cancel();
+          _lidarTimer = null;
+        }
       }
     } catch (e) {
-      // Silent fail - LIDAR is optional visualization
+      // Timeout or network error - track failures
+      _lidarFailCount++;
+      if (_lidarFailCount >= _maxPollFailures) {
+        debugPrint('MapView: Stopping LIDAR polling after $_lidarFailCount failures');
+        _lidarTimer?.cancel();
+        _lidarTimer = null;
+      }
     }
   }
 
@@ -216,6 +235,7 @@ class _MapViewState extends State<MapView> {
       ).timeout(const Duration(milliseconds: 500));
 
       if (response.statusCode == 200) {
+        _peopleFailCount = 0;  // Reset on success
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final peopleJson = data['people'] as List?;
 
@@ -227,7 +247,14 @@ class _MapViewState extends State<MapView> {
           });
         }
       } else {
-        // No people data - clear the list
+        // 404 or other error - track failures
+        _peopleFailCount++;
+        if (_peopleFailCount >= _maxPollFailures) {
+          debugPrint('MapView: Stopping people polling after $_peopleFailCount failures');
+          _peopleTimer?.cancel();
+          _peopleTimer = null;
+        }
+        // Clear the list on failure
         if (mounted && _trackedPeople.isNotEmpty) {
           setState(() {
             _trackedPeople = [];
@@ -235,7 +262,13 @@ class _MapViewState extends State<MapView> {
         }
       }
     } catch (e) {
-      // Silent fail - people detection is optional visualization
+      // Timeout or network error - track failures
+      _peopleFailCount++;
+      if (_peopleFailCount >= _maxPollFailures) {
+        debugPrint('MapView: Stopping people polling after $_peopleFailCount failures');
+        _peopleTimer?.cancel();
+        _peopleTimer = null;
+      }
     }
   }
 
@@ -280,6 +313,7 @@ class _MapViewState extends State<MapView> {
       ).timeout(const Duration(milliseconds: 500));
 
       if (response.statusCode == 200) {
+        _depthFailCount = 0;  // Reset on success
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final dataBase64 = data['data'] as String?;
         final width = data['width'] as int?;
@@ -294,9 +328,23 @@ class _MapViewState extends State<MapView> {
             _depthEncoding = encoding;
           });
         }
+      } else {
+        // 404 or other error - track failures
+        _depthFailCount++;
+        if (_depthFailCount >= _maxPollFailures) {
+          debugPrint('MapView: Stopping depth polling after $_depthFailCount failures');
+          _depthTimer?.cancel();
+          _depthTimer = null;
+        }
       }
     } catch (e) {
-      // Silent fail
+      // Timeout or network error - track failures
+      _depthFailCount++;
+      if (_depthFailCount >= _maxPollFailures) {
+        debugPrint('MapView: Stopping depth polling after $_depthFailCount failures');
+        _depthTimer?.cancel();
+        _depthTimer = null;
+      }
     }
   }
 
@@ -387,6 +435,13 @@ class _MapViewState extends State<MapView> {
       debugPrint('MapView: Connection restored');
       _startMapPolling();
       _subscribeToPose();
+      // Reset failure counters and restart optional polling
+      _lidarFailCount = 0;
+      _peopleFailCount = 0;
+      _depthFailCount = 0;
+      _startLidarPolling();
+      _startPeoplePolling();
+      _startDepthPolling();
     } else if (!isConnected && _lastKnownConnected) {
       debugPrint('MapView: Connection lost (HTTP map polling continues independently)');
       // DON'T cancel _pollTimer! HTTP polling is independent of WebSocket
@@ -780,9 +835,9 @@ class _MapViewState extends State<MapView> {
                   size: Size.infinite,
                 ),
         ),
-        // Depth camera overlay - top right
+        // Depth camera overlay - below tour overlay area (tour overlay is at top: 64)
         Positioned(
-          top: 8,
+          top: 140,
           right: 8,
           child: Container(
             width: 160,

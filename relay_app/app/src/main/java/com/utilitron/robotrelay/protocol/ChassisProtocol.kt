@@ -37,6 +37,11 @@ object ChassisProtocol {
     const val TOPIC_DETECTED_PEOPLE_ARRAY = "/detected_people_array"  // Rich people detection data
     const val TOPIC_HANDPOSE = "/handpose"  // Hand gesture detection
     const val TOPIC_LOCAL_COSTMAP = "/move_base/local_costmap/costmap"  // Real-time obstacle blocks
+    const val TOPIC_UPCAMERA_DEPTH_RAW = "/upcamera/depth/image_raw"  // Raw depth image from up-facing camera
+    const val TOPIC_UPCAMERA_DEPTH_POINTS = "/upcamera/depth/points"  // Point cloud from depth camera
+    const val TOPIC_UP_CAMERA_SCAN = "/up_camera_scan"  // Processed scan from up camera
+    const val TOPIC_UP_CAMERA_POINTS = "/up_camera_points"  // Processed points from up camera (may have people positions)
+    const val TOPIC_UPCAM_DATA = "/upcam_data"  // Unknown data from up camera
 
     // Services
     const val SERVICE_POI = "/poi"
@@ -44,6 +49,7 @@ object ChassisProtocol {
     const val SERVICE_VELOCITY_CONTROL = "/velocity_control"
     const val SERVICE_ROBOT_INFO = "/robot_info"
     const val SERVICE_GET_MAP_INFO = "/get_map_info"
+    const val SERVICE_ROSAPI_TOPICS = "/rosapi/topics"  // List all available ROS topics
 
     // Navigation status codes
     const val NAV_WAITING = 600
@@ -148,6 +154,72 @@ object ChassisProtocol {
     ))
 
     /**
+     * Subscribe to raw depth image from up-facing camera.
+     * This is the actual human detection source data.
+     * WARNING: Images can be LARGE - heavily throttled.
+     * Filter logcat: DEPTH_CAMERA
+     */
+    fun subscribeUpCameraDepthRaw(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_upcamera_depth_raw",
+        topic = TOPIC_UPCAMERA_DEPTH_RAW,
+        type = "sensor_msgs/Image",
+        throttleRate = 1000  // 1Hz max - images are big
+    ))
+
+    /**
+     * Subscribe to point cloud from up-facing depth camera.
+     * 3D positions of detected points in camera frame.
+     * Filter logcat: DEPTH_CAMERA
+     */
+    fun subscribeUpCameraDepthPoints(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_upcamera_depth_points",
+        topic = TOPIC_UPCAMERA_DEPTH_POINTS,
+        type = "sensor_msgs/PointCloud2",
+        throttleRate = 500  // 2Hz max
+    ))
+
+    /**
+     * Subscribe to processed scan from up camera.
+     * May contain human leg/body detection in scan format.
+     * Filter logcat: DEPTH_CAMERA
+     */
+    fun subscribeUpCameraScan(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_up_camera_scan",
+        topic = TOPIC_UP_CAMERA_SCAN,
+        type = "sensor_msgs/LaserScan",
+        throttleRate = 200  // 5Hz
+    ))
+
+    /**
+     * Subscribe to processed points from up camera.
+     * May contain detected person positions.
+     * Filter logcat: PEOPLE_DEBUG
+     */
+    fun subscribeUpCameraPoints(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_up_camera_points",
+        topic = TOPIC_UP_CAMERA_POINTS,
+        type = "yutong_assistance/point_array",  // Same format as laser_data
+        throttleRate = 200  // 5Hz
+    ))
+
+    /**
+     * Subscribe to upcam_data topic.
+     * Unknown format - log to discover structure.
+     * Filter logcat: PEOPLE_DEBUG
+     */
+    fun subscribeUpcamData(): String = toJson(SubscribeMsg(
+        op = OP_SUBSCRIBE,
+        id = "get_upcam_data",
+        topic = TOPIC_UPCAM_DATA,
+        type = "",  // Unknown - discover via logging
+        throttleRate = 500  // 2Hz for discovery
+    ))
+
+    /**
      * Subscribe to map WITHOUT fragmentation/compression.
      * Returns raw OccupancyGrid that Flutter can parse directly.
      * The fragmented+PNG approach from chassis docs does NOT produce
@@ -244,6 +316,18 @@ object ChassisProtocol {
         id = "service_velocity_control",
         service = SERVICE_VELOCITY_CONTROL,
         args = mapOf("cmd" to mode, "str" to "")
+    ))
+
+    /**
+     * List all available ROS topics via rosapi service.
+     * Response will contain "topics" array with all topic names.
+     * Filter logcat: ROSAPI_TOPICS
+     */
+    fun callListTopics(): String = toJson(ServiceCallMsg(
+        op = OP_CALL_SERVICE,
+        id = "list_topics",
+        service = SERVICE_ROSAPI_TOPICS,
+        args = emptyMap()
     ))
 
     // Speed modes

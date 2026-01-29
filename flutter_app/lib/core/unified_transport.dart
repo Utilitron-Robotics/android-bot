@@ -141,6 +141,7 @@ class TransportConnectionStatus {
   final bool httpReachable;
   final String? activeTransport;
   final NetworkCondition networkCondition;
+  final double rttMs;
 
   const TransportConnectionStatus({
     this.grpcConnected = false,
@@ -150,6 +151,7 @@ class TransportConnectionStatus {
     this.httpReachable = false,
     this.activeTransport,
     this.networkCondition = NetworkCondition.good,
+    this.rttMs = 0,
   });
 
   bool get hasAnyConnection =>
@@ -560,9 +562,19 @@ class UnifiedTransportManager extends ChangeNotifier {
         httpReachable: _status.httpReachable,
         activeTransport: _determineActiveTransport(),
         networkCondition: _config.currentCondition,
+        rttMs: _config.currentRtt,
       );
       _statusController.add(_status);
       notifyListeners();
+    });
+
+    // Listen for RTT updates from heartbeat responses
+    _grpc!.addListener(() {
+      final rtt = _grpc!.lastRtt;
+      if (rtt > 0) {
+        _config.updateNetworkMetrics(rttMs: rtt, jitterMs: 0);
+        _updateStatus();
+      }
     });
   }
 
@@ -586,6 +598,7 @@ class UnifiedTransportManager extends ChangeNotifier {
         httpReachable: _status.httpReachable,
         activeTransport: _determineActiveTransport(),
         networkCondition: _config.currentCondition,
+        rttMs: _config.currentRtt,
       );
       _statusController.add(_status);
       notifyListeners();
@@ -610,6 +623,7 @@ class UnifiedTransportManager extends ChangeNotifier {
         httpReachable: _status.httpReachable,
         activeTransport: _determineActiveTransport(),
         networkCondition: _config.currentCondition,
+        rttMs: _config.currentRtt,
       );
       _statusController.add(_status);
       notifyListeners();
@@ -685,6 +699,7 @@ class UnifiedTransportManager extends ChangeNotifier {
       httpReachable: _adaptive?.isConnected ?? false,
       activeTransport: _determineActiveTransport(),
       networkCondition: _config.currentCondition,
+      rttMs: _config.currentRtt,
     );
     _statusController.add(_status);
     notifyListeners();

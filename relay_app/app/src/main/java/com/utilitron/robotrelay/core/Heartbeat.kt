@@ -169,6 +169,9 @@ class Drummer(
 class Messenger(
     private val expectedSource: String,
     private val missedBeatsThreshold: Int = 3,
+    private val initialIntervalMs: Long = 1000,  // Starting assumption, adapts via EMA
+    private val minCheckIntervalMs: Long = 100,   // Floor: never check faster than this
+    private val maxCheckIntervalMs: Long = 5000,  // Ceiling: never check slower than this
     private val onStale: (() -> Unit)? = null,
     private val onRecovered: (() -> Unit)? = null,
     private val onHeartbeat: ((HeartbeatData) -> Unit)? = null
@@ -180,8 +183,8 @@ class Messenger(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var checkJob: Job? = null
 
-    // SINC-style rhythm learning
-    private var expectedIntervalMs: Long = 1000
+    // SINC-style rhythm learning - adapts to actual heartbeat interval via EMA
+    private var expectedIntervalMs: Long = initialIntervalMs
     private var lastSequence = 0
     private var lastTimestamp: Long = 0
 
@@ -192,16 +195,25 @@ class Messenger(
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected
 
+    /**
+     * Calculate adaptive check interval based on learned rhythm.
+     * Check at half the expected beat interval (Nyquist-ish) -
+     * fast enough to catch missed beats, slow enough not to waste cycles.
+     */
+    private fun adaptiveCheckInterval(): Long {
+        return (expectedIntervalMs / 2).coerceIn(minCheckIntervalMs, maxCheckIntervalMs)
+    }
+
     /** Start monitoring for staleness */
     fun start() {
         checkJob?.cancel()
         checkJob = scope.launch {
             while (isActive) {
-                delay(500)
+                delay(adaptiveCheckInterval())  // Adapts to learned rhythm
                 checkStaleness()
             }
         }
-        Log.i(TAG, "[$expectedSource] Started monitoring")
+        Log.i(TAG, "[$expectedSource] Started monitoring (initial interval: ${initialIntervalMs}ms)")
     }
 
     /** Stop monitoring */

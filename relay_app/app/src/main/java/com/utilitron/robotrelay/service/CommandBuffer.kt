@@ -10,7 +10,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.*
-import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
  * CommandBuffer - A dumb queue that executes commands sequentially.
@@ -29,7 +28,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
 class CommandBuffer(
     private val robotClient: RobotWebSocketClient,
     private val taskExecutor: RelayServer.TaskExecutor?,
-    private val onStatusUpdate: (String) -> Unit  // Sends JSON to Flutter
+    private val onStatusUpdate: (String) -> Unit,  // Sends JSON to Flutter
+    private val heartbeatIntervalMs: Long = 1000,  // Configurable heartbeat pace (sets the rhythm)
+    private val minHeartbeatMs: Long = 200,        // Floor: never beat faster than this
+    private val maxHeartbeatMs: Long = 5000        // Ceiling: never beat slower than this
 ) {
     companion object {
         private const val TAG = "CommandBuffer"
@@ -38,8 +40,12 @@ class CommandBuffer(
     private val gson = Gson()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // Command queue
-    private val pendingQueue = ConcurrentLinkedQueue<BufferCommand>()
+    // Command list with index-based execution (enables looping without re-queuing)
+    // MutableList so we can insert/remove/reorder in flight (deliveries, etc.)
+    private var commandList: MutableList<BufferCommand> = mutableListOf()
+    @Volatile
+    private var currentIndex: Int = -1  // -1 = stopped, 0+ = executing
+    private var loopStartIndex: Int = 0  // Index to return to on loop (after initial nav+button_standby)
     @Volatile
     private var currentCommand: BufferCommand? = null
     private val completedHistory = mutableListOf<CompletedCommand>()
@@ -142,7 +148,8 @@ class CommandBuffer(
      */
     fun loadCommands(commands: List<BufferCommand>, clearExisting: Boolean = false) {
         if (clearExisting) {
-            pendingQueue.clear()
+            commandList = mutableListOf()
+            currentIndex = -1
             // Also cancel the current running command so it exits its loop
             // (e.g., button_standby waits on currentCommand != null)
             currentCommand = null
@@ -153,12 +160,24 @@ class CommandBuffer(
             Log.i(TAG, "Cleared existing commands + cancelled current")
         }
 
-        commands.forEach { cmd ->
-            pendingQueue.add(cmd)
-            Log.i(TAG, "Queued: ${cmd.type} (id=${cmd.id})")
+        commandList = commands.toMutableList()
+        currentIndex = 0  // Start from beginning
+
+        // Calculate loop start index (skip initial nav + button_standby)
+        // This prevents showing the START button twice when looping
+        loopStartIndex = 0
+        if (commands.isNotEmpty() && commands[0].type == "navigate") {
+            loopStartIndex = 1
+            if (commands.size > 1 && commands[1].type == "button_standby") {
+                loopStartIndex = 2
+            }
         }
 
-        Log.i(TAG, "Loaded ${commands.size} commands, total pending: ${pendingQueue.size}")
+        commands.forEachIndexed { index, cmd ->
+            Log.i(TAG, "Command[$index]: ${cmd.type} (id=${cmd.id})")
+        }
+
+        Log.i(TAG, "Loaded ${commands.size} commands, loopStartIndex=$loopStartIndex")
         sendStatusUpdate()
     }
 
@@ -166,7 +185,8 @@ class CommandBuffer(
      * Clear all pending commands AND stop current command
      */
     fun clear() {
-        pendingQueue.clear()
+        currentIndex = -1  // Stop execution
+        commandList = mutableListOf()
         waitingForNavArrival = false
         navArrivalPending = false
         pendingNavWaypoint = null
@@ -209,7 +229,7 @@ class CommandBuffer(
         val cmd = currentCommand
         if (cmd == null) {
             Log.w(TAG, ">>> SKIP called but currentCommand is NULL! Nothing to skip.")
-            Log.w(TAG, "    pendingQueue.size=${pendingQueue.size}")
+            Log.w(TAG, "    commandList.size=${commandList.size}")
             return
         }
         Log.i(TAG, ">>> SKIP: Skipping ${cmd.type} (id=${cmd.id})")
@@ -229,7 +249,7 @@ class CommandBuffer(
         val cmd = currentCommand
         if (cmd == null) {
             Log.e(TAG, "notifyTourStarted called but currentCommand is NULL! Buffer may have been cleared/restarted.")
-            Log.e(TAG, "  pendingQueue.size=${pendingQueue.size}, completedHistory.size=${completedHistory.size}")
+            Log.e(TAG, "  commandList.size=${commandList.size}, completedHistory.size=${completedHistory.size}")
             return
         }
         if (cmd.type != "motion_standby" && cmd.type != "button_standby") {
@@ -331,22 +351,26 @@ class CommandBuffer(
                 waitingForNavArrival = false
                 navArrivalPending = false
                 pendingNavWaypoint = null
+                currentIndex = -1  // Stop execution on real cancellation
                 completeCommand(cmd.id, "cancelled")
             }
         }
     }
 
     /**
-     * Heartbeat - sends status every second
+     * Heartbeat - sends status at configured rhythm.
+     * The Drummer sets the pace, Flutter's Messenger learns to follow.
      */
     private fun startHeartbeat() {
         heartbeatJob?.cancel()
+        val interval = heartbeatIntervalMs.coerceIn(minHeartbeatMs, maxHeartbeatMs)
         heartbeatJob = scope.launch {
             while (isActive) {
-                delay(1000)
+                delay(interval)  // Configurable rhythm, not hardcoded
                 sendHeartbeat()
             }
         }
+        Log.i(TAG, "Heartbeat started at ${interval}ms interval")
     }
 
     private fun sendHeartbeat() {
@@ -376,8 +400,10 @@ class CommandBuffer(
                         "elapsed_ms" to (now - currentCommandStartTime)
                     )
                 },
-                "pending_count" to pendingQueue.size,
-                "completed_count" to completedHistory.size
+                "pending_count" to (commandList.size - currentIndex).coerceAtLeast(0),
+                "completed_count" to completedHistory.size,
+                "current_index" to currentIndex,
+                "loop_start_index" to loopStartIndex
             ),
             "robot" to mapOf(
                 "connected" to (robotClient.connectionState.value == ConnectionState.CONNECTED),
@@ -412,7 +438,7 @@ class CommandBuffer(
     }
 
     /**
-     * Execution loop - runs commands one at a time
+     * Execution loop - runs commands one at a time using index-based access
      */
     private fun startExecutionLoop() {
         executionJob?.cancel()
@@ -423,18 +449,20 @@ class CommandBuffer(
                     delay(100)
                 }
 
-                // Get next command
-                val cmd = pendingQueue.poll()
-                if (cmd == null) {
-                    delay(100)  // Nothing to do, wait a bit
+                // Get next command by index (not poll from queue)
+                if (currentIndex < 0 || currentIndex >= commandList.size) {
+                    delay(100)  // Nothing to do or stopped, wait a bit
                     continue
                 }
+
+                val cmd = commandList[currentIndex]
+                currentIndex++  // Advance index for next iteration
 
                 // Execute command
                 currentCommand = cmd
                 currentCommandStartTime = System.currentTimeMillis()
 
-                Log.i(TAG, "Executing: ${cmd.type} (id=${cmd.id})")
+                Log.i(TAG, "Executing[${currentIndex - 1}/${commandList.size}]: ${cmd.type} (id=${cmd.id})")
                 sendCommandStarted(cmd)
 
                 try {
@@ -994,9 +1022,9 @@ class CommandBuffer(
             }
 
             "loop" -> {
-                // Loop command - restart the sequence from the beginning
-                // IMPORTANT: Clear any motion trigger state to prevent auto-triggering
-                Log.i(TAG, "Loop command received - restarting sequence")
+                // Loop command - restart the sequence from loopStartIndex
+                // This skips the initial nav + button_standby that already ran
+                Log.i(TAG, "Loop command - resetting to index $loopStartIndex (skipping initial nav/button_standby)")
 
                 // Clear motion detection state if it was active
                 withContext(Dispatchers.Main) {
@@ -1006,7 +1034,9 @@ class CommandBuffer(
                 // Mark this command as complete
                 completeCommand(cmd.id, "success")
 
-                // The buffer executor will reload commands after this completes
+                // Reset index to loop start (after initial nav+button_standby)
+                // This is the key fix: robot is already at start, don't show button again
+                currentIndex = loopStartIndex
             }
 
             else -> {

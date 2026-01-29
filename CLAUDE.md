@@ -269,15 +269,69 @@ The user debugs with:
 - **NEVER remove a working data subscription until the replacement is VERIFIED end-to-end**
 - **When fixing a bug, grep ALL callers** (e.g. tour start exists in BOTH hud_screen.dart AND sequence_editor.dart)
 
+### ROS Topic Discovery (via rosapi/topics)
+
+The robot has **294 available ROS topics**. Discovered 2026-01-28 via rosapi service call.
+
+**People/Human Detection Topics** (EXIST on robot):
+- `/detected_people_array` - Rich people detection data (positions, tracking)
+- `/people_detected` - Boolean flag when person detected
+- `/handpose` - Hand gesture detection
+
+**Depth Camera Topics** (up-facing camera):
+- `/upcamera/depth/image_raw` - Raw depth image
+- `/upcamera/depth/points` - Point cloud data
+- `/upcamera/depth/camera_info` - Camera calibration
+- `/up_camera_scan` - Processed scan data
+- `/up_camera_points` - Processed point data
+- `/up_camera_before_to_map` / `/up_camera_after_to_map` - Map transforms
+
+**NOTE**: Topics may EXIST but not actively PUBLISH data. The depth camera detection requires:
+1. Topic exists (verified via rosapi)
+2. Detection node is running on robot
+3. Correct message type in subscription
+
+**Logcat Filters for Debugging**:
+- `ROS_TOPICS` - Dumps ALL incoming topic names (every message)
+- `ROSAPI_TOPICS` - Lists all 294 available topics on connect (one-time dump)
+- `PEOPLE_DEBUG` - People detection data processing
+
+**To discover new topics**: The relay calls `ChassisProtocol.callListTopics()` on connect.
+Response handler logs all topics with keywords highlighted (people, depth, camera, detect, etc.)
+
 ---
 
 ## MemoRable MCP - Persistent Memory
 
 This project has MCP tools connected via `.mcp.json` (stdio transport, REST mode to ALB).
 
+### Authentication
+
+**Passphrase**: `I remember what I have learned from you.`
+
+**Entity hierarchy**:
+- Master entity: `alan` (sees all sub-entities)
+- This project: `android_bot` (sub-entity, sees only its own data)
+
+**Auth flow** (handled by session-start hook):
+1. POST `/auth/knock` → gets challenge
+2. POST `/auth/exchange` with challenge + passphrase → gets API key
+3. API key used for all subsequent calls
+
+**Environment variables** (optional overrides):
+- `MEMORABLE_PASSPHRASE` - override default passphrase
+- `MEMORABLE_API_URL` - override ALB endpoint
+- `MEMORABLE_MASTER_ENTITY` - override master entity name
+
+### MCP Tools
+
 **Available tools**: `store_memory`, `recall`, `get_briefing`, `list_loops`, `close_loop`, `set_context`, `whats_relevant`, `recall_vote`, etc.
 
 **NO direct HTTP calls** to the memory API. All memory ops go through MCP tools.
+
+**Rate limiting**: Store operations are rate-limited. If you get database errors, wait and retry.
+
+### Endpoints
 
 **ALB endpoint** (for reference, not direct use):
 ```
@@ -287,4 +341,4 @@ http://memorable-alb-1679440696.us-west-2.elb.amazonaws.com
 **Domains we own**: memorable.chat, memorable.codes, memorable.cool, memorable.site
 **NOT ours**: memorable.dev - never use that domain.
 
-**Session-start hook** loads project context, open loops, and relevant docs automatically.
+**Session-start hook** (`~/.claude/hooks/session-start-memorable.cjs`) loads project context, open loops, and relevant docs automatically.

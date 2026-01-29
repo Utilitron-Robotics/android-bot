@@ -8,6 +8,7 @@ import '../core/buffer_client.dart' show BufferClient;
 import '../core/buffer_sequence_executor.dart' show BufferSequenceExecutor, SequenceExecutorStatus;
 import '../core/robot_connection.dart';
 import '../core/unified_transport.dart' show UnifiedTransportManager;
+import '../core/transport_config.dart';
 import '../core/sequence_mode.dart'
     show SequenceManager, SequenceStatus, SequencePhase, Sequence;
 import '../core/chassis_protocol.dart' as protocol;
@@ -351,23 +352,25 @@ class _HudScreenState extends State<HudScreen>
         bufferExecutor?.currentPhase == SequencePhase.awaitingVisitor ||
             bufferExecutor?.isAwaitingVisitor == true;
 
-    // ADAPTIVE RECONNECT: If tour is running, preserve state (don't full-disconnect)
+    // ADAPTIVE RECONNECT: If navigation is active, preserve state (don't full-disconnect)
     // HUD is a control panel - it receives output from relay, doesn't send input
     // unless something changes. Full reconnect would cancel active navigation.
     // NOTE: Check tourManager.status (covers ALL tour types including SequenceTaskMode fallback)
     // not just bufferExecutor.status (only covers buffer-based tours)
     final isTourActive = tourManager.status == SequenceStatus.running ||
         tourManager.status == SequenceStatus.paused;
+    // Also preserve state if robot is actively navigating (POI navigation, not a tour)
+    final isNavigating = robot.status.isMoving;
 
     if (isStale) {
       final savedUrl = robot.robotUrl;
       if (savedUrl.isEmpty) return;
       final host = _extractHost(savedUrl);
 
-      if (isAwaitingVisitor || isTourActive) {
-        // Tour running: low-level WS reconnect (preserves BufferClient/tour state)
+      if (isAwaitingVisitor || isTourActive || isNavigating) {
+        // Navigation active: low-level WS reconnect (preserves navigation state)
         // HUD should NEVER cancel navigation just because it reconnected
-        debugPrint('HUD: Connection STALE while tour active - low-level WS reconnect (preserving tour)');
+        debugPrint('HUD: Connection STALE while nav active (tour=$isTourActive, moving=$isNavigating) - low-level WS reconnect');
         robot.client.reconnect();
         // Also reconnect gRPC for command channel
         context.read<UnifiedTransportManager>().connectToHost(host);
@@ -1471,6 +1474,34 @@ class _HudScreenState extends State<HudScreen>
               color: _accentSecondary,
             ),
           ),
+          const SizedBox(width: 8),
+
+          // Latency meter - shows RTT from heartbeat
+          Builder(builder: (context) {
+            final transport = context.watch<UnifiedTransportManager>();
+            final rtt = transport.status.rttMs;
+            final condition = transport.status.networkCondition;
+            final color = switch (condition) {
+              NetworkCondition.excellent => Colors.green,
+              NetworkCondition.good => _accentColor,
+              NetworkCondition.fair => Colors.yellow,
+              NetworkCondition.poor => Colors.orange,
+              NetworkCondition.critical => _dangerColor,
+            };
+            final icon = switch (condition) {
+              NetworkCondition.excellent => Icons.signal_cellular_4_bar,
+              NetworkCondition.good => Icons.signal_cellular_4_bar,
+              NetworkCondition.fair => Icons.signal_cellular_alt_2_bar,
+              NetworkCondition.poor => Icons.signal_cellular_alt_1_bar,
+              NetworkCondition.critical => Icons.signal_cellular_0_bar,
+            };
+            return _HudChip(
+              icon: icon,
+              label: rtt > 0 ? '${rtt.toStringAsFixed(0)}ms' : '--',
+              color: color,
+              pulse: condition == NetworkCondition.critical,
+            );
+          }),
           const SizedBox(width: 12),
 
           // Battery
@@ -1523,24 +1554,46 @@ class _HudScreenState extends State<HudScreen>
           // Stale data warning - BufferClient is authoritative when active
           // bufferClient tracks relay heartbeat rhythm + robot data_age_ms
           // robot.isStale only tracks WebSocket /robot_status subscription (can lag after background)
+          // Also check if waypoints are loaded - heartbeat can resume before data is ready
           Builder(builder: (context) {
             final bufferClient = tourManager.bufferClient;
             final isStale = bufferClient != null
                 ? bufferClient.isStale  // Buffer active: trust relay heartbeat
                 : robot.isStale;        // No buffer: fall back to WS subscription
-            if (!isStale) return const SizedBox.shrink();
-            return const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(width: 12),
-                _HudChip(
-                  icon: Icons.warning_amber,
-                  label: 'DATA STALE',
-                  color: Colors.amber,
-                  pulse: true,
-                ),
-              ],
-            );
+            final waypointsLoaded = robot.capabilities?.waypoints.isNotEmpty ?? false;
+
+            // Three states:
+            // 1. Stale: heartbeat not working (amber warning)
+            // 2. Loading: heartbeat OK but waypoints not ready yet (blue info)
+            // 3. Ready: hide indicator
+            if (isStale) {
+              return const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: 12),
+                  _HudChip(
+                    icon: Icons.warning_amber,
+                    label: 'DATA STALE',
+                    color: Colors.amber,
+                    pulse: true,
+                  ),
+                ],
+              );
+            } else if (!waypointsLoaded) {
+              return const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(width: 12),
+                  _HudChip(
+                    icon: Icons.hourglass_empty,
+                    label: 'LOADING...',
+                    color: Colors.lightBlue,
+                    pulse: true,
+                  ),
+                ],
+              );
+            }
+            return const SizedBox.shrink();
           }),
 
           // Tour Status in Center
