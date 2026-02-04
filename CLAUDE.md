@@ -295,6 +295,8 @@ The robot has **294 available ROS topics**. Discovered 2026-01-28 via rosapi ser
 - `ROS_TOPICS` - Dumps ALL incoming topic names (every message)
 - `ROSAPI_TOPICS` - Lists all 294 available topics on connect (one-time dump)
 - `PEOPLE_DEBUG` - People detection data processing
+- `DEPTH_PEOPLE` - Depth camera clustering results and ghost rejection
+- `LIDAR_DEPTH_FUSION` - Sensor fusion: LIDAR+depth confirmation, ghost detection
 
 **To discover new topics**: The relay calls `ChassisProtocol.callListTopics()` on connect.
 Response handler logs all topics with keywords highlighted (people, depth, camera, detect, etc.)

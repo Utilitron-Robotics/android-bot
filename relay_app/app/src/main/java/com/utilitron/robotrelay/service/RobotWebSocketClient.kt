@@ -144,6 +144,9 @@ class RobotWebSocketClient(
     // Depth-based people detector - processes raw depth data to find humans
     private val depthPeopleDetector = DepthPeopleDetector()
 
+    // LIDAR + Depth fusion - confirms detections, rejects ghosts
+    private val lidarDepthFusion = LidarDepthFusion()
+
     // Crowd control config: distance-proportional speed limiting
     private var crowdSafeDistance: Double = 0.9  // meters - ramping begins here
     private var crowdRampRate: Double = 0.5      // 0.1=gentle, 1.0=aggressive
@@ -575,17 +578,41 @@ class RobotWebSocketClient(
                         // Feed coordinate data to obstacle classifier
                         obstacleClassifier?.processLidarScan(px, py)
 
-                        // FALLBACK: If no people data from dedicated topics, try detecting from LIDAR
-                        // This works because LIDAR can see human-shaped clusters
-                        val staleThreshold = System.currentTimeMillis() - 2000  // 2 seconds
-                        if (lastPeopleTime < staleThreshold && px.size > 20) {
+                        // LIDAR-based people detection with DEPTH FUSION
+                        // Only use LIDAR detections if confirmed by depth camera (reduces ghosting)
+                        if (px.size > 20) {
                             val lidarPeople = depthPeopleDetector.processPointArrays(px, py)
+
                             if (lidarPeople.isNotEmpty()) {
-                                detectedPeopleX = lidarPeople.map { it.x }
-                                detectedPeopleY = lidarPeople.map { it.y }
-                                lastPeopleTime = System.currentTimeMillis()
-                                val tracked = peopleTracker.update(detectedPeopleX, detectedPeopleY)
-                                Log.i("PEOPLE_DEBUG", "LIDAR fallback: ${px.size} pts → ${lidarPeople.size} people → ${tracked.size} tracked")
+                                // Feed LIDAR detections to fusion system
+                                lidarDepthFusion.updateLidar(lidarPeople.map { person ->
+                                    LidarDepthFusion.Detection(
+                                        x = person.x,
+                                        y = person.y,
+                                        timestamp = System.currentTimeMillis(),
+                                        source = LidarDepthFusion.Source.LIDAR,
+                                        confidence = person.confidence,
+                                        width = person.width,
+                                        pointCount = person.pointCount
+                                    )
+                                })
+
+                                // Get fused/confirmed people (depth confirms or rejects ghosts)
+                                val confirmedPeople = lidarDepthFusion.getConfirmedPeople()
+
+                                if (confirmedPeople.isNotEmpty()) {
+                                    detectedPeopleX = confirmedPeople.map { it.x }
+                                    detectedPeopleY = confirmedPeople.map { it.y }
+                                    lastPeopleTime = System.currentTimeMillis()
+                                    val tracked = peopleTracker.update(detectedPeopleX, detectedPeopleY)
+
+                                    val bothCount = confirmedPeople.count { it.source == LidarDepthFusion.ConfirmationSource.BOTH_SENSORS }
+                                    val unconfirmedCount = confirmedPeople.count { it.source == LidarDepthFusion.ConfirmationSource.LIDAR_UNCONFIRMED }
+                                    Log.i("PEOPLE_DEBUG", "LIDAR+fusion: ${px.size} pts → ${lidarPeople.size} lidar → " +
+                                                         "${confirmedPeople.size} confirmed ($bothCount both, $unconfirmedCount unconfirmed) → ${tracked.size} tracked")
+                                } else if (lidarPeople.isNotEmpty()) {
+                                    Log.d("PEOPLE_DEBUG", "LIDAR detected ${lidarPeople.size} but all rejected as ghosts (depth shows nothing)")
+                                }
                             }
                         }
 
@@ -771,6 +798,19 @@ class RobotWebSocketClient(
                         // Use DepthPeopleDetector to cluster points and find humans
                         val detectedPeople = depthPeopleDetector.processPointArrays(px, py)
 
+                        // Feed depth detections to fusion system (for LIDAR ghost rejection)
+                        lidarDepthFusion.updateDepth(detectedPeople.map { person ->
+                            LidarDepthFusion.Detection(
+                                x = person.x,
+                                y = person.y,
+                                timestamp = System.currentTimeMillis(),
+                                source = LidarDepthFusion.Source.DEPTH,
+                                confidence = person.confidence,
+                                width = person.width,
+                                pointCount = person.pointCount
+                            )
+                        })
+
                         if (detectedPeople.isNotEmpty()) {
                             // Extract x,y positions from detected people
                             detectedPeopleX = detectedPeople.map { it.x }
@@ -779,10 +819,13 @@ class RobotWebSocketClient(
 
                             // Feed to people tracker for stable IDs and smoothing
                             val tracked = peopleTracker.update(detectedPeopleX, detectedPeopleY)
-                            Log.i("PEOPLE_DEBUG", "UP_CAMERA_POINTS: ${px.size} raw pts → ${detectedPeople.size} detected → ${tracked.size} tracked")
+                            Log.i("PEOPLE_DEBUG", "UP_CAMERA_POINTS (depth): ${px.size} raw pts → ${detectedPeople.size} detected → ${tracked.size} tracked")
 
                             // Also feed to ObstacleClassifier for intelligent crowd handling
                             obstacleClassifier?.processLidarScan(detectedPeopleX, detectedPeopleY)
+                        } else {
+                            // Still update fusion with empty depth (important for ghost detection)
+                            Log.d("PEOPLE_DEBUG", "UP_CAMERA_POINTS: ${px.size} pts but no people clusters (depth clear)")
                         }
                     } else {
                         Log.d("PEOPLE_DEBUG", "UP_CAMERA_POINTS: No px/py arrays. Raw: ${msg.toString().take(300)}")

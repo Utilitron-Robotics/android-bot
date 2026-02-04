@@ -28,11 +28,14 @@ class DepthPeopleDetector {
         private const val MIN_HEIGHT = 0.5   // Filter out floor
         private const val MAX_HEIGHT = 2.0   // Filter out ceiling
 
-        // Clustering parameters
-        private const val CLUSTER_DISTANCE = 0.5  // Max distance between points in cluster (relaxed)
-        private const val MIN_CLUSTER_POINTS = 5  // Minimum points to be a person (lowered for sparse depth data)
-        private const val MIN_CLUSTER_WIDTH = 0.3 // Minimum human width
-        private const val MAX_CLUSTER_WIDTH = 1.2 // Maximum human width
+        // Clustering parameters - TIGHTENED to reduce ghosting
+        private const val CLUSTER_DISTANCE = 0.35  // Max distance between points in cluster (tighter = less ghosting)
+        private const val MIN_CLUSTER_POINTS = 8   // Minimum points to be a person (higher = more evidence required)
+        private const val MIN_CLUSTER_WIDTH = 0.25 // Minimum human width (allow slim profiles)
+        private const val MAX_CLUSTER_WIDTH = 1.2  // Maximum human width
+
+        // Cross-section validation - reject suspiciously thin clusters (likely reflections)
+        private const val MIN_CROSS_SECTION_RATIO = 0.15  // min(width,depth)/max(width,depth) - 0.15 = very elongated allowed
 
         // Rate limiting
         private const val MIN_PROCESS_INTERVAL_MS = 100 // Don't process faster than 10Hz
@@ -88,12 +91,26 @@ class DepthPeopleDetector {
         val clusters = clusterPoints(points2D)
         Log.d(TAG, "Found ${clusters.size} clusters")
 
-        // Step 4: Filter clusters by human size
+        // Step 4: Filter clusters by human size and cross-section
         val people = clusters.filter { cluster ->
             val width = cluster.maxOf { it.first } - cluster.minOf { it.first }
             val depth = cluster.maxOf { it.second } - cluster.minOf { it.second }
             val size = maxOf(width, depth)
-            size in MIN_CLUSTER_WIDTH..MAX_CLUSTER_WIDTH && cluster.size >= MIN_CLUSTER_POINTS
+            val minDim = minOf(width, depth)
+
+            // Cross-section ratio: thin line-like clusters are likely reflections/ghosts
+            val crossSectionRatio = if (size > 0.01) minDim / size else 0.0
+
+            val validSize = size in MIN_CLUSTER_WIDTH..MAX_CLUSTER_WIDTH
+            val validCrossSection = crossSectionRatio >= MIN_CROSS_SECTION_RATIO || minDim >= 0.15
+            val validPoints = cluster.size >= MIN_CLUSTER_POINTS
+
+            if (!validCrossSection && cluster.size >= MIN_CLUSTER_POINTS) {
+                Log.d(TAG, "Rejected thin cluster: ${cluster.size} pts, " +
+                          "size=%.2f, ratio=%.2f (likely ghost/reflection)".format(size, crossSectionRatio))
+            }
+
+            validSize && validCrossSection && validPoints
         }.map { cluster ->
             val centerX = cluster.map { it.first }.average()
             val centerY = cluster.map { it.second }.average()
@@ -140,7 +157,21 @@ class DepthPeopleDetector {
             val width = cluster.maxOf { it.first } - cluster.minOf { it.first }
             val depth = cluster.maxOf { it.second } - cluster.minOf { it.second }
             val size = maxOf(width, depth)
-            size in MIN_CLUSTER_WIDTH..MAX_CLUSTER_WIDTH && cluster.size >= MIN_CLUSTER_POINTS
+            val minDim = minOf(width, depth)
+
+            // Cross-section ratio: thin line-like clusters are likely reflections/ghosts
+            val crossSectionRatio = if (size > 0.01) minDim / size else 0.0
+
+            val validSize = size in MIN_CLUSTER_WIDTH..MAX_CLUSTER_WIDTH
+            val validCrossSection = crossSectionRatio >= MIN_CROSS_SECTION_RATIO || minDim >= 0.15
+            val validPoints = cluster.size >= MIN_CLUSTER_POINTS
+
+            if (!validCrossSection && cluster.size >= MIN_CLUSTER_POINTS) {
+                Log.d(TAG, "Rejected thin 2D cluster: ${cluster.size} pts, " +
+                          "size=%.2f, ratio=%.2f (likely ghost)".format(size, crossSectionRatio))
+            }
+
+            validSize && validCrossSection && validPoints
         }.map { cluster ->
             DetectedPerson(
                 x = cluster.map { it.first }.average(),
@@ -154,7 +185,7 @@ class DepthPeopleDetector {
             )
         }.also {
             if (it.isNotEmpty()) {
-                Log.i(TAG, "Detected ${it.size} people from 2D points")
+                Log.i(TAG, "Detected ${it.size} people from 2D points (tighter clustering)")
             }
         }
     }
