@@ -428,6 +428,9 @@ class BufferClient extends ChangeNotifier {
   DateTime? _lastHeartbeat;
   DateTime? get lastHeartbeat => _lastHeartbeat;
 
+  /// True if we've received at least one heartbeat from relay (synced)
+  bool get isSynced => _lastHeartbeat != null;
+
   // Track the heartbeat rhythm - measured interval between beats
   Duration _expectedInterval = const Duration(milliseconds: 500); // Default, will adapt
   int _heartbeatCount = 0;

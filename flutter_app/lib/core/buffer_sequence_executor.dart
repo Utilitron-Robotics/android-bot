@@ -556,6 +556,23 @@ class BufferSequenceExecutor extends ChangeNotifier {
       return;
     }
 
+    // SYNC GATE: Wait for relay sync before sending commands
+    if (!_bufferClient.isSynced) {
+      debugPrint('BufferSequenceExecutor: Waiting for relay sync before starting...');
+      // Wait up to 3 seconds for first heartbeat
+      for (int i = 0; i < 30; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (_bufferClient.isSynced) {
+          debugPrint('BufferSequenceExecutor: Relay synced after ${(i + 1) * 100}ms');
+          break;
+        }
+      }
+      if (!_bufferClient.isSynced) {
+        debugPrint('BufferSequenceExecutor: ✗ Relay sync timeout - aborting start');
+        return;
+      }
+    }
+
     debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
     debugPrint('BufferSequenceExecutor: START SEQUENCE "${sequence.name}"');
     debugPrint('BufferSequenceExecutor: ══════════════════════════════════════');
