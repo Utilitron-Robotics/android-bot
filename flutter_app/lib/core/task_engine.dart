@@ -662,10 +662,10 @@ class TaskEngine extends ChangeNotifier {
     _isExecuting = true;
     notifyListeners();
 
-    // Announce arrival first if enabled
+    // Announce arrival first if enabled — fire-and-forget,
+    // relay handles TTS timing and signals completion
     if (mode.announceArrival && _callback != null) {
       _callback!.onSpeak('Arrived at $waypoint');
-      await Future.delayed(const Duration(milliseconds: 500));
     }
 
     // Execute steps
@@ -690,16 +690,11 @@ class TaskEngine extends ChangeNotifier {
 
     switch (step.action) {
       case TaskAction.speak:
+        // Fire-and-forget — relay handles TTS and signals completion.
+        // No fake duration guessing. Advance to next step immediately.
         _callback?.onSpeak(step.data);
-        if (step.parallel && nextStep != null) {
-          _currentStepIndex++;
-          _executeNextStep(); // Run next in parallel
-        } else {
-          await Future.delayed(
-              const Duration(seconds: 2)); // Rough TTS duration
-          _currentStepIndex++;
-          _executeNextStep();
-        }
+        _currentStepIndex++;
+        _executeNextStep();
         break;
 
       case TaskAction.display:

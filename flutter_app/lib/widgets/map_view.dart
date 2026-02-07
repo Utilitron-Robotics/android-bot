@@ -591,14 +591,13 @@ class _MapViewState extends State<MapView> {
       _error = null;
     });
 
-    // Tell relay to refresh its map subscription
+    // Tell relay to refresh its map subscription, then fetch immediately.
+    // The regular 5s poll timer will pick up the fresh data if the first
+    // fetch arrives before the relay has it ready.
     http.post(Uri.parse('$_httpBaseUrl/map/refresh')).then((_) {
-      // Wait a bit for the relay to get fresh map, then fetch
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          _fetchMapViaHttp();
-        }
-      });
+      if (mounted) {
+        _fetchMapViaHttp();
+      }
     }).catchError((e) {
       debugPrint('MapView: Refresh request failed: $e');
       if (mounted) {

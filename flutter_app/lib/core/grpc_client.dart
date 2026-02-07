@@ -156,10 +156,7 @@ class GrpcRobotClient extends ChangeNotifier {
           onDone: _handleStreamDone,
         );
 
-        // Wait a moment for stream to establish
-        await Future.delayed(const Duration(milliseconds: 100));
-
-        // Send initial heartbeat request
+        // Send heartbeat immediately — stream is ready after listen()
         _sendHeartbeatRequest();
 
         // Start periodic heartbeat

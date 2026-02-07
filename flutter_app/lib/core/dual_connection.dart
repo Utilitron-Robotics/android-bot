@@ -298,12 +298,22 @@ class DualConnectionManager extends ChangeNotifier {
     _scheduleReconnect();
   }
 
+  int _reconnectAttempts = 0;
+
   void _scheduleReconnect() {
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 3), () {
+    // Exponential backoff: 1s, 2s, 4s, 8s, ... capped at 30s
+    final delayMs = (1000 * (1 << _reconnectAttempts.clamp(0, 4))).clamp(1000, 30000);
+    _reconnectAttempts++;
+    debugPrint('DualConnection: Reconnect in ${delayMs}ms (attempt $_reconnectAttempts)');
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
       if (_state != DualConnectionState.connected) {
         debugPrint('DualConnection: Attempting reconnect...');
-        connect();
+        connect().then((_) {
+          if (_state == DualConnectionState.connected) {
+            _reconnectAttempts = 0; // Reset on success
+          }
+        });
       }
     });
   }
@@ -314,9 +324,8 @@ class DualConnectionManager extends ChangeNotifier {
     send(ChassisProtocol.advertiseCancelGoal());
     send(ChassisProtocol.advertiseSoftStop());
 
-    await Future.delayed(const Duration(milliseconds: 200));
-
-    // Subscribe to status topics
+    // Subscribe to status topics — no delay needed,
+    // rosbridge processes messages sequentially
     send(ChassisProtocol.subscribeRobotStatus());
     send(ChassisProtocol.subscribeRobotPose());
     send(ChassisProtocol.subscribeNaviStatus());

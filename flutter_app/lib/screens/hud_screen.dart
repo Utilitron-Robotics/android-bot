@@ -381,21 +381,19 @@ class _HudScreenState extends State<HudScreen>
       } else {
         // No tour running: full reconnect is safe
         debugPrint('HUD: Connection STALE (no tour) - full reconnect (WebSocket + gRPC)...');
+        // Disconnect completes synchronously — connect immediately after.
+        // No stabilization delay needed; onOpen IS the readiness signal.
         if (kIsWeb) {
           robot.disconnect();
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) robot.connect(savedUrl);
-          });
+          if (mounted) robot.connect(savedUrl);
         } else {
           // Full reconnect: WebSocket (heartbeats) + gRPC (commands)
           robot.disconnect();
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted) {
-              final wsUrl = 'ws://$host:8766';
-              robot.connectWithDisplayUrl(wsUrl, host);
-              context.read<UnifiedTransportManager>().connectToHost(host);
-            }
-          });
+          if (mounted) {
+            final wsUrl = 'ws://$host:8766';
+            robot.connectWithDisplayUrl(wsUrl, host);
+            context.read<UnifiedTransportManager>().connectToHost(host);
+          }
         }
       }
     } else {
@@ -407,24 +405,25 @@ class _HudScreenState extends State<HudScreen>
 
   /// Monitor heartbeat after reconnection to detect if button_standby was
   /// completed while disconnected (visitor pressed START TOUR on tablet).
+  /// Uses ChangeNotifier listener instead of Timer.periodic polling.
   void _monitorButtonStandbyRecovery(
       BufferSequenceExecutor executor, BufferClient client) {
     debugPrint('HUD: Monitoring for button_standby recovery after reconnect...');
-    int checks = 0;
-    const maxChecks = 20; // 10 seconds max
-    Timer.periodic(const Duration(milliseconds: 500), (timer) {
-      checks++;
-      if (!mounted || checks > maxChecks) {
-        timer.cancel();
-        if (checks > maxChecks) {
-          debugPrint('HUD: Button standby recovery timeout - no heartbeat received');
-        }
+
+    // Safety timeout — if no heartbeat arrives within 10s, give up
+    Timer? timeout;
+    late void Function() listener;
+
+    listener = () {
+      if (!mounted) {
+        client.removeListener(listener);
+        timeout?.cancel();
         return;
       }
-      // Once we get a heartbeat (no longer stale), the BufferSequenceExecutor's
-      // heartbeat handler will auto-detect if button was pressed while disconnected
+      // BufferClient notifies on every heartbeat — check if no longer stale
       if (!client.isStale) {
-        timer.cancel();
+        client.removeListener(listener);
+        timeout?.cancel();
         final state = client.state;
         final currentType = state.current?.type;
         debugPrint('HUD: Reconnected! Buffer: current=$currentType, pending=${state.pendingCount}');
@@ -434,6 +433,12 @@ class _HudScreenState extends State<HudScreen>
           debugPrint('HUD: button_standby still active - waiting for visitor');
         }
       }
+    };
+
+    client.addListener(listener);
+    timeout = Timer(const Duration(seconds: 10), () {
+      client.removeListener(listener);
+      debugPrint('HUD: Button standby recovery timeout - no heartbeat received');
     });
   }
 
