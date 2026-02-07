@@ -367,13 +367,11 @@ class MqttTransport implements RobotTransport {
   }
 
   Future<void> _simulateConnection(String brokerUrl) async {
-    // Simulate connection delay
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    // Simulate potential failure
+    // Validate connection parameters
     if (brokerUrl.isEmpty) {
       throw Exception('Invalid broker URL');
     }
+    // In real implementation, MQTT client connects here
   }
 
   void _startKeepalive() {

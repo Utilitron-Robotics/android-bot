@@ -1317,16 +1317,15 @@ class SequenceManager extends ChangeNotifier {
     }
   }
 
-  /// Clean up SequenceTaskMode after completion
+  /// Clean up SequenceTaskMode after completion — resets immediately.
+  /// Next startSequence() call will set up fresh state.
   void _cleanupSequenceTask() {
     _activeSequenceTask?.removeListener(_onSequenceTaskChanged);
     _activeSequenceTask = null;
-    Future.delayed(const Duration(seconds: 3), () {
-      _currentSequence = null;
-      _currentStopIndex = -1;
-      _status = SequenceStatus.idle;
-      notifyListeners();
-    });
+    _currentSequence = null;
+    _currentStopIndex = -1;
+    _status = SequenceStatus.idle;
+    notifyListeners();
   }
 
   /// Called when robot arrives at a waypoint
@@ -1563,13 +1562,12 @@ class SequenceManager extends ChangeNotifier {
     _callback?.onSequenceCompleted();
     notifyListeners();
 
-    // Reset after a delay
-    Future.delayed(const Duration(seconds: 3), () {
-      _currentSequence = null;
-      _currentStopIndex = -1;
-      _status = SequenceStatus.idle;
-      notifyListeners();
-    });
+    // Reset immediately — next startSequence() sets up fresh state.
+    // UI shows completion via onSequenceCompleted() callback.
+    _currentSequence = null;
+    _currentStopIndex = -1;
+    _status = SequenceStatus.idle;
+    notifyListeners();
   }
 
   /// Stop the current tour

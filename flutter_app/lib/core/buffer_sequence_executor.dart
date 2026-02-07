@@ -912,14 +912,13 @@ class BufferSequenceExecutor extends ChangeNotifier {
 
     notifyListeners();
 
-    // Reset after delay
-    Future.delayed(const Duration(seconds: 3), () {
-      _currentSequence = null;
-      _currentStopIndex = -1;
-      _status = SequenceExecutorStatus.idle;
-      _needsStateRestore = true; // Ready to restore on next reconnect
-      notifyListeners();
-    });
+    // Reset immediately — next startSequence() sets up fresh state.
+    // UI shows completion via onSequenceCompleted() callback.
+    _currentSequence = null;
+    _currentStopIndex = -1;
+    _status = SequenceExecutorStatus.idle;
+    _needsStateRestore = true; // Ready to restore on next reconnect
+    notifyListeners();
   }
 
   void _failSequence(String reason) {

@@ -107,9 +107,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     // Only enable explicitly for motion-triggered tours (greeting visitors)
     private var obstacleIntelligenceEnabled = false  // OFF by default
     private var obstacleAnnouncementsEnabled = false  // TTS announcements OFF
-    private var lastObstacleAnnouncement: Long = 0
     private var lastObstacleType: ObstacleType? = null
-    private val OBSTACLE_ANNOUNCE_COOLDOWN = 5000L  // 5 seconds between same-type announcements
+    private var obstacleAnnouncementTtsComplete: CompletableDeferred<Unit>? = null  // Driven by TTS completion, not timer
 
     lateinit var robotClient: RobotWebSocketClient
         private set
@@ -207,30 +206,48 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     }
 
     /**
-     * Start periodic fleet config sync
+     * Start fleet sync — reports on robot status changes, not blind polling.
+     * Fetches config once, then syncs status when it actually changes.
      */
     private fun startFleetSync() {
         fleetSyncJob?.cancel()
         fleetSyncJob = scope.launch {
-            while (isActive) {
-                delay(30_000) // 30 seconds
-                try {
-                    fleetClient.fetchConfig()
+            // Initial config fetch
+            try { fleetClient.fetchConfig() } catch (e: Exception) {
+                Log.w(TAG, "Initial fleet config fetch failed: ${e.message}")
+            }
 
-                    // Update robot status in cloud if registered
-                    if (fleetClient.robotId.isNotEmpty() && ::robotClient.isInitialized) {
-                        val status = robotClient.robotStatus.value
-                        if (status != null) {
-                            fleetClient.updateStatus(
-                                battery = status.battery,
-                                navStatus = status.navStatus,
-                                currentGoal = status.currentGoalName,
-                                estop = status.softEstop || status.hardEstop
-                            )
-                        }
+            // Wait for robotClient to be initialized, then collect status changes
+            while (!::robotClient.isInitialized && isActive) { delay(100) }
+            if (!isActive) return@launch
+
+            var lastReportedNavStatus = -1
+            var lastReportedBattery = -1
+            var lastReportedEstop = false
+
+            robotClient.robotStatus.collect { status ->
+                if (status == null) return@collect
+                if (fleetClient.robotId.isEmpty()) return@collect
+
+                // Only report when something actually changed
+                val changed = status.navStatus != lastReportedNavStatus ||
+                              status.battery != lastReportedBattery ||
+                              (status.softEstop || status.hardEstop) != lastReportedEstop
+
+                if (changed) {
+                    try {
+                        fleetClient.updateStatus(
+                            battery = status.battery,
+                            navStatus = status.navStatus,
+                            currentGoal = status.currentGoalName,
+                            estop = status.softEstop || status.hardEstop
+                        )
+                        lastReportedNavStatus = status.navStatus
+                        lastReportedBattery = status.battery
+                        lastReportedEstop = status.softEstop || status.hardEstop
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Fleet status sync failed: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Fleet sync failed: ${e.message}")
                 }
             }
         }
@@ -746,21 +763,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         // Only announce for MOVING obstacles (walls don't move)
         if (!classification.isMoving) return
 
-        // Check cooldown to avoid spamming announcements
-        // Use TWO cooldowns:
-        // 1. Short cooldown for ANY announcement (prevents rapid fire)
-        // 2. Longer cooldown for same-type (avoids repeating the same thing)
-        val now = System.currentTimeMillis()
-        val timeSinceLastAnnouncement = now - lastObstacleAnnouncement
-
-        // Always wait at least 3 seconds between ANY announcements
-        if (timeSinceLastAnnouncement < 3000L) {
-            return
-        }
-
-        // Wait 5 seconds before repeating same type
-        if (classification.type == lastObstacleType && timeSinceLastAnnouncement < OBSTACLE_ANNOUNCE_COOLDOWN) {
-            return
+        // Don't announce if previous announcement is still speaking
+        // Driven by TTS completion signal, not arbitrary timer
+        obstacleAnnouncementTtsComplete?.let { prev ->
+            if (!prev.isCompleted) return  // Still speaking — don't stack announcements
         }
 
         // Determine announcement based on type
@@ -803,11 +809,12 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             SuggestedAction.NONE -> null
         }
 
-        // Make announcement if we have one
+        // Make announcement if we have one — track TTS completion for debounce
         if (announcement != null) {
-            lastObstacleAnnouncement = now
             lastObstacleType = classification.type
-            speak(announcement)
+            val ttsComplete = CompletableDeferred<Unit>()
+            obstacleAnnouncementTtsComplete = ttsComplete
+            speak(announcement) { ttsComplete.complete(Unit) }
         }
     }
 
@@ -1013,9 +1020,10 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
     }
 
     /**
-     * Generate a pure tone using AudioTrack - works on all devices
+     * Generate a pure tone using AudioTrack - works on all devices.
+     * Suspend function: waits for playback completion via AudioTrack notification (no Thread.sleep).
      */
-    private fun generateTone(frequencyHz: Double, durationMs: Int) {
+    private suspend fun generateTone(frequencyHz: Double, durationMs: Int) {
         val sampleRate = 44100
         val numSamples = (sampleRate * durationMs / 1000.0).toInt()
         val samples = ShortArray(numSamples)
@@ -1045,6 +1053,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             android.media.AudioFormat.ENCODING_PCM_16BIT
         )
 
+        val playbackComplete = CompletableDeferred<Unit>()
+
         val audioTrack = android.media.AudioTrack.Builder()
             .setAudioAttributes(
                 android.media.AudioAttributes.Builder()
@@ -1063,11 +1073,21 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
             .setTransferMode(android.media.AudioTrack.MODE_STATIC)
             .build()
 
+        // Use playback position notification to know when playback is done
+        audioTrack.setNotificationMarkerPosition(numSamples)
+        audioTrack.setPlaybackPositionUpdateListener(object : android.media.AudioTrack.OnPlaybackPositionUpdateListener {
+            override fun onMarkerReached(track: android.media.AudioTrack?) {
+                playbackComplete.complete(Unit)
+            }
+            override fun onPeriodicNotification(track: android.media.AudioTrack?) {}
+        })
+
         audioTrack.write(samples, 0, samples.size)
         audioTrack.play()
 
-        // Wait for playback to complete
-        Thread.sleep(durationMs.toLong() + 50)
+        // Wait for playback completion signal (not a timer)
+        withTimeoutOrNull(durationMs.toLong() + 500) { playbackComplete.await() }
+
         audioTrack.stop()
         audioTrack.release()
     }
@@ -1140,13 +1160,22 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
 
                 Log.i(TAG, "🔊 EMERGENCY ALARM ACTIVE - CYCLING SIREN + VOICE")
 
-                // Cycle: siren for 3 seconds, then Life Alert voice, repeat
+                // Cycle: siren until completion marker, then Life Alert voice, repeat
                 var cycleCount = 0
+                val loopCount = 7  // 7 loops of the siren cycle
                 while (isActive && estopAlarmTrack != null) {
-                    // Play siren for ~3 seconds (looping)
-                    track.setLoopPoints(0, numSamples, 7)  // 7 loops ≈ 3.2 seconds
+                    // Play siren with completion notification
+                    val sirenComplete = CompletableDeferred<Unit>()
+                    track.setNotificationMarkerPosition(numSamples * (loopCount + 1))
+                    track.setPlaybackPositionUpdateListener(object : android.media.AudioTrack.OnPlaybackPositionUpdateListener {
+                        override fun onMarkerReached(t: android.media.AudioTrack?) { sirenComplete.complete(Unit) }
+                        override fun onPeriodicNotification(t: android.media.AudioTrack?) {}
+                    })
+                    track.setLoopPoints(0, numSamples, loopCount)
                     track.play()
-                    delay(3200)
+
+                    // Wait for siren to finish playing (signal-driven, not timer)
+                    withTimeoutOrNull(10_000) { sirenComplete.await() }
                     track.pause()
                     track.flush()
 
@@ -1161,7 +1190,7 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                     }
                     cycleCount++
 
-                    // Use main thread for TTS
+                    // Use main thread for TTS — wait for completion
                     val ttsComplete = CompletableDeferred<Unit>()
                     withContext(Dispatchers.Main) {
                         cloudTts?.speak(helpMessage) {
@@ -1169,11 +1198,8 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
                         } ?: ttsComplete.complete(Unit)
                     }
 
-                    // Wait for TTS to finish (with timeout)
-                    withTimeoutOrNull(5000) { ttsComplete.await() }
-
-                    // Small pause before siren restarts
-                    delay(300)
+                    // Wait for TTS to finish (driven by completion callback)
+                    withTimeoutOrNull(10_000) { ttsComplete.await() }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start emergency alarm: ${e.message}", e)

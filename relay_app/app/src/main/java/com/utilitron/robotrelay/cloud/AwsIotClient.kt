@@ -145,24 +145,26 @@ class AwsIotClient(
     }
 
     /**
-     * Update robot status in the cloud
+     * Update robot status — reports to cloud immediately on change (no polling).
+     * Deduplicates by comparing with last reported state.
      */
     fun updateStatus(status: RobotCloudStatus) {
+        val changed = status != lastRobotStatus
         lastRobotStatus = status
+
+        if (changed && isEnabled) {
+            scope.launch {
+                reportStatus(status)
+            }
+        }
     }
 
     /**
-     * Start periodic status reporting
+     * Start status reporting — no-op, reporting is now change-driven via updateStatus()
      */
     private fun startStatusReporting() {
-        statusJob = scope.launch {
-            while (isEnabled) {
-                lastRobotStatus?.let { status ->
-                    reportStatus(status)
-                }
-                delay(5000) // Report every 5 seconds
-            }
-        }
+        // Status is reported on change via updateStatus(), not on a timer
+        Log.i(TAG, "Status reporting: change-driven (no polling)")
     }
 
     /**
@@ -194,7 +196,9 @@ class AwsIotClient(
     }
 
     /**
-     * Start polling for commands (fallback when WebSocket unavailable)
+     * Start polling for commands (REST fallback — replace with WebSocket/MQTT push when available).
+     * This is the one legitimate polling loop: the cloud API has no push mechanism yet.
+     * Uses the heartbeat interval pattern since there's no other signal to wait for.
      */
     private fun startCommandPolling() {
         scope.launch {
@@ -205,7 +209,7 @@ class AwsIotClient(
                 } catch (e: Exception) {
                     Log.w(TAG, "Command poll failed: ${e.message}")
                 }
-                delay(2000) // Poll every 2 seconds
+                delay(2000)  // Heartbeat-style interval — no push signal available from REST API
             }
         }
     }
