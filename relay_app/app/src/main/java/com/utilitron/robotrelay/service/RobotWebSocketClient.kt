@@ -97,6 +97,7 @@ class RobotWebSocketClient(
     // Rate limit costmap logging (it's HUGE - 40k+ cells at 2Hz)
     private var lastCostmapLogTime: Long = 0
     private var lastPeopleArrayLogTime: Long = 0
+    private var ultrasonicLogCounter: Int = 0
 
     // === HUMAN DETECTION TOPIC DISCOVERY ===
     // Log ANY topic that might be related to people/human detection
@@ -176,10 +177,8 @@ class RobotWebSocketClient(
             Log.i(TAG, "Connected to robot at $robotIp:$robotPort")
             _connectionState.value = ConnectionState.CONNECTED
             isConnecting = false
-            scope.launch {
-                delay(500)
-                setupSubscriptions()
-            }
+            // onOpen IS the readiness signal — send subscriptions immediately
+            setupSubscriptions()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -435,25 +434,24 @@ class RobotWebSocketClient(
 
             val unsubMsg = ChassisProtocol.unsubscribe(ChassisProtocol.TOPIC_MAP, "get_map")
             send(unsubMsg)
-            delay(300)
 
+            // Clear cache and resubscribe immediately — rosbridge handles unsub/resub ordering
             _cachedMapMessage = null
             val subMsg = ChassisProtocol.subscribeMap()
             val sent = send(subMsg)
             Log.d(TAG, ">>> MAP REFRESH: Sent subscribe (success=$sent)")
 
-            delay(2000)
-            if (_connectionState.value == ConnectionState.CONNECTED && _cachedMapMessage == null) {
-                Log.d(TAG, ">>> MAP REFRESH: No map from subscription, retrying...")
-                send(subMsg)
-
-                delay(2000)
-                if (_connectionState.value == ConnectionState.CONNECTED && _cachedMapMessage == null) {
-                    // Fallback: call /static_map service (works for latched topics)
-                    Log.d(TAG, ">>> MAP REFRESH: Subscription failed, calling /static_map service")
-                    val serviceCall = """{"op":"call_service","id":"get_static_map","service":"/static_map","type":"nav_msgs/GetMap"}"""
-                    send(serviceCall)
+            // Wait for map data to arrive (signal-driven: check cachedMapMessage)
+            val mapReceived = withTimeoutOrNull(5000) {
+                while (_cachedMapMessage == null && _connectionState.value == ConnectionState.CONNECTED) {
+                    delay(100)  // Brief check — waiting for onMessage to populate cache
                 }
+            }
+
+            if (_cachedMapMessage == null && _connectionState.value == ConnectionState.CONNECTED) {
+                Log.d(TAG, ">>> MAP REFRESH: No map from subscription, trying /static_map service")
+                val serviceCall = """{"op":"call_service","id":"get_static_map","service":"/static_map","type":"nav_msgs/GetMap"}"""
+                send(serviceCall)
             }
         }
     }
@@ -523,8 +521,8 @@ class RobotWebSocketClient(
                     }
                     val ultrasonicMeters = ultrasonicMm / 1000.0
 
-                    // Log ultrasonic data periodically for debugging
-                    if (System.currentTimeMillis() % 2000 < 100) {  // ~Every 2 seconds
+                    // Log ultrasonic data periodically for debugging (~every 20 messages)
+                    if (ultrasonicLogCounter++ % 20 == 0) {
                         Log.d(TAG, "Ultrasonic: ${ultrasonicMm}mm (${String.format("%.2f", ultrasonicMeters)}m)")
                     }
 
@@ -848,11 +846,19 @@ class RobotWebSocketClient(
         }
     }
 
+    private var adaptivePolicy: AdaptiveConnectionPolicy? = null
+
+    fun setAdaptivePolicy(policy: AdaptiveConnectionPolicy) {
+        adaptivePolicy = policy
+    }
+
     private fun scheduleReconnect() {
         scope.launch {
-            delay(RECONNECT_DELAY_MS)
+            // Use adaptive policy if available, otherwise fall back to constant
+            val delayMs = adaptivePolicy?.getRetryDelayMs() ?: RECONNECT_DELAY_MS
+            delay(delayMs)
             if (_connectionState.value != ConnectionState.CONNECTED) {
-                Log.i(TAG, "Attempting reconnect...")
+                Log.i(TAG, "Attempting reconnect (delay was ${delayMs}ms)...")
                 connect()
             }
         }

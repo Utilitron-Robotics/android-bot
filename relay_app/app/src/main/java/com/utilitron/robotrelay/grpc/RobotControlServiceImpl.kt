@@ -27,8 +27,7 @@ class RobotControlServiceImpl(
 
     companion object {
         private const val TAG = "RobotControlGRPC"
-        private const val HEARTBEAT_INTERVAL_MS = 1000L
-        private const val STREAM_STABILIZE_DELAY_MS = 100L
+        private const val HEARTBEAT_INTERVAL_MS = 1000L  // Heartbeat: the one allowed hardcoded interval
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -78,9 +77,8 @@ class RobotControlServiceImpl(
         }
         webRtcManagers[streamId] = webRtcManager
 
-        // Start heartbeat for this stream
+        // Start heartbeat for this stream — send first beat immediately
         val heartbeatJob = scope.launch {
-            delay(STREAM_STABILIZE_DELAY_MS)
             while (isActive && streamActive[streamId] == true) {
                 val heartbeat = buildHeartbeat()
                 val message = ServerMessage.newBuilder()

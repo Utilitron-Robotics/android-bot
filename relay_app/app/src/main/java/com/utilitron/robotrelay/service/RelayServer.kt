@@ -142,8 +142,7 @@ class RelayServer(
                 // Detect reconnection: was disconnected/error, now connected
                 if (isConnected && !lastRobotConnectedState) {
                     Log.i(TAG, ">>> Robot reconnected! Restarting message forwarder...")
-                    // Give robot time to establish subscriptions
-                    delay(1000)
+                    // Subscriptions are sent immediately on onOpen — forwarder can start now
                     startMessageForwarder()
                 }
 
@@ -208,10 +207,9 @@ class RelayServer(
                     Log.e(TAG, "Message forwarder error: ${t.javaClass.simpleName}: ${t.message}")
                     t.printStackTrace()
                 }
-                // Minimal delay before restart - speed is critical for safety
+                // Restart immediately — flow completion IS the signal
                 if (isActive && _isRunning.value) {
                     restartCount++
-                    delay(100)  // Reduced from 500ms for faster recovery
                 }
             }
             livenessJob.cancel()

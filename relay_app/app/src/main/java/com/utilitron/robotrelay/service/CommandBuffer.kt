@@ -7,8 +7,10 @@ import com.utilitron.robotrelay.core.HeartbeatData
 import com.utilitron.robotrelay.core.Messenger
 import com.utilitron.robotrelay.core.ProcessingType
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import java.util.*
 
 /**
@@ -37,6 +39,16 @@ class CommandBuffer(
         private const val TAG = "CommandBuffer"
     }
 
+    /** Navigation signals from onNavStatus — replaces polling loop */
+    sealed class NavSignal {
+        data class Moving(val goalName: String) : NavSignal()
+        data class Arrived(val goalName: String) : NavSignal()
+        data class Failed(val goalName: String) : NavSignal()
+        data class Cancelled(val goalName: String) : NavSignal()
+        object StuckAnnouncement : NavSignal()
+        object RecoveryTriggered : NavSignal()
+    }
+
     private val gson = Gson()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -54,6 +66,11 @@ class CommandBuffer(
     // State
     private val _paused = MutableStateFlow(false)
     val paused: StateFlow<Boolean> = _paused
+
+    // Signal channels — replace polling loops with event-driven waits
+    private val commandAvailable = Channel<Unit>(Channel.CONFLATED)  // Signals when commands are loaded
+    private val navSignal = Channel<NavSignal>(Channel.CONFLATED)     // Signals nav state changes from onNavStatus
+    private var externalCompletion: CompletableDeferred<Unit>? = null // Signals when command is completed externally
 
     private var executionJob: Job? = null
     private var heartbeatJob: Job? = null
@@ -178,6 +195,7 @@ class CommandBuffer(
         }
 
         Log.i(TAG, "Loaded ${commands.size} commands, loopStartIndex=$loopStartIndex")
+        commandAvailable.trySend(Unit)  // Signal execution loop that commands are ready
         sendStatusUpdate()
     }
 
@@ -276,28 +294,23 @@ class CommandBuffer(
                     if (!hasStartedMoving) {
                         Log.i(TAG, "Robot started moving toward $pendingNavWaypoint")
                         hasStartedMoving = true
+                        navSignal.trySend(NavSignal.Moving(goalName))
                     }
                 } else {
                     Log.d(TAG, "Robot moving but goal='$goalName' doesn't match pending='$pendingNavWaypoint'")
                 }
             }
             603 -> { // Arrived
-                // Log EVERYTHING to debug false arrivals
                 val currentPos = robotClient.robotStatus.value?.let { "(${it.x}, ${it.y})" } ?: "unknown"
                 Log.i(TAG, ">>> 603 ARRIVAL: robot says arrived at '$goalName', we wanted '$pendingNavWaypoint', pos=$currentPos")
 
-                // BUG FIX: Only accept arrival if goalName matches what we're waiting for
-                // Old logic was broken: `goalName == pendingNavWaypoint || pendingNavWaypoint != null`
-                // That would ALWAYS accept 603 if we were navigating to anything!
                 val isOurArrival = pendingNavWaypoint != null &&
                                    (goalName == pendingNavWaypoint || goalName.isNullOrEmpty())
 
                 if (isOurArrival) {
                     Log.i(TAG, "Nav reported arrival at $goalName, verifying robot has stopped...")
-                    // Don't complete immediately - the robot may still be maneuvering
-                    // The executeCommand loop will verify robot has actually stopped
-                    // by checking velocity before completing the navigation
                     navArrivalPending = true
+                    navSignal.trySend(NavSignal.Arrived(goalName))
                 } else {
                     Log.w(TAG, ">>> IGNORING 603: goalName='$goalName' doesn't match pendingNavWaypoint='$pendingNavWaypoint'")
                 }
@@ -306,12 +319,11 @@ class CommandBuffer(
                 if (recoveryAttempts < recoveryConfig.maxRecoveryAttempts) {
                     Log.i(TAG, "Path blocked to $pendingNavWaypoint - searching for escape route...")
                     triggerRecovery = true
+                    navSignal.trySend(NavSignal.RecoveryTriggered)
                 } else {
-                    // All attempts exhausted - set flag for nav loop to handle properly
-                    // Nav loop will await TTS+sound before completing command
                     Log.w(TAG, "Trapped! No escape route found after $recoveryAttempts attempts")
                     stuckAnnouncementPending = true
-                    // Don't complete command here - let nav loop do it after TTS+sound finish
+                    navSignal.trySend(NavSignal.StuckAnnouncement)
                 }
             }
             602 -> { // Cancelled
@@ -348,6 +360,7 @@ class CommandBuffer(
 
                 // All checks passed - this is a real cancellation of our current navigation
                 Log.i(TAG, "Nav cancelled to $pendingNavWaypoint (confirmed: robot was moving, goal matches)")
+                navSignal.trySend(NavSignal.Cancelled(goalName))
                 waitingForNavArrival = false
                 navArrivalPending = false
                 pendingNavWaypoint = null
@@ -444,14 +457,12 @@ class CommandBuffer(
         executionJob?.cancel()
         executionJob = scope.launch {
             while (isActive) {
-                // Wait if paused
-                while (_paused.value && isActive) {
-                    delay(100)
-                }
+                // Wait if paused — suspends until unpaused (no polling)
+                _paused.first { !it }
 
-                // Get next command by index (not poll from queue)
+                // Wait for commands to be available — suspends until loadCommands() signals
                 if (currentIndex < 0 || currentIndex >= commandList.size) {
-                    delay(100)  // Nothing to do or stopped, wait a bit
+                    commandAvailable.receive()  // Suspends until commands are loaded
                     continue
                 }
 
@@ -507,18 +518,20 @@ class CommandBuffer(
                 navArrivalPending = false
 
                 // Wait for nav completion or timeout
-                val timeout = cmd.timeoutMs ?: 120000L  // Increased to 2min to allow recovery attempts
+                val timeout = cmd.timeoutMs ?: 120000L
                 val deadline = System.currentTimeMillis() + timeout
                 var lastProgressTime = System.currentTimeMillis()
                 var lastPosition: Pair<Double, Double>? = null
-                var stoppedSince: Long? = null  // Track when robot stopped after 603
-                // Note: stuckThreshold now comes from recoveryConfig.stuckThresholdMs
+                var stoppedSince: Long? = null
 
                 while (waitingForNavArrival && System.currentTimeMillis() < deadline) {
-                    delay(100)
+                    // Wait for a nav signal or check progress on robot status changes
+                    // Uses withTimeoutOrNull so we still check progress periodically
+                    // when status changes arrive (position, velocity) without explicit nav signals
+                    val signal = withTimeoutOrNull(500) { navSignal.receive() }
 
                     // Check if stuck announcement is pending (604 exhausted all recovery attempts)
-                    if (stuckAnnouncementPending) {
+                    if (signal is NavSignal.StuckAnnouncement || stuckAnnouncementPending) {
                         stuckAnnouncementPending = false
                         Log.i(TAG, "Playing stuck announcement with TTS+sound...")
 
@@ -617,12 +630,9 @@ class CommandBuffer(
 
                         robotClient.cancelNavigation()
                         // Wait for navStatus to leave 601 so sendVelocity won't be blocked
-                        var waitMs = 0
-                        while (robotClient.robotStatus.value?.navStatus == 601 && waitMs < 2000) {
-                            delay(100)
-                            waitMs += 100
+                        withTimeoutOrNull(2000) {
+                            robotClient.robotStatus.first { it?.navStatus != 601 }
                         }
-                        delay(200)
 
                         if (recoveryConfig.announceRecovery) {
                             val ttsComplete = CompletableDeferred<Unit>()
@@ -668,7 +678,6 @@ class CommandBuffer(
                         // STEP 1: Back up
                         Log.i(TAG, "Backing up...")
                         smartVelocity(-recoveryConfig.backupSpeed, 0.0, recoveryConfig.backupDurationMs.toLong())
-                        delay(200)
 
                         // STEP 2: Spin to find clear direction
                         // CRITICAL: Spin at least 90 degrees BEFORE checking for clear!
@@ -696,7 +705,6 @@ class CommandBuffer(
                             }
                         }
                         robotClient.sendVelocity(0.0, 0.0)
-                        delay(200)
 
                         // STEP 3: Nudge forward if clear
                         if (foundClear) {
@@ -705,7 +713,13 @@ class CommandBuffer(
                         }
 
                         Log.i(TAG, "Recovery complete, retrying navigation to $waypoint")
-                        delay(300)
+                        // Wait for robot to confirm stopped before retrying nav
+                        withTimeoutOrNull(2000) {
+                            robotClient.robotStatus.first { status ->
+                                val vel = status?.velocity ?: listOf(0.0, 0.0)
+                                kotlin.math.abs(vel[0]) < 0.01 && kotlin.math.abs(vel.getOrElse(1) { 0.0 }) < 0.01
+                            }
+                        }
                         inRecovery = false  // Done with recovery, 602 can cancel again
                         robotClient.navigateToPoi(waypoint)
                         lastProgressTime = System.currentTimeMillis()
@@ -858,10 +872,8 @@ class CommandBuffer(
                     }
                 }
 
-                // Wait for person detected from /people_detected
-                while (currentCommand != null && !robotClient.peopleDetected.value) {
-                    delay(200)
-                }
+                // Wait for person detected — suspends until signal fires (no polling)
+                robotClient.peopleDetected.first { it || currentCommand == null }
 
                 if (currentCommand == null) {
                     Log.i(TAG, "Motion standby cancelled")
@@ -899,16 +911,14 @@ class CommandBuffer(
 
                 Log.i(TAG, "Entering button standby for sequence: $sequenceId, button: $buttonText")
 
-                // Wait for any obstacle avoidance messages to finish speaking
-                // This prevents the button from appearing while TTS is still active
-                var waitCount = 0
-                while (taskExecutor?.isTtsSpeaking() == true && waitCount < 20) {
+                // Wait for any active TTS to finish before showing button
+                if (taskExecutor?.isTtsSpeaking() == true) {
                     Log.i(TAG, "Waiting for TTS to finish before showing button...")
-                    delay(250)
-                    waitCount++
-                }
-                if (waitCount > 0) {
-                    Log.i(TAG, "TTS finished after ${waitCount * 250}ms, showing button")
+                    // TTS completion is signaled via callback — wait with a safety timeout
+                    withTimeoutOrNull(5000) {
+                        while (taskExecutor.isTtsSpeaking()) { delay(100) }
+                    }
+                    Log.i(TAG, "TTS finished, showing button")
                 }
 
                 // Show standby display URL if provided (e.g., frontiertower.io)
@@ -923,55 +933,57 @@ class CommandBuffer(
                     taskExecutor?.notifyTourStandby(sequenceId, buttonText)
                 }
 
-                // Track when we last played the greeting (cooldown: 30 seconds)
-                var lastGreetingTime = 0L  // 0 = never greeted yet, so first detection can trigger
-                val greetingCooldownMs = 30_000L
-                val initialDelayMs = 1_500L  // Shorter delay - just enough for sensor to stabilize
-                var debugLogCounter = 0
+                // Track when we last played the greeting
+                var lastGreetingTime = 0L
+                var lastGreetingTtsComplete: CompletableDeferred<Unit>? = null
                 val startedAt = System.currentTimeMillis()
-
-                // RISING EDGE detection: only greet when detection transitions false→true
-                // This prevents greeting when someone is walking AWAY (hysteresis active)
                 var wasDetectedLastCycle = false
 
-                // Wait indefinitely until the command is completed by a button press or skipped
-                while (currentCommand != null) {
-                    delay(500)
+                // Wait for button press or command cancellation — collect peopleDetected for greeting
+                // Rising edge detection: only greet on false→true transition
+                val standbyJob = scope.launch {
+                    robotClient.peopleDetected.collect { peopleDetected ->
+                        if (currentCommand == null) return@collect
 
-                    val peopleDetected = robotClient.peopleDetected.value
-                    val timeSinceStart = System.currentTimeMillis() - startedAt
-                    val risingEdge = peopleDetected && !wasDetectedLastCycle
+                        val risingEdge = peopleDetected && !wasDetectedLastCycle
+                        wasDetectedLastCycle = peopleDetected
 
-                    // Log every 10 iterations (~5 seconds) for debugging
-                    debugLogCounter++
-                    if (debugLogCounter >= 10) {
-                        debugLogCounter = 0
-                        val timeSinceGreeting = if (lastGreetingTime > 0) System.currentTimeMillis() - lastGreetingTime else -1
-                        Log.d(TAG, "button_standby: detected=$peopleDetected, wasDetected=$wasDetectedLastCycle, lastGreeting=${timeSinceGreeting}ms ago")
-                    }
-
-                    // RISING EDGE: Greet when detection transitions from false→true
-                    // This triggers when someone APPROACHES, not when they're leaving
-                    if (risingEdge && timeSinceStart > initialDelayMs) {
-                        val now = System.currentTimeMillis()
-                        val cooldownRemaining = if (lastGreetingTime > 0) greetingCooldownMs - (now - lastGreetingTime) else -1
-
-                        if (lastGreetingTime == 0L || now - lastGreetingTime > greetingCooldownMs) {
-                            Log.i(TAG, "RISING EDGE: People approaching - playing greeting: $greetingText")
-                            lastGreetingTime = now
-                            withContext(Dispatchers.Main) {
-                                taskExecutor?.speakText(greetingText) { /* no-op callback */ }
+                        if (risingEdge) {
+                            // Wait for any previous greeting to finish before starting another
+                            lastGreetingTtsComplete?.let { prev ->
+                                if (!prev.isCompleted) return@collect  // Still speaking, skip
                             }
-                        } else {
-                            Log.d(TAG, "RISING EDGE: Detection but cooldown active (${cooldownRemaining/1000}s remaining)")
-                        }
-                    } else if (risingEdge && timeSinceStart <= initialDelayMs) {
-                        Log.d(TAG, "RISING EDGE: Detection during initial settling (${(initialDelayMs - timeSinceStart)/1000}s remaining)")
-                    }
 
-                    // Track for next cycle's rising edge detection
-                    wasDetectedLastCycle = peopleDetected
+                            val now = System.currentTimeMillis()
+                            val timeSinceStart = now - startedAt
+
+                            // Skip detections during initial sensor settling
+                            if (timeSinceStart <= 1_500L) {
+                                Log.d(TAG, "RISING EDGE: Detection during initial settling")
+                                return@collect
+                            }
+
+                            // Cooldown: don't re-greet until previous greeting TTS is done
+                            // (replaces hardcoded 30s cooldown — now driven by TTS completion)
+                            if (lastGreetingTime == 0L || lastGreetingTtsComplete?.isCompleted != false) {
+                                Log.i(TAG, "RISING EDGE: People approaching - playing greeting: $greetingText")
+                                lastGreetingTime = now
+                                val ttsComplete = CompletableDeferred<Unit>()
+                                lastGreetingTtsComplete = ttsComplete
+                                withContext(Dispatchers.Main) {
+                                    taskExecutor?.speakText(greetingText) { ttsComplete.complete(Unit) }
+                                }
+                            }
+                        }
+                    }
                 }
+
+                // Suspend until command is completed externally (button press, skip, clear)
+                // completeCommand() signals externalCompletion — no polling
+                val completion = CompletableDeferred<Unit>()
+                externalCompletion = completion
+                completion.await()
+                standbyJob.cancel()
 
                 // Command was completed externally (e.g., button press, skip, clear)
                 Log.i(TAG, "Exiting button standby for sequence: $sequenceId")
@@ -1074,8 +1086,10 @@ class CommandBuffer(
             completedHistory.removeAt(0)
         }
 
-        // Clear current
+        // Clear current and signal any waiting code
         currentCommand = null
+        externalCompletion?.complete(Unit)
+        externalCompletion = null
 
         // Send event
         val event = mapOf(
