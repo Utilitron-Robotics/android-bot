@@ -1,189 +1,110 @@
-# Relay App Timer Audit — Honest Assessment
+# Relay App — Required Timing Reference
 
-**Date**: 2026-02-07
-**Scope**: All 21 Kotlin source files in `relay_app/`
-**Directive**: Only the heartbeat's "is this missing?" check should be hardcoded. Everything else should be driven by task completion or signals.
-
----
-
-## The Code Already Has Event-Driven Infrastructure
-
-Before listing what needs to change, it's important to acknowledge what's already in place. The codebase is NOT structured around timers — it's structured around events, with timers sprinkled in where the author got lazy or ran out of time.
-
-### Patterns Already Established
-
-| Pattern | Where It's Used | Example |
-|---------|----------------|---------|
-| **CompletableDeferred** | CommandBuffer TTS, sounds, stuck announcement | `val ttsComplete = CompletableDeferred<Unit>()` ... `ttsComplete.await()` |
-| **StateFlow** | Paused state, connection state, robot status, people detection | `_paused = MutableStateFlow(false)` |
-| **Callbacks** | TTS completion, sound completion, tour start | `speakText(text) { completion.complete(Unit) }` |
-| **Flow.collect** | Robot status stream, connection state | `robotClient.robotStatus.collect { status -> ... }` |
-| **Drummer/Messenger** | Bidirectional heartbeat with adaptive rhythm learning | `Heartbeat.kt` — SINC-style rhythm detection via EMA |
-| **onNavStatus callback** | Navigation 601/602/603/604 events | Event-driven nav state machine in CommandBuffer |
-| **AdaptiveConnectionPolicy** | Reconnection with learned reliability | SharedPreferences-backed configurable retry policy |
-
-The heartbeat system (Drummer/Messenger) already does exactly what the directive says — it's the only place where a hardcoded interval is justified because there's no external signal to wait for. The Messenger even *learns* the rhythm via EMA and adapts its check interval.
+**Updated**: 2026-02-07 (post-fix)
+**Directive**: Only heartbeat "is this missing?" checks may use hardcoded intervals. Everything else is driven by task completion or signals.
 
 ---
 
-## What Actually Needs to Change
+## Category 1: Heartbeat / Liveness Checks (ALLOWED — no other signal exists)
 
-These are targeted replacements, not rewrites. Each one swaps a `delay(X)` for an event wait using a pattern already used elsewhere in the same file.
+| File | Timer | Value | Justification |
+|------|-------|-------|---------------|
+| `Heartbeat.kt:122` | Drummer interval | Configurable | Sends periodic heartbeat beats — no external signal to trigger |
+| `Heartbeat.kt:212` | Messenger check | Adaptive EMA | Checks if heartbeats are missing — learns rhythm via SINC-style EMA |
+| `RobotControlServiceImpl.kt:88` | `HEARTBEAT_INTERVAL_MS` | 1000ms | gRPC heartbeat to Flutter clients — no signal to trigger, must be periodic |
+| `RobotControlServiceImpl.kt:199` | `HEARTBEAT_INTERVAL_MS` | 1000ms | Same, for streamHeartbeat() RPC |
+| `GrpcServer.kt:32-33` | `KEEPALIVE_TIME_MS` / `KEEPALIVE_TIMEOUT_MS` | 10s / 5s | gRPC transport-level keepalive — protocol heartbeat |
+| `GrpcServer.kt:98` | Server health monitor | 30s | Checks if gRPC server process is still alive — liveness check |
+| `RelayServer.kt:171` | Forwarder liveness | 10s | Logs if message forwarder is still receiving — liveness check |
+| `RelayServer.kt:736` | `PING_INTERVAL_MS` | 10s | WebSocket keepalive ping — transport heartbeat |
+| `AwsIotClient.kt:210` | Command polling | 2s | REST API has no push — polling IS the only mechanism |
+| `RobotWebSocketClient.kt:859` | Reconnect delay | Adaptive | Uses AdaptiveConnectionPolicy learned interval, falls back to 1s constant |
+| `CommandBuffer.kt:382` | Buffer heartbeat | Configurable | Rhythm-based heartbeat to Flutter — interval set by Drummer |
 
-### CommandBuffer.kt — 5 targeted fixes
+## Category 2: Velocity Commands (REQUIRED — chassis protocol spec)
 
-**1. Pause wait (line 448-450)**
-```kotlin
-// CURRENT: Polls every 100ms
-while (_paused.value && isActive) { delay(100) }
+| File | Timer | Value | Justification |
+|------|-------|-------|---------------|
+| `CommandBuffer.kt:653` | smartVelocity send rate | 200ms | Chassis protocol: velocity commands expire after 0.6s. Must send at 200ms (3x within window) to maintain movement. This IS the real-time requirement. |
+| `MainActivity.kt:643` | Joystick velocity send | 100ms | Same — UI joystick button held down sends velocity at 100ms intervals |
 
-// FIX: One-liner — _paused is already a StateFlow
-_paused.first { !it }
-```
+## Category 3: Audio Durations (REQUIRED — content IS the timing)
 
-**2. Idle wait (line 453-455)**
-```kotlin
-// CURRENT: Spins at 100ms when nothing to execute
-if (currentIndex < 0 || currentIndex >= commandList.size) { delay(100); continue }
+| File | Timer | Value | Justification |
+|------|-------|-------|---------------|
+| `RelayService.kt:969-999` | Tone note gaps | 30-100ms | Musical rests between generated tones — silence IS the content |
+| `RelayService.kt:845,859` | Task wait durations | From Flutter | `task.waitSeconds` — Flutter specifies how long to show/wait |
+| `CommandBuffer.kt:768,790` | Wait/display durations | From Flutter | `durationMs` — Flutter specifies the duration, it IS the task |
 
-// FIX: Use a signal (CompletableDeferred or Channel) that loadCommands() triggers
-commandAvailable.receive()  // Suspends until loadCommands() sends
-```
+## Category 4: Safety Timeouts (REQUIRED — caps for signal waits)
 
-**3. Nav wait loop (line 517-518)**
-```kotlin
-// CURRENT: Polls at 100ms during navigation
-while (waitingForNavArrival && ...) { delay(100) ... }
+| File | Timer | Value | Justification |
+|------|-------|-------|---------------|
+| `CommandBuffer.kt:521` | Nav timeout | 120s | Safety cap — if nav signals never arrive, don't wait forever |
+| `CommandBuffer.kt:531` | Nav signal wait | 500ms | `withTimeoutOrNull` on navSignal.receive() — checks progress between signals |
+| `CommandBuffer.kt:633` | Recovery nav-cancel wait | 2s | `withTimeoutOrNull` — waits for navStatus to leave 601, capped |
+| `CommandBuffer.kt:717` | Recovery stopped confirm | 2s | `withTimeoutOrNull` — waits for velocity to reach zero, capped |
+| `CommandBuffer.kt:918` | TTS finish before button | 5s | `withTimeoutOrNull` — safety cap on TTS completion signal |
+| `RelayService.kt:1079` | generateTone playback | duration+500ms | `withTimeoutOrNull` — safety cap on AudioTrack completion signal |
+| `RelayService.kt:1158` | Siren playback | 10s | `withTimeoutOrNull` — safety cap on AudioTrack marker signal |
+| `RelayService.kt:1182` | TTS in alarm | 10s | `withTimeoutOrNull` — safety cap on TTS completion signal |
+| `RobotWebSocketClient.kt:445` | Map data arrival | 5s | `withTimeoutOrNull` — waits for map data from robot, fallback to /static_map |
 
-// FIX: Nav completion is ALREADY signaled via onNavStatus() callback
-// Create a CompletableDeferred<String> that onNavStatus completes
-// The pattern is already used for TTS (line 526-530) and sounds (line 535-541)
-navCompletion.await()
-```
+## Category 5: Transport / Protocol Configuration (REQUIRED — external system requirements)
 
-**4. Button standby people detection (line 862-863, 938-939)**
-```kotlin
-// CURRENT: Polls peopleDetected every 200ms/500ms
-while (currentCommand != null && !robotClient.peopleDetected.value) { delay(200) }
-// and in button_standby:
-while (currentCommand != null) { delay(500) ... }
+| File | Timer | Value | Justification |
+|------|-------|-------|---------------|
+| `GrpcServer.kt:34` | `MAX_CONNECTION_IDLE_MS` | 5 min | gRPC auto-close idle connections — protocol config |
+| `RelayServer.kt:731` | NanoWSD socket timeout | 60s | WebSocket framework socket timeout — transport config |
+| `RobotWebSocketClient.kt:163` | OkHttp read timeout | 0 (infinite) | WebSocket must stay open — transport config |
+| `CloudTtsService.kt` | HTTP connect/read timeout | 10s / 30s | Google Cloud TTS API timeouts — external API config |
+| `AwsIotClient.kt:302-303` | HTTP connect/read timeout | 10s / 10s | AWS API timeouts — external API config |
+| `ChassisProtocol.kt` | Throttle rates | 150-5000ms | ROS subscription rates per topic — protocol config |
+| `DepthPeopleDetector.kt:38` | `MIN_PROCESS_INTERVAL_MS` | 100ms | Throughput cap — don't process depth data faster than 10Hz |
 
-// FIX: peopleDetected is already a StateFlow
-robotClient.peopleDetected.first { it }
-```
+## Category 6: Algorithm Parameters (NOT timers — math constants)
 
-**5. TTS wait in button_standby (line 905-909)**
-```kotlin
-// CURRENT: Polls isTtsSpeaking() every 250ms
-while (taskExecutor?.isTtsSpeaking() == true && waitCount < 20) { delay(250) }
+| File | Parameter | Value | What It Is |
+|------|-----------|-------|------------|
+| `ObstacleClassifier.kt` | Velocity/movement thresholds | Various | Classification math — not timing |
+| `PeopleTracker.kt` | Smoothing alpha, association distance | 0.3, 1.5m | Tracking algorithm — not timing |
+| `Heartbeat.kt` | EMA weights | 0.9/0.1 | Rhythm learning — algorithm parameter |
+| `AdaptiveConnectionPolicy.kt` | Reliability thresholds | 0.95-0.20 | Learned retry behavior — all configurable via SharedPreferences |
+| `RobotWebSocketClient.kt` | Safety distances | 0.20/0.50/0.80m | Physical robot stopping distances |
 
-// FIX: TTS already has completion callbacks — use CompletableDeferred
-// (same pattern as line 731-741 in the same file)
-```
+## Category 7: Remaining Startup Delays (NEEDS FUTURE WORK)
 
-**The recovery velocity loop (`delay(200)` in smartVelocity)** is actually correct — velocity commands expire after 0.6s per chassis protocol spec, so sending them at 200ms intervals (3x within the window) IS the real-time requirement. This is signal-driven in the sense that the robot needs continuous commands.
-
-**The nav 602 grace period** was already replaced by proper layered checks — goal name matching + movement tracking + recovery state. The `timeSinceSend < 3000` is Layer 1 of 3 checks, and `hasStartedMoving` (Layer 3) is the actual signal-based guard that catches the real cases.
-
-### RelayService.kt — 3 targeted fixes
-
-**1. Thread.sleep in generateTone (line 1070)**
-```kotlin
-// CURRENT: Blocks thread
-Thread.sleep(durationMs.toLong() + 50)
-
-// FIX: AudioTrack supports setNotificationMarkerPosition + OnPlaybackPositionUpdateListener
-// OR: Use MODE_STATIC with a CompletableDeferred triggered by playback position notification
-```
-
-**2. Emergency alarm siren duration (line 1149)**
-```kotlin
-// CURRENT: delay(3200) guessing how long 7 loops of audio take
-track.setLoopPoints(0, numSamples, 7)
-track.play()
-delay(3200)
-
-// FIX: setNotificationMarkerPosition(numSamples * 8) with listener that signals completion
-```
-
-**3. Fleet sync (line 216)**
-```kotlin
-// CURRENT: Polls every 30 seconds regardless
-while (isActive) { delay(30_000); fleetClient.fetchConfig() }
-
-// FIX: Sync on state change (robotStatus.collect) with a coalescing window
-// Report when status actually changes, not on a blind timer
-```
-
-The tone gaps between notes (`delay(100)`, `delay(30)`) are intentional musical rests — silence between notes IS the requirement. These aren't "waiting for something to happen," they're "play silence for this duration." Same category as the `wait` command's `durationMs`.
-
-The obstacle cooldowns are debounce logic, not fake timers. They prevent spamming "excuse me" 10 times per second. Debounce inherently requires a time window — but the window should be derived from the TTS completion signal (don't announce again until the last announcement finished playing).
-
-### RobotWebSocketClient.kt — 3 targeted fixes
-
-**1. Post-connect delay (delay(500) after onOpen)**
-Remove it. Send subscriptions immediately. The WebSocket `onOpen` IS the readiness signal — that's literally what it means.
-
-**2. Map refresh unsub/resub (delay(300) + delay(2000))**
-Rosbridge sends a confirmation message for unsubscribe. Wait for that, then resubscribe.
-
-**3. Modular time logging hack**
-Replace `System.currentTimeMillis() % 2000 < 100` with a simple counter: `if (logCounter++ % 20 == 0)`.
-
-The reconnect delay (`RECONNECT_DELAY_MS = 1000L`) should defer to AdaptiveConnectionPolicy, which already exists and already handles this correctly with learned reliability.
-
-### RobotControlServiceImpl.kt — 1 targeted fix
-
-**STREAM_STABILIZE_DELAY_MS = 100L** — Remove it. The gRPC stream is ready when `controlStream()` is called. Send the first heartbeat immediately (the Drummer pattern already does this — "Send first beat immediately" on line 118 of Heartbeat.kt).
-
-The `HEARTBEAT_INTERVAL_MS = 1000L` stays — this IS the heartbeat check. The LIDAR staleness threshold (`3000ms`) is a "is this data missing?" check — same category as heartbeat, stays.
-
-### AwsIotClient.kt — 1 targeted fix
-
-**Status reporting** should fire on `robotClient.robotStatus` changes (collect the flow), not poll every 5 seconds. The `delay(5000)` becomes a coalescing window — "don't report more than once per 5 seconds" — which is a debounce, not a poll.
-
-Command polling (`delay(2000)`) is genuinely polling a REST API. Without WebSocket push from AWS, polling IS the mechanism. The interval stays but should be configurable.
-
-### Other Files — No Changes Needed
-
-| File | Status | Reason |
-|------|--------|--------|
-| Heartbeat.kt | **Stays as-is** | This IS the heartbeat. Hardcoded interval is the directive's exception. |
-| AdaptiveConnectionPolicy.kt | **Stays as-is** | Already configurable via SharedPreferences. Well-designed. |
-| ChassisProtocol.kt | **Stays as-is** | Throttle rates control ROS subscription frequency — these are protocol-level. |
-| ObstacleClassifier.kt | **Stays as-is** | Algorithm parameters (velocity thresholds, scan history) — not timers. |
-| PeopleTracker.kt | **Stays as-is** | Tracking algorithm parameters (EMA weights, association distance) — not timers. |
-| DepthPeopleDetector.kt | **Stays as-is** | Rate limiting input processing to 10Hz — this is throughput control. |
-| GrpcServer.kt | **Stays as-is** | gRPC keepalive IS a heartbeat mechanism. Health monitor is a liveness check. |
-| CloudTtsService.kt | **Stays as-is** | HTTP timeouts are transport-level requirements. Cache limits are policy. |
-| DiscoveryService.kt | **Already clean** | No timing issues. |
-| WebRtcManager.kt | **Already clean** | No timing issues. |
+| File | Timer | Value | Issue | Fix Path |
+|------|-------|-------|-------|----------|
+| `MainActivity.kt:61` | IP refresh after gRPC start | 2s | Waits for gRPC server to start | Need callback from GrpcServer.start() |
+| `MainActivity.kt:605` | Service rebind retry | 1s | Waits for service binding | Need ServiceConnection callback |
+| `RelayService.kt:222` | Wait for robotClient init | 100ms poll | `while (!::robotClient.isInitialized)` | Need lateinit signal |
+| `CommandBuffer.kt:919` | TTS speaking poll | 100ms | `while (isTtsSpeaking())` inside withTimeout | Need TTS completion CompletableDeferred plumbed through |
+| `RobotWebSocketClient.kt:447` | Map cache poll | 100ms | `while (_cachedMapMessage == null)` inside withTimeout | Need onMessage to signal a CompletableDeferred |
+| `CloudTtsService.kt:313` | Precache rate limit | 500ms | Sequential rate limit between API calls | Could use Semaphore or queue |
 
 ---
 
-## Summary
+## What Was Fixed (This Commit)
 
-| Category | Count | Actual Work |
-|----------|-------|-------------|
-| Polling loops → Flow.first{} / CompletableDeferred | 5 | Mechanical one-line replacements using existing patterns |
-| Thread.sleep → AudioTrack completion listener | 2 | Use Android's built-in playback notification API |
-| Stabilization delays → remove or use existing signals | 3 | Delete the delay; the signal (onOpen, stream ready) already exists |
-| Timer polling → StateFlow.collect | 2 | Fleet sync and cloud status: collect flow instead of poll |
-| Logging hack → counter | 1 | One-line fix |
-| **Total targeted changes** | **13** | |
-
-### What Stays (Correctly)
-
-- **Heartbeat intervals** (Drummer/Messenger) — the directive's explicit exception
-- **gRPC keepalive** — transport-level heartbeat
-- **Liveness monitors** — "is this thing missing?" checks
-- **LIDAR staleness threshold** — "is this data missing?" check
-- **Velocity command rate** (200ms in smartVelocity) — chassis protocol requires continuous commands at this rate
-- **Musical note durations and rests** — these are the actual content being played
-- **Wait command durations** — these come from Flutter, they ARE the task
-- **Display durations** — same, Flutter specifies how long to show content
-- **Algorithm parameters** (EMA weights, tracking thresholds) — math, not timers
-- **HTTP timeouts** — transport-level requirements
-- **Debounce windows** — should be derived from completion signals but the concept is valid
-
-The infrastructure is already there. The fixes are targeted swaps, not a rewrite.
+| Before | After | File |
+|--------|-------|------|
+| `while(paused) delay(100)` | `_paused.first { !it }` | CommandBuffer |
+| `delay(100)` idle loop | `commandAvailable.receive()` | CommandBuffer |
+| `delay(100)` nav wait | `navSignal.receive()` from onNavStatus | CommandBuffer |
+| `delay(300)` post-recovery | `robotStatus.first { stopped }` | CommandBuffer |
+| `delay(500)` button standby poll | `externalCompletion.await()` | CommandBuffer |
+| `delay(200)` people detect | `peopleDetected.first { it }` | CommandBuffer |
+| 30s greeting cooldown | TTS completion signal | CommandBuffer |
+| `delay(500)` after onOpen | Removed — onOpen IS readiness | RobotWebSocketClient |
+| `time % 2000 < 100` log hack | Counter `% 20` | RobotWebSocketClient |
+| `delay(300)` + `delay(2000)` x2 map refresh | Single 5s wait for data arrival | RobotWebSocketClient |
+| Reconnect constant 1s | Defers to AdaptiveConnectionPolicy | RobotWebSocketClient |
+| `Thread.sleep(ms + 50)` | AudioTrack completion listener | RelayService |
+| `delay(3200)` siren | AudioTrack marker notification | RelayService |
+| `delay(30_000)` fleet sync poll | `robotStatus.collect` on change | RelayService |
+| Timer-based obstacle cooldown | TTS completion signal debounce | RelayService |
+| `delay(1000)` post-reconnect | Removed — onOpen triggers subscriptions | RelayServer |
+| `delay(100)` forwarder restart | Removed — flow completion is the signal | RelayServer |
+| `delay(100)` stream stabilize | Removed — send heartbeat immediately | RobotControlServiceImpl |
+| `delay(5000)` status poll | Change-driven via updateStatus() | AwsIotClient |
