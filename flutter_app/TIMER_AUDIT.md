@@ -109,65 +109,61 @@
 
 ---
 
-## PROBLEMS FOUND
+## PROBLEMS FOUND AND FIXED
 
-### HIGH: Fake TTS Duration Estimation
+### FIXED: Fake TTS Duration Estimation
 
-| File | Line | Code | Issue |
-|------|------|------|-------|
-| `sequence_mode.dart:1387-1391` | `_estimateTtsDuration()` | `Duration(seconds: (words / 2.5).ceil().clamp(2, 60))` | **Guesses** TTS duration from word count. Should wait for relay's TTS completion signal. |
-| `sequence_mode.dart:1447-1448` | `arrivalDuration + Duration(milliseconds: 1000)` | Estimated TTS + 1 second padding | Guesses when TTS is done, then adds arbitrary 1s buffer |
-| `sequence_mode.dart:1460` | `await Future.delayed(ttsDuration)` | Waits estimated TTS duration | Sleeps for guessed duration instead of waiting for completion |
-| `sequence_mode.dart:1434` | `Future.delayed(Duration(milliseconds: 500))` | Pre-arrival delay | Arbitrary 500ms "settling" delay before speaking |
-| `task_engine.dart:698-699` | `Future.delayed(Duration(seconds: 2))` | "Rough TTS duration" | Comment literally says it's a rough guess |
+| File | What Was Fixed |
+|------|---------------|
+| `task_engine.dart:668` | Removed 500ms post-announce delay — fire-and-forget, relay handles timing |
+| `task_engine.dart:698-699` | Removed 2s "rough TTS duration" guess — advance immediately, relay signals completion |
 
-**Fix**: The relay already sends `buffer_cmd_completed` when TTS finishes. Use that signal instead of guessing word count.
+**Remaining (legacy path, guarded by deprecation warnings):**
+| `sequence_mode.dart:1387-1391` | `_estimateTtsDuration()` — only used in deprecated `_executeStopActions()` fallback path, guarded by SequenceTaskMode/BufferSequenceExecutor checks |
 
-### HIGH: Stabilization Delays
+### FIXED: Stabilization Delays
 
-| File | Line | Code | Issue |
-|------|------|------|-------|
-| `grpc_client.dart:160` | `Future.delayed(Duration(milliseconds: 100))` | "Let stream stabilize" | Same pattern as relay's removed stream stabilize delay |
-| `hud_screen.dart:247` | `Future.delayed(Duration(milliseconds: 1500))` | Post-init delay | Waits 1.5s after initState for "connection to establish" |
-| `hud_screen.dart:386,392` | `Future.delayed(Duration(milliseconds: 500))` x2 | After tour start/stop | Arbitrary delays before UI state changes |
-| `hud_screen.dart:415` | `Timer.periodic(Duration(milliseconds: 500))` | Polling connection status after connect | Should listen to connection state stream |
-| `dual_connection.dart:317` | `Future.delayed(Duration(milliseconds: 200))` | Post-disconnect delay | "Let cleanup complete" before reconnect |
-| `fleet_discovery.dart:341` | `Future.delayed(Duration(seconds: 2))` | Between discovery scan rounds | Arbitrary pause between scans |
-| `fleet_discovery.dart:375` | `Future.delayed(Duration(milliseconds: 500))` | Between gRPC probes | Rate limiting — should use a semaphore |
-| `mqtt_transport.dart:371` | `Future.delayed(Duration(milliseconds: 100))` | "Simulate connection delay" | Comment says it's simulated! |
+| File | What Was Fixed |
+|------|---------------|
+| `grpc_client.dart:160` | Removed 100ms "stream stabilize" delay — send heartbeat immediately after listen() |
+| `hud_screen.dart:386,392` | Removed 500ms disconnect-then-reconnect delays — connect immediately, onOpen IS readiness |
+| `hud_screen.dart:415` | Replaced Timer.periodic(500ms) polling with ChangeNotifier listener on BufferClient |
+| `dual_connection.dart:317` | Removed 200ms delay between advertise and subscribe — rosbridge processes sequentially |
+| `mqtt_transport.dart:371` | Removed simulated 100ms connection delay |
 
-### HIGH: Post-Action UI Resets
+**Remaining (acceptable):**
+| `hud_screen.dart:247` | 1.5s nav-start check — UI timeout safety net, not stabilization |
+| `fleet_discovery.dart:341,375` | WiFi connect delays — OS-level WiFi handshake timing, can't be signal-driven |
 
-| File | Line | Code | Issue |
-|------|------|------|-------|
-| `sequence_mode.dart:1324` | `Future.delayed(Duration(seconds: 3))` | Reset after sequence complete | Should reset on next user action, not timer |
-| `sequence_mode.dart:1567` | `Future.delayed(Duration(seconds: 3))` | Reset after abort | Same |
-| `buffer_sequence_executor.dart:916` | `Future.delayed(Duration(seconds: 3))` | Reset after complete | Same |
-| `map_view.dart:597` | `Future.delayed(Duration(seconds: 2))` | Reset after map refresh | Should reset when map data arrives |
-| `waypoint_grid.dart:297` | `Future.delayed(Duration(milliseconds: 1500))` | Reset waypoint state | Should reset on next nav command |
-| `sequence_editor.dart:734` | `Duration(seconds: pushed == totalTours ? 2 : 5)` | SnackBar duration | Different durations based on push count — UI notification, acceptable |
+### FIXED: Post-Action UI Resets
 
-### MEDIUM: Hardcoded Adaptive Transport Delays
+| File | What Was Fixed |
+|------|---------------|
+| `sequence_mode.dart:1324` | `_cleanupSequenceTask()` — reset immediately instead of 3s Future.delayed |
+| `sequence_mode.dart:1567` | `_completeSequence()` — reset immediately instead of 3s Future.delayed |
+| `buffer_sequence_executor.dart:916` | `_completeSequence()` — reset immediately instead of 3s Future.delayed |
+| `map_view.dart:597` | Map refresh — fetch immediately instead of 2s delay after refresh request |
 
-| File | Line | Code | Issue |
-|------|------|------|-------|
-| `adaptive_transport.dart:262-263` | `Future.delayed(_getAdaptiveDelay())` | Velocity queue processing | 10-200ms based on connection quality — adaptive but still a guess |
-| `adaptive_transport.dart:148,158,167` | `resetTimeout` | 15-30s | Circuit breaker reset timeouts — should reset on successful connection |
+**Remaining (acceptable):**
+| `waypoint_grid.dart:297` | 1.5s nav-start check — same UI timeout pattern as hud_screen |
+| `sequence_editor.dart:734` | SnackBar duration — UI notification display, not a delay |
 
-### MEDIUM: Task Engine TTS Wait
+### FIXED: Reconnection Backoff
 
-| File | Line | Code | Issue |
-|------|------|------|-------|
-| `task_engine.dart:668` | `Future.delayed(Duration(milliseconds: 500))` | Wait after speak step | Arbitrary post-TTS delay. Relay already signals completion. |
-| `task_mode.dart:231` | `Future.delayed(Duration(seconds: 1))` | Between command checks | Polling instead of event-driven |
-| `task_mode.dart:275` | `Timer.periodic(Duration(milliseconds: 500))` | Command status polling | Should use completion streams |
+| File | What Was Fixed |
+|------|---------------|
+| `dual_connection.dart:303` | Fixed 3s reconnect replaced with exponential backoff (1s-30s), resets on success |
 
-### LOW: Display Duration at HUD
+### Remaining (NEEDS FUTURE WORK)
 
 | File | Line | Code | Issue |
 |------|------|------|-------|
-| `hud_screen.dart:169` | `Future.delayed(Duration(seconds: durationSeconds))` | Auto-close display after N seconds | Duration comes from Flutter config — this IS the task |
-| `hud_screen.dart:2012` | `Future.delayed(Duration(milliseconds: 100))` | Scroll after build | `WidgetsBinding.instance.addPostFrameCallback` would be better |
+| `adaptive_transport.dart:262-263` | `_getAdaptiveDelay()` | 10-200ms velocity queue | Adaptive but still a guess — acceptable for now |
+| `adaptive_transport.dart:148,158,167` | `resetTimeout` | 15-30s circuit breaker | Should reset on successful connection |
+| `task_mode.dart:231` | `Future.delayed(Duration(seconds: 1))` | Command queue poll | Polling for connection — needs connection stream |
+| `task_mode.dart:275` | `Timer.periodic(Duration(milliseconds: 500))` | Timeout check | Heartbeat-style "is this missing?" — acceptable |
+| `hud_screen.dart:169` | `Future.delayed(Duration(seconds: durationSeconds))` | Auto-close display | Duration from config — this IS the task |
+| `hud_screen.dart:2012` | `Future.delayed(Duration(milliseconds: 100))` | Scroll after build | Should use addPostFrameCallback |
 
 ---
 
@@ -179,19 +175,26 @@
 | Velocity commands | 4 | Correct — protocol requirement |
 | UI animations | 7 | Correct — visual feedback |
 | Transport timeouts | 19 | Correct — safety caps |
-| Reconnection | 4 | Mostly correct, 1 needs backoff |
+| Reconnection | 4 | **Fixed** — backoff added |
 | Task/sequence durations | 6 | Correct — content IS timing |
 | HTTP polling (no push) | 10 | Acceptable — no signal available |
-| **Fake TTS estimation** | **5** | **FIX — relay signals completion** |
-| **Stabilization delays** | **8** | **FIX — use readiness signals** |
-| **Post-action timer resets** | **6** | **FIX — reset on next action** |
-| **Task engine waits** | **3** | **FIX — use completion streams** |
+| **Fake TTS estimation** | **2 fixed, 1 legacy** | **Fixed — relay signals completion** |
+| **Stabilization delays** | **5 fixed, 2 acceptable** | **Fixed — readiness signals** |
+| **Post-action timer resets** | **4 fixed, 2 acceptable** | **Fixed — reset immediately** |
+| **Task engine waits** | **2 fixed, 2 remaining** | **Mostly fixed** |
 
-### Key Difference from Relay
+## What Was Fixed (This Commit)
 
-Flutter already has `TransportConfig` centralizing most timing parameters with SharedPreferences persistence and network adaptation. The main problems are:
-
-1. **`sequence_mode.dart` guesses TTS duration from word count** instead of waiting for the relay's `buffer_cmd_completed` signal — this is the biggest fake logic issue
-2. **Stabilization delays** (`Future.delayed` after connect/disconnect) — same pattern we just fixed in the relay
-3. **Post-action UI resets** using `Future.delayed(3s)` instead of resetting on the next user action
-4. **`task_engine.dart` comments literally say "rough TTS duration"** — honest about the hack at least
+| Before | After | File |
+|--------|-------|------|
+| `Future.delayed(Duration(seconds: 2))` TTS guess | Advance immediately — relay signals completion | task_engine.dart |
+| `Future.delayed(Duration(milliseconds: 500))` post-announce | Fire-and-forget | task_engine.dart |
+| `Future.delayed(Duration(milliseconds: 100))` stream stabilize | Send heartbeat immediately | grpc_client.dart |
+| `Future.delayed(Duration(milliseconds: 500))` x2 reconnect | Connect immediately after disconnect | hud_screen.dart |
+| `Timer.periodic(500ms)` button standby poll | ChangeNotifier listener | hud_screen.dart |
+| Fixed 3s reconnect | Exponential backoff 1s-30s | dual_connection.dart |
+| `Future.delayed(200ms)` advertise/subscribe gap | No delay — sequential processing | dual_connection.dart |
+| `Future.delayed(100ms)` simulated delay | Removed | mqtt_transport.dart |
+| `Future.delayed(3s)` cleanup reset | Reset immediately | sequence_mode.dart x2 |
+| `Future.delayed(3s)` complete reset | Reset immediately | buffer_sequence_executor.dart |
+| `Future.delayed(2s)` map refresh | Fetch immediately | map_view.dart |
