@@ -855,8 +855,17 @@ class MainActivity : AppCompatActivity() {
                 binding.tvSensorStatus.setTextColor(ContextCompat.getColor(this, R.color.status_yellow))
             }
             SafetyZone.CLEAR -> {
-                binding.tvSensorStatus.text = "Sensors: OK"
-                binding.tvSensorStatus.setTextColor(ContextCompat.getColor(this, R.color.status_green))
+                val usDist = sensors.ultrasonicDistanceM
+                if (usDist < 0.3) {
+                    binding.tvSensorStatus.text = "Ultrasonic: ${String.format("%.0f", usDist * 100)}cm BLOCKED"
+                    binding.tvSensorStatus.setTextColor(ContextCompat.getColor(this, R.color.status_red))
+                } else if (usDist < 1.0) {
+                    binding.tvSensorStatus.text = "Ultrasonic: ${String.format("%.0f", usDist * 100)}cm"
+                    binding.tvSensorStatus.setTextColor(ContextCompat.getColor(this, R.color.status_yellow))
+                } else {
+                    binding.tvSensorStatus.text = "Sensors: OK"
+                    binding.tvSensorStatus.setTextColor(ContextCompat.getColor(this, R.color.status_green))
+                }
             }
         }
     }

@@ -555,10 +555,10 @@ class RobotWebSocketClient(
                             bumperRight = bumper and 1 != 0,
                             cliffLeft = cliff and 4 != 0,
                             cliffCenter = cliff and 2 != 0,
-                            cliffRight = cliff and 1 != 0
+                            cliffRight = cliff and 1 != 0,
+                            ultrasonicDistanceM = ultrasonicMeters
                         )
                     )
-                    // TODO: Add ultrasonic distance to RobotStatusData for motion detection
                 }
                 ChassisProtocol.TOPIC_LASER_DATA -> {
                     // Try px/py format first (coordinate arrays)
@@ -975,7 +975,8 @@ data class SensorStatus(
     val bumperRight: Boolean = false,
     val cliffLeft: Boolean = false,
     val cliffCenter: Boolean = false,
-    val cliffRight: Boolean = false
+    val cliffRight: Boolean = false,
+    val ultrasonicDistanceM: Double = 9.999 // Central ultrasonic sensor in meters (9.999 = no data)
 )
 
 data class RobotStatusData(

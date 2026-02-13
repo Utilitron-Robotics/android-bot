@@ -429,7 +429,10 @@ class CommandBuffer(
                 "y" to (status?.y ?: 0.0),
                 "theta" to (status?.theta ?: 0.0),
                 // CRITICAL: Data freshness so Flutter knows if we're serving stale data
-                "data_age_ms" to robotDataAge
+                "data_age_ms" to robotDataAge,
+                // Ultrasonic sensor data for motion detection UI
+                "ultrasonic" to listOf(status?.sensors?.ultrasonicDistanceM ?: 9.999),
+                "ultrasonic_blocked" to ((status?.sensors?.ultrasonicDistanceM ?: 9.999) < 0.3)
             ),
             "crowd_config" to mapOf(
                 "safe_distance_meters" to crowdConfig.safeDistanceMeters,
