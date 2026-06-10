@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/fleet_discovery.dart';
 import '../core/robot_connection.dart';
+import '../core/relay_discovery_stub.dart'
+    if (dart.library.io) '../core/relay_discovery.dart' as relay_discovery;
 
 /// Fleet picker with WiFi scanning and robot selection
 class FleetPicker extends StatefulWidget {
@@ -366,13 +368,19 @@ class _FleetPickerState extends State<FleetPicker>
   Future<void> _scanForRelays() async {
     setState(() => _scanningRelays = true);
     try {
-      final relays = await RelayDiscovery.scanForRelays(
-        subnet: '192.168.1', // Future: detect current subnet
-        timeout: const Duration(milliseconds: 300),
+      // UDP broadcast on :9999 - subnet-agnostic, the relay answers itself
+      final relays = await relay_discovery.scanForRelays(
+        timeout: const Duration(seconds: 2),
       );
-      setState(() => _discoveredRelays = relays);
+      if (mounted) setState(() => _discoveredRelays = relays);
+    } on UnsupportedError catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message ?? 'Relay scan unavailable')),
+        );
+      }
     } finally {
-      setState(() => _scanningRelays = false);
+      if (mounted) setState(() => _scanningRelays = false);
     }
   }
 
