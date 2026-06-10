@@ -83,6 +83,15 @@ class _MapCache {
 class _MapViewState extends State<MapView> {
   StreamSubscription? _poseSubscription;
   StreamSubscription? _wsStateSubscription;
+
+  // Push-over-WS freshness: the HTTP pollers below only fire when push is
+  // stale, so an old relay APK behaves exactly as before (pure polling) and
+  // a new relay turns the polls into no-ops. One source active at a time.
+  static const Duration _vizPushFreshWindow = Duration(seconds: 1);
+  static const Duration _mapPushFreshWindow = Duration(seconds: 12);
+  DateTime? _lastWsLidar;
+  DateTime? _lastWsPeople;
+  DateTime? _lastWsMap;
   StreamSubscription? _mapStreamSubscription;
   ui.Image? _mapImage;
   MapInfo? _mapInfo;
@@ -175,8 +184,37 @@ class _MapViewState extends State<MapView> {
     });
   }
 
+  /// Apply lidar point data (same shape from WS push or HTTP fallback)
+  void _applyLidarData(Map<String, dynamic>? data) {
+    if (data == null || !mounted) return;
+    final px = (data['px'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
+    final py = (data['py'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
+    if (px.isEmpty) return;
+    setState(() {
+      _lidarPx = px;
+      _lidarPy = py;
+    });
+  }
+
+  /// Apply tracked-people data (same shape from WS push or HTTP fallback)
+  void _applyPeopleData(Map<String, dynamic>? data) {
+    if (data == null || !mounted) return;
+    final peopleJson = data['people'] as List?;
+    if (peopleJson == null) return;
+    setState(() {
+      _trackedPeople = peopleJson
+          .map((p) => TrackedPerson.fromJson((p as Map).cast<String, dynamic>()))
+          .toList();
+    });
+  }
+
   Future<void> _fetchLidarData() async {
     if (_httpBaseUrl == null) return;
+    // Push feed is live - polling stays a silent no-op
+    if (_lastWsLidar != null &&
+        DateTime.now().difference(_lastWsLidar!) < _vizPushFreshWindow) {
+      return;
+    }
 
     try {
       final response = await http.get(
@@ -185,16 +223,7 @@ class _MapViewState extends State<MapView> {
 
       if (response.statusCode == 200) {
         _lidarFailCount = 0;  // Reset on success
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final px = (data['px'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
-        final py = (data['py'] as List?)?.cast<num>().map((n) => n.toDouble()).toList() ?? [];
-
-        if (mounted && px.isNotEmpty) {
-          setState(() {
-            _lidarPx = px;
-            _lidarPy = py;
-          });
-        }
+        _applyLidarData(jsonDecode(response.body) as Map<String, dynamic>);
       } else {
         // 404 or other error - track failures
         _lidarFailCount++;
@@ -228,6 +257,11 @@ class _MapViewState extends State<MapView> {
 
   Future<void> _fetchPeopleData() async {
     if (_httpBaseUrl == null) return;
+    // Push feed is live - polling stays a silent no-op
+    if (_lastWsPeople != null &&
+        DateTime.now().difference(_lastWsPeople!) < _vizPushFreshWindow) {
+      return;
+    }
 
     try {
       final response = await http.get(
@@ -236,16 +270,7 @@ class _MapViewState extends State<MapView> {
 
       if (response.statusCode == 200) {
         _peopleFailCount = 0;  // Reset on success
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final peopleJson = data['people'] as List?;
-
-        if (mounted && peopleJson != null) {
-          setState(() {
-            _trackedPeople = peopleJson
-                .map((p) => TrackedPerson.fromJson(p as Map<String, dynamic>))
-                .toList();
-          });
-        }
+        _applyPeopleData(jsonDecode(response.body) as Map<String, dynamic>);
       } else {
         // 404 or other error - track failures
         _peopleFailCount++;
@@ -492,6 +517,11 @@ class _MapViewState extends State<MapView> {
   /// Fetch map via HTTP - single request/response, no subscription issues
   Future<void> _fetchMapViaHttp() async {
     if (_httpBaseUrl == null) return;
+    // Forwarded /map over WS is flowing - polling stays a silent no-op
+    if (_lastWsMap != null &&
+        DateTime.now().difference(_lastWsMap!) < _mapPushFreshWindow) {
+      return;
+    }
 
     // Don't gate on robot.isConnected - HTTP is independent of WebSocket state
     // The relay HTTP server runs regardless of WS connection
@@ -554,7 +584,9 @@ class _MapViewState extends State<MapView> {
     debugPrint('MapView: Subscribed to /map via WebSocket');
   }
 
-  /// Subscribe to robot pose via WebSocket
+  /// Subscribe to robot pose + relay push topics via WebSocket.
+  /// One listener, one lifecycle: /robot_pose, forwarded /map, and the
+  /// relay-synthesized /relay/lidar + /relay/people push feeds.
   void _subscribeToPose() {
     final robot = _robot;
     if (robot == null || !robot.isConnected) return;
@@ -570,10 +602,19 @@ class _MapViewState extends State<MapView> {
       final topic = msg['topic'] as String?;
       if (topic == '/robot_pose') {
         _handlePoseMessage(msg['msg']);
+      } else if (topic == '/map') {
+        _lastWsMap = DateTime.now();
+        _handleMapMessage(msg['msg']);
+      } else if (topic == '/relay/lidar') {
+        _lastWsLidar = DateTime.now();
+        _applyLidarData((msg['msg'] as Map?)?.cast<String, dynamic>());
+      } else if (topic == '/relay/people') {
+        _lastWsPeople = DateTime.now();
+        _applyPeopleData((msg['msg'] as Map?)?.cast<String, dynamic>());
       }
     });
 
-    debugPrint('MapView: Subscribed to robot pose');
+    debugPrint('MapView: Subscribed to pose + relay push topics');
   }
 
   /// Force a map refresh via HTTP

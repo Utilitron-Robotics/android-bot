@@ -49,6 +49,12 @@ class RobotWebSocketClient(
         private const val SAFETY_RANGE_DELTA_M = 0.05f
         private const val SAFETY_KEEPALIVE_MS = 2000L
         private const val SAFETY_CLEAR_RANGE_M = 999.0
+
+        // /relay/lidar + /relay/people push (replaces HUD HTTP polling):
+        // emitted only when fresh data just arrived, at most this often.
+        // Payload shapes mirror the HTTP /lidar and /people endpoints.
+        private const val PUSH_LIDAR_INTERVAL_MS = 200L
+        private const val PUSH_PEOPLE_INTERVAL_MS = 200L
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -601,6 +607,9 @@ class RobotWebSocketClient(
                             kotlin.math.sqrt(x * x + y * y).toFloat()
                         }.filter { it > 0.05f }
                         checkLaserData(distances)
+
+                        // Fresh lidar (and current people) -> push to HUD clients
+                        emitVisualizationPush()
                     } else {
                         // Fallback to points array (distance format)
                         val points = msg.get("points")?.asJsonArray?.mapNotNull {
@@ -731,6 +740,8 @@ class RobotWebSocketClient(
                             Log.i("PEOPLE_DEBUG", "no people array found, keys: ${msg.keySet()}")
                         }
                     }
+                    // People tracker just updated -> push to HUD clients
+                    emitVisualizationPush()
                 }
                 ChassisProtocol.TOPIC_HANDPOSE -> {
                     // Hand gesture detection - LOG to understand format
@@ -877,6 +888,69 @@ class RobotWebSocketClient(
                 "\"detach_mode\":${_detachMode.value}," +
                 "\"ts\":$now}}"
         _incomingMessages.tryEmit(msg)
+    }
+
+    private val pushGson = com.google.gson.Gson()
+    @Volatile private var lastLidarPushMs = 0L
+    @Volatile private var lastPeoplePushMs = 0L
+    @Volatile private var lastPushedPeopleCount = -1
+
+    /**
+     * Push lidar points and tracked people to WS clients as synthetic topics,
+     * replacing HUD HTTP polling. Called only from data-arrival handlers, so
+     * pushed data is fresh by construction; throttled to the old poll cadence;
+     * an empty people list is pushed exactly once (transition), never repeated.
+     */
+    private fun emitVisualizationPush() {
+        val now = System.currentTimeMillis()
+        val status = _robotStatus.value
+
+        val px = lidarPointsX
+        val py = lidarPointsY
+        if (px.isNotEmpty() && now - lastLidarPushMs >= PUSH_LIDAR_INTERVAL_MS) {
+            lastLidarPushMs = now
+            val data = mapOf(
+                "px" to px,
+                "py" to py,
+                "robot_x" to (status?.x ?: 0.0),
+                "robot_y" to (status?.y ?: 0.0),
+                "robot_theta" to (status?.theta ?: 0.0),
+                "age_ms" to 0,
+                "point_count" to px.size
+            )
+            _incomingMessages.tryEmit(
+                "{\"op\":\"publish\",\"topic\":\"/relay/lidar\",\"msg\":${pushGson.toJson(data)}}")
+        }
+
+        if (now - lastPeoplePushMs >= PUSH_PEOPLE_INTERVAL_MS) {
+            val tracked = peopleTracker.getTrackedPeople()
+            if (tracked.isNotEmpty() || lastPushedPeopleCount != 0) {
+                lastPeoplePushMs = now
+                lastPushedPeopleCount = tracked.size
+                val people = tracked.map { person ->
+                    mapOf(
+                        "id" to person.id,
+                        "x" to person.x,
+                        "y" to person.y,
+                        "vx" to person.vx,
+                        "vy" to person.vy,
+                        "heading" to person.heading,
+                        "confidence" to person.confidence
+                    )
+                }
+                val data = mapOf(
+                    "people" to people,
+                    "robot_x" to (status?.x ?: 0.0),
+                    "robot_y" to (status?.y ?: 0.0),
+                    "robot_theta" to (status?.theta ?: 0.0),
+                    "age_ms" to 0,
+                    "count" to tracked.size,
+                    "people_detected" to _peopleDetected.value
+                )
+                _incomingMessages.tryEmit(
+                    "{\"op\":\"publish\",\"topic\":\"/relay/people\",\"msg\":${pushGson.toJson(data)}}")
+            }
+        }
     }
 
     /**
