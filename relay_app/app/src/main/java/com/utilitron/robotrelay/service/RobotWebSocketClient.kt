@@ -41,6 +41,14 @@ class RobotWebSocketClient(
         private const val CREEP_DISTANCE = 0.50f
         private const val WARN_DISTANCE = 0.80f
         private const val CREEP_SPEED = 0.05
+
+        // /relay/safety WS publishing: zone changes emit immediately; range-only
+        // changes are throttled; keepalive proves LIDAR liveness so clients can
+        // age-out staleness without the relay ever re-publishing stale data.
+        private const val SAFETY_EMIT_INTERVAL_MS = 500L
+        private const val SAFETY_RANGE_DELTA_M = 0.05f
+        private const val SAFETY_KEEPALIVE_MS = 2000L
+        private const val SAFETY_CLEAR_RANGE_M = 999.0
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -833,6 +841,42 @@ class RobotWebSocketClient(
                     if (_detachMode.value) " [DETACH]" else "")
         }
         _robotStatus.value = _robotStatus.value?.copy(safetyZone = newZone)
+
+        emitSafetyStatus(newZone, zoneChanged = newZone != oldZone, minFront = minFront)
+    }
+
+    @Volatile private var lastSafetyEmitMs: Long = 0
+    @Volatile private var lastEmittedRangeM: Float = Float.MAX_VALUE
+
+    /**
+     * Publish relay-computed safety intelligence to WS clients as a synthetic
+     * rosbridge-style topic. Rides the same incomingMessages flow the forwarder
+     * already broadcasts, so it inherits forwarder resilience and there is
+     * exactly one publish pipe to clients.
+     */
+    private fun emitSafetyStatus(zone: SafetyZone, zoneChanged: Boolean, minFront: Float) {
+        val now = System.currentTimeMillis()
+        val rangeDelta = kotlin.math.abs(minFront - lastEmittedRangeM)
+        val throttleElapsed = now - lastSafetyEmitMs >= SAFETY_EMIT_INTERVAL_MS
+        val keepaliveDue = now - lastSafetyEmitMs >= SAFETY_KEEPALIVE_MS
+
+        if (!zoneChanged && !keepaliveDue && !(throttleElapsed && rangeDelta >= SAFETY_RANGE_DELTA_M)) {
+            return
+        }
+
+        lastSafetyEmitMs = now
+        lastEmittedRangeM = minFront
+        val status = _robotStatus.value
+        val rangeM = if (minFront == Float.MAX_VALUE) SAFETY_CLEAR_RANGE_M else minFront.toDouble()
+        val msg = "{\"op\":\"publish\",\"topic\":\"/relay/safety\",\"msg\":{" +
+                "\"safety_zone\":\"${zone.name}\"," +
+                "\"min_range_m\":$rangeM," +
+                "\"obstacle_in_path\":${status?.obstacleInPath ?: false}," +
+                "\"obstacle_moving\":${status?.obstacleMoving ?: false}," +
+                "\"obstacle_type\":\"${status?.obstacleType ?: "CLEAR"}\"," +
+                "\"detach_mode\":${_detachMode.value}," +
+                "\"ts\":$now}}"
+        _incomingMessages.tryEmit(msg)
     }
 
     /**

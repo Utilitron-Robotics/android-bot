@@ -880,6 +880,13 @@ class RelayWebSocketServer(
                         return
                     }
 
+                    // === RTT PROBE (echoed to the probing client only, never forwarded) ===
+                    "relay_ping" -> {
+                        val t = json.get("t")?.asLong ?: 0L
+                        send("{\"op\":\"relay_pong\",\"t\":$t}")
+                        return
+                    }
+
                     // === LEGACY TABLET COMMANDS (still supported) ===
                     "tablet_stop_speak" -> {
                         Log.i(TAG, "Tablet stop speak")
