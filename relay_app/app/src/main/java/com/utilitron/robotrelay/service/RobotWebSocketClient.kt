@@ -55,6 +55,12 @@ class RobotWebSocketClient(
         // Payload shapes mirror the HTTP /lidar and /people endpoints.
         private const val PUSH_LIDAR_INTERVAL_MS = 200L
         private const val PUSH_PEOPLE_INTERVAL_MS = 200L
+
+        // Teleop deadman: the joystick streams velocity every 100ms while
+        // held; this many ms of silence after a nonzero command means the
+        // operator vanished (wifi drop mid-drag between floors) - zero once.
+        private const val DEADMAN_TIMEOUT_MS = 800L
+        private const val DEADMAN_CHECK_INTERVAL_MS = 200L
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -890,6 +896,39 @@ class RobotWebSocketClient(
         _incomingMessages.tryEmit(msg)
     }
 
+    // ── Teleop deadman ─────────────────────────────────────────────────
+    // Armed by any teleop velocity command (WS-forwarded or HTTP). If the
+    // last command was motion and the stream goes silent, zero the base
+    // exactly once. Autonomous nav is untouched: sendVelocity already
+    // defers to move_base while navStatus == 601.
+    @Volatile private var lastTeleopCmdMs = 0L
+    @Volatile private var teleopMoving = false
+    private var deadmanJob: Job? = null
+
+    fun noteTeleopCommand(linearX: Double, angularZ: Double) {
+        lastTeleopCmdMs = System.currentTimeMillis()
+        teleopMoving = linearX != 0.0 || angularZ != 0.0
+    }
+
+    private fun startDeadmanWatchdog() {
+        deadmanJob?.cancel()
+        deadmanJob = scope.launch {
+            while (isActive) {
+                delay(DEADMAN_CHECK_INTERVAL_MS)
+                if (teleopMoving &&
+                    System.currentTimeMillis() - lastTeleopCmdMs >= DEADMAN_TIMEOUT_MS) {
+                    teleopMoving = false
+                    Log.w(TAG, "DEADMAN: teleop silent ${DEADMAN_TIMEOUT_MS}ms while moving - zeroing base")
+                    sendVelocity(0.0, 0.0)
+                }
+            }
+        }
+    }
+
+    init {
+        startDeadmanWatchdog()
+    }
+
     private val pushGson = com.google.gson.Gson()
     @Volatile private var lastLidarPushMs = 0L
     @Volatile private var lastPeoplePushMs = 0L
@@ -998,6 +1037,8 @@ class RobotWebSocketClient(
             // Don't send teleop velocity during autonomous nav - it overrides move_base
             return
         }
+
+        noteTeleopCommand(linearX, angularZ)
 
         var adjustedLinear = linearX
 

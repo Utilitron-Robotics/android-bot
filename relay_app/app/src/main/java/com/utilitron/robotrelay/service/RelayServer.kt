@@ -1020,6 +1020,21 @@ class RelayWebSocketServer(
                 // Not a tablet command, forward to robot
             }
 
+            // Deadman: timestamp teleop velocity passing through raw, so the
+            // base zeroes if the operator's stream dies mid-motion
+            try {
+                val json = gson.fromJson(payload, com.google.gson.JsonObject::class.java)
+                if (json.get("op")?.asString == "publish" &&
+                    json.get("topic")?.asString == ChassisProtocol.TOPIC_CMD_VEL) {
+                    val msg = json.getAsJsonObject("msg")
+                    val lin = msg?.getAsJsonObject("linear")?.get("x")?.asDouble ?: 0.0
+                    val ang = msg?.getAsJsonObject("angular")?.get("z")?.asDouble ?: 0.0
+                    robotClient.noteTeleopCommand(lin, ang)
+                }
+            } catch (_: Exception) {
+                // Not JSON or not a velocity publish - nothing to note
+            }
+
             Log.d(TAG, "Relaying: ${payload.take(100)}...")
             robotClient.send(payload)
         }
