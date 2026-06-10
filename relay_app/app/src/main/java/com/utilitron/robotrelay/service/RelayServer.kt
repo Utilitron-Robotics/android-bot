@@ -58,6 +58,30 @@ class RelayServer(
     private var httpServer: RelayHttpServer? = null
     private var wsServer: RelayWebSocketServer? = null
 
+    // Latest /chloe/av state, replayed to late-joining WS clients so they
+    // never have to wait for the next change to learn the stream URLs.
+    @Volatile
+    private var latestChloeAvMsg: String? = null
+
+    /** Broadcast Chloe's AV endpoints as a synthetic rosbridge-style topic.
+     *  Called on REAL change only (StateFlow dedupes repeat beacons). */
+    fun publishChloeAv(av: DiscoveryService.ChloeAvInfo?) {
+        val msg = if (av == null) {
+            "{\"op\":\"publish\",\"topic\":\"/chloe/av\",\"msg\":{\"available\":false}}"
+        } else {
+            val base = "http://${av.host}:${av.port}"
+            "{\"op\":\"publish\",\"topic\":\"/chloe/av\",\"msg\":{" +
+                "\"available\":true," +
+                "\"video_url\":\"$base${av.videoPath}\"," +
+                "\"audio_url\":\"$base${av.audioPath}\"," +
+                "\"camera\":${av.cameraAvailable}," +
+                "\"name\":\"${av.name}\"}}"
+        }
+        latestChloeAvMsg = msg
+        wsServer?.broadcast(msg)
+        Log.i(TAG, "Chloe AV -> clients: ${if (av == null) "unavailable" else av.host}")
+    }
+
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning
 
@@ -93,7 +117,7 @@ class RelayServer(
             // Start WebSocket server on port + 1
             wsServer = RelayWebSocketServer(port + 1, robotClient, scope, { count ->
                 _connectedClients.value = count
-            }, taskExecutor, commandBuffer)
+            }, taskExecutor, commandBuffer, { listOfNotNull(latestChloeAvMsg) })
             wsServer?.start()
 
             _isRunning.value = true
@@ -716,7 +740,8 @@ class RelayWebSocketServer(
     private val scope: CoroutineScope,
     private val onClientCountChanged: (Int) -> Unit,
     private val taskExecutor: RelayServer.TaskExecutor? = null,
-    private val commandBuffer: CommandBuffer? = null
+    private val commandBuffer: CommandBuffer? = null,
+    private val initialClientMessages: () -> List<String> = { emptyList() }
 ) : NanoWSD(port) {
 
     companion object {
@@ -761,7 +786,7 @@ class RelayWebSocketServer(
     }
 
     override fun openWebSocket(handshake: IHTTPSession): WebSocket {
-        return RelayWebSocket(handshake, robotClient, scope, taskExecutor, commandBuffer) { ws, connected ->
+        return RelayWebSocket(handshake, robotClient, scope, taskExecutor, commandBuffer, initialClientMessages) { ws, connected ->
             synchronized(clients) {
                 if (connected) {
                     clients.add(ws)
@@ -799,6 +824,7 @@ class RelayWebSocketServer(
         private val scope: CoroutineScope,
         private val taskExecutor: RelayServer.TaskExecutor?,
         private val commandBuffer: CommandBuffer?,
+        private val initialClientMessages: () -> List<String>,
         private val onConnectionChanged: (WebSocket, Boolean) -> Unit
     ) : NanoWSD.WebSocket(handshake) {
 
@@ -807,6 +833,15 @@ class RelayWebSocketServer(
         override fun onOpen() {
             Log.i(TAG, "Client connected")
             onConnectionChanged(this, true)
+            // Replay latest synthetic state (e.g. /chloe/av) so late joiners
+            // don't wait for the next change
+            initialClientMessages().forEach { msg ->
+                try {
+                    send(msg)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Initial state replay failed: ${e.message}")
+                }
+            }
             // Force /map refresh using the robust refreshMap method
             Log.i(TAG, "Triggering map refresh for new Flutter client")
             robotClient.refreshMap()

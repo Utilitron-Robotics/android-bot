@@ -353,6 +353,14 @@ class RelayService : Service(), TextToSpeech.OnInitListener, RelayServer.TaskExe
         discoveryService = DiscoveryService(relayPort, robotClient)
         discoveryService?.start()
 
+        // Chloe AV beacons -> /chloe/av to WS clients. StateFlow fires on
+        // real change only (appear/move/camera-flip/stale), never repeats.
+        scope.launch {
+            discoveryService?.chloeAv?.collect { av ->
+                relayServer.publishChloeAv(av)
+            }
+        }
+
         // Update notification with status
         scope.launch {
             robotClient.connectionState.collect { state ->
