@@ -48,11 +48,13 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
   // Chloe AV endpoints from /chloe/av (relay rebroadcasts her UDP beacon).
   // Relay handles staleness (10s silence -> available:false exactly once).
   bool _chloeAvAvailable = false;
+  String? _chloeBaseUrl;
   String? _chloeVideoUrl;
   String? _chloeAudioUrl;
   bool _chloeCameraUp = false;
 
   bool get chloeAvAvailable => _chloeAvAvailable;
+  String? get chloeBaseUrl => _chloeBaseUrl;
   String? get chloeVideoUrl => _chloeVideoUrl;
   String? get chloeAudioUrl => _chloeAudioUrl;
   bool get chloeCameraUp => _chloeCameraUp;
@@ -296,6 +298,7 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
         final data = msg['msg'] as Map<String, dynamic>?;
         if (data != null) {
           _chloeAvAvailable = data['available'] as bool? ?? false;
+          _chloeBaseUrl = data['base_url'] as String?;
           _chloeVideoUrl = data['video_url'] as String?;
           _chloeAudioUrl = data['audio_url'] as String?;
           _chloeCameraUp = data['camera'] as bool? ?? false;
@@ -457,6 +460,7 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
     _minRangeMeters = null;
     _lastSafetyUpdate = null;
     _chloeAvAvailable = false;
+    _chloeBaseUrl = null;
     _chloeVideoUrl = null;
     _chloeAudioUrl = null;
     _chloeCameraUp = false;

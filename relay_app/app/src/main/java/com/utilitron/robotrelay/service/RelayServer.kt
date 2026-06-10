@@ -72,6 +72,7 @@ class RelayServer(
             val base = "http://${av.host}:${av.port}"
             "{\"op\":\"publish\",\"topic\":\"/chloe/av\",\"msg\":{" +
                 "\"available\":true," +
+                "\"base_url\":\"$base\"," +
                 "\"video_url\":\"$base${av.videoPath}\"," +
                 "\"audio_url\":\"$base${av.audioPath}\"," +
                 "\"camera\":${av.cameraAvailable}," +

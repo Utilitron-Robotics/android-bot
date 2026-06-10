@@ -639,6 +639,7 @@ class _HudScreenState extends State<HudScreen>
                   child: ChloeAvPanel(
                     videoUrl: robot.chloeVideoUrl,
                     audioUrl: robot.chloeAudioUrl,
+                    baseUrl: robot.chloeBaseUrl,
                     cameraUp: robot.chloeCameraUp,
                     onClose: () => setState(() => _chloePanelVisible = false),
                   ),

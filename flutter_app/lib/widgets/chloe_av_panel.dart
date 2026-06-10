@@ -14,6 +14,7 @@ import 'package:just_audio/just_audio.dart';
 class ChloeAvPanel extends StatefulWidget {
   final String? videoUrl;
   final String? audioUrl;
+  final String? baseUrl;
   final bool cameraUp;
   final VoidCallback? onClose;
 
@@ -21,6 +22,7 @@ class ChloeAvPanel extends StatefulWidget {
     super.key,
     required this.videoUrl,
     required this.audioUrl,
+    this.baseUrl,
     required this.cameraUp,
     this.onClose,
   });
@@ -33,6 +35,34 @@ class _ChloeAvPanelState extends State<ChloeAvPanel> {
   AudioPlayer? _audioPlayer;
   bool _audioOn = false;
   bool _audioBusy = false;
+  bool _wakeBusy = false;
+
+  /// POST /wake or /sleep on the Nano. The Nano runs its env-configured
+  /// command and reports honestly (501 when not configured).
+  Future<void> _sendWakeSleep(String action) async {
+    final base = widget.baseUrl;
+    if (base == null || _wakeBusy) return;
+    setState(() => _wakeBusy = true);
+    String result;
+    try {
+      final res = await http
+          .post(Uri.parse('$base/$action'))
+          .timeout(const Duration(seconds: 35));
+      if (res.statusCode == 200) {
+        result = 'Chloe $action: OK';
+      } else {
+        final body = res.body.length > 200 ? res.body.substring(0, 200) : res.body;
+        result = 'Chloe $action failed (${res.statusCode}): $body';
+      }
+    } catch (e) {
+      result = 'Chloe $action failed: $e';
+    }
+    if (mounted) {
+      setState(() => _wakeBusy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(result)));
+    }
+  }
 
   Future<void> _toggleAudio() async {
     final url = widget.audioUrl;
@@ -98,6 +128,26 @@ class _ChloeAvPanelState extends State<ChloeAvPanel> {
                         fontSize: 12,
                         letterSpacing: 2)),
                 const Spacer(),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  tooltip: 'Wake Chloe',
+                  color: _wakeBusy ? Colors.grey : Colors.amber,
+                  icon: const Icon(Icons.wb_sunny),
+                  onPressed: widget.baseUrl == null || _wakeBusy
+                      ? null
+                      : () => _sendWakeSleep('wake'),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  tooltip: 'Put Chloe to sleep (teleop mode)',
+                  color: _wakeBusy ? Colors.grey : Colors.blueGrey,
+                  icon: const Icon(Icons.bedtime),
+                  onPressed: widget.baseUrl == null || _wakeBusy
+                      ? null
+                      : () => _sendWakeSleep('sleep'),
+                ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   iconSize: 18,
