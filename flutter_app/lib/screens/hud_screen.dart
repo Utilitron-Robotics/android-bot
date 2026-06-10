@@ -17,6 +17,7 @@ import '../services/audio_announcer.dart';
 import '../services/sequence_executor.dart';
 import '../widgets/map_view.dart';
 import '../widgets/joystick.dart';
+import '../widgets/chloe_av_panel.dart';
 import '../widgets/sequence_editor.dart';
 import '../widgets/voice_control.dart';
 import '../widgets/fleet_picker.dart';
@@ -66,6 +67,9 @@ class _HudScreenState extends State<HudScreen>
   MapInfo? _mapInfo;
   double _robotX = 0;
   double _robotY = 0;
+
+  // Chloe AV panel visibility (panel only offered while her beacon is live)
+  bool _chloePanelVisible = true;
 
   // Transport type (auto-detected from platform)
   late final TransportType _transportType = TransportType.auto;
@@ -624,6 +628,30 @@ class _HudScreenState extends State<HudScreen>
                   bottom: 60,
                   right: _rightPanelExpanded ? 280 : 72,
                   child: _buildLargeCountdownTimer(tourManager),
+                ),
+
+              // === LAYER 4b: Chloe's eyes + ears (when her AV beacon is live) ===
+              if (robot.chloeAvAvailable && _chloePanelVisible)
+                AnimatedPositioned(
+                  duration: const Duration(milliseconds: 200),
+                  bottom: 60,
+                  left: _leftPanelExpanded ? 424 : 72,
+                  child: ChloeAvPanel(
+                    videoUrl: robot.chloeVideoUrl,
+                    audioUrl: robot.chloeAudioUrl,
+                    cameraUp: robot.chloeCameraUp,
+                    onClose: () => setState(() => _chloePanelVisible = false),
+                  ),
+                ),
+              if (robot.chloeAvAvailable && !_chloePanelVisible)
+                Positioned(
+                  bottom: 60,
+                  left: _leftPanelExpanded ? 424 : 72,
+                  child: FloatingActionButton.small(
+                    tooltip: "Show Chloe's camera",
+                    onPressed: () => setState(() => _chloePanelVisible = true),
+                    child: const Icon(Icons.videocam),
+                  ),
                 ),
 
               // LAYER 5: Await Visitor overlay now shows on TABLET (not Flutter)

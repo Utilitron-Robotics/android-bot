@@ -51,6 +51,9 @@ dependencies:
 
   # Archive/compression utilities for WebRTC map data decompression
   archive: ^3.6.1
+
+  # Chloe's mic in the HUD (endless-WAV stream playback)
+  just_audio: ^0.9.40
 dev_dependencies:
   flutter_test:
     sdk: flutter

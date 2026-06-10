@@ -45,6 +45,18 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
       _lastSafetyUpdate == null ||
       DateTime.now().difference(_lastSafetyUpdate!) > safetyStaleAfter;
 
+  // Chloe AV endpoints from /chloe/av (relay rebroadcasts her UDP beacon).
+  // Relay handles staleness (10s silence -> available:false exactly once).
+  bool _chloeAvAvailable = false;
+  String? _chloeVideoUrl;
+  String? _chloeAudioUrl;
+  bool _chloeCameraUp = false;
+
+  bool get chloeAvAvailable => _chloeAvAvailable;
+  String? get chloeVideoUrl => _chloeVideoUrl;
+  String? get chloeAudioUrl => _chloeAudioUrl;
+  bool get chloeCameraUp => _chloeCameraUp;
+
   // RTT from the relay_ping echo on the live socket
   int? get rttMs => _client.rttMs;
   NetworkCondition get networkCondition {
@@ -279,6 +291,20 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
     // Listen for status updates
     _statusSubscription = _client.messages.listen((msg) {
+      // Chloe AV announcement (relay-synthesized, broadcast on change only)
+      if (msg['topic'] == '/chloe/av') {
+        final data = msg['msg'] as Map<String, dynamic>?;
+        if (data != null) {
+          _chloeAvAvailable = data['available'] as bool? ?? false;
+          _chloeVideoUrl = data['video_url'] as String?;
+          _chloeAudioUrl = data['audio_url'] as String?;
+          _chloeCameraUp = data['camera'] as bool? ?? false;
+          debugPrint('RobotConnection: Chloe AV '
+              '${_chloeAvAvailable ? "at $_chloeVideoUrl (camera: $_chloeCameraUp)" : "unavailable"}');
+          notifyListeners();
+        }
+        return;
+      }
       // Relay-synthesized safety topic (broadcast by relay, no subscribe needed)
       if (msg['topic'] == '/relay/safety') {
         final data = msg['msg'] as Map<String, dynamic>?;
@@ -430,6 +456,10 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
     _lastStatusUpdate = null;
     _minRangeMeters = null;
     _lastSafetyUpdate = null;
+    _chloeAvAvailable = false;
+    _chloeVideoUrl = null;
+    _chloeAudioUrl = null;
+    _chloeCameraUp = false;
     notifyListeners();
   }
 
