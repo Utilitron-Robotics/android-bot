@@ -7,7 +7,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 import '../core/buffer_client.dart' show BufferClient;
 import '../core/buffer_sequence_executor.dart' show BufferSequenceExecutor, SequenceExecutorStatus;
 import '../core/robot_connection.dart';
-import '../core/unified_transport.dart' show UnifiedTransportManager;
 import '../core/transport_config.dart';
 import '../core/sequence_mode.dart'
     show SequenceManager, SequenceStatus, SequencePhase, Sequence;
@@ -25,20 +24,16 @@ import '../widgets/crowd_logic_settings.dart';
 import '../widgets/announcement_presets.dart';
 import '../widgets/mode_editor.dart';
 
-/// Transport type - auto-selected based on platform
-/// Chrome/Web → WebSocket (gRPC doesn't work in browsers)
-/// Native (macOS, iOS, Android) → gRPC (binary, reliable)
+/// Transport: one path on every platform - WebSocket (rosbridge) via the relay
 enum TransportType {
-  websocket('WebSocket', Icons.language, ':8766'),
-  grpc('gRPC', Icons.cable, ':50051');
+  websocket('WebSocket', Icons.language, ':8766');
 
   final String label;
   final IconData icon;
   final String port;
   const TransportType(this.label, this.icon, this.port);
 
-  /// Auto-detect transport based on platform
-  static TransportType get auto => kIsWeb ? websocket : grpc;
+  static TransportType get auto => websocket;
 }
 
 /// HUD-style cockpit layout for landscape tablet control
@@ -290,12 +285,8 @@ class _HudScreenState extends State<HudScreen>
   /// Called when app returns from background/lock screen
   void _onAppResumed() {
     final robot = context.read<RobotConnection>();
-    final transport = context.read<UnifiedTransportManager>();
 
-    // Check connection based on mode
-    final isConnected = kIsWeb
-        ? robot.state == RobotConnectionState.connected
-        : transport.status.grpcConnected;
+    final isConnected = robot.state == RobotConnectionState.connected;
 
     if (isConnected) {
       // Use shared health check for staleness detection
@@ -307,13 +298,7 @@ class _HudScreenState extends State<HudScreen>
           'HUD: Connection lost during background, attempting reconnect');
       final savedUrl = robot.robotUrl;
       if (savedUrl.isNotEmpty) {
-        if (kIsWeb) {
-          robot.connect(savedUrl);
-        } else {
-          // Relay mode - reconnect gRPC
-          final host = _extractHost(savedUrl);
-          transport.connectToHost(host);
-        }
+        robot.connect(savedUrl);
       }
     }
 
@@ -327,10 +312,7 @@ class _HudScreenState extends State<HudScreen>
   /// Check connection health and reconnect if stale
   /// Called from: app resume, tour start (SINC seeding)
   void _checkConnectionHealth(RobotConnection robot) {
-    final transport = context.read<UnifiedTransportManager>();
-    final isConnected = kIsWeb
-        ? robot.state == RobotConnectionState.connected
-        : transport.status.grpcConnected;
+    final isConnected = robot.state == RobotConnectionState.connected;
 
     if (!isConnected) {
       debugPrint('HUD: _checkConnectionHealth - not connected, skipping');
@@ -372,28 +354,19 @@ class _HudScreenState extends State<HudScreen>
         // HUD should NEVER cancel navigation just because it reconnected
         debugPrint('HUD: Connection STALE while nav active (tour=$isTourActive, moving=$isNavigating) - low-level WS reconnect');
         robot.client.reconnect();
-        // Also reconnect gRPC for command channel
-        context.read<UnifiedTransportManager>().connectToHost(host);
         // Monitor heartbeat to detect if button was pressed while disconnected
         if (isAwaitingVisitor && bufferExecutor != null && bufferClient != null) {
           _monitorButtonStandbyRecovery(bufferExecutor, bufferClient);
         }
       } else {
         // No tour running: full reconnect is safe
-        debugPrint('HUD: Connection STALE (no tour) - full reconnect (WebSocket + gRPC)...');
+        debugPrint('HUD: Connection STALE (no tour) - full reconnect...');
         // Disconnect completes synchronously — connect immediately after.
         // No stabilization delay needed; onOpen IS the readiness signal.
-        if (kIsWeb) {
-          robot.disconnect();
-          if (mounted) robot.connect(savedUrl);
-        } else {
-          // Full reconnect: WebSocket (heartbeats) + gRPC (commands)
-          robot.disconnect();
-          if (mounted) {
-            final wsUrl = 'ws://$host:8766';
-            robot.connectWithDisplayUrl(wsUrl, host);
-            context.read<UnifiedTransportManager>().connectToHost(host);
-          }
+        robot.disconnect();
+        if (mounted) {
+          final wsUrl = 'ws://$host:8766';
+          robot.connectWithDisplayUrl(wsUrl, host);
         }
       }
     } else {
@@ -533,20 +506,11 @@ class _HudScreenState extends State<HudScreen>
                 'HUD: Sequence status=${tourManager.status}, tourRunning=$tourRunning, phase=${tourManager.currentPhase}, countdown=${tourManager.countdownSeconds}');
           }
 
-          // Check connection based on mode:
-          // - Direct mode: check RobotConnection (WebSocket)
-          // - Relay mode: check UnifiedTransportManager (gRPC)
-          final transport = context.watch<UnifiedTransportManager>();
-          final isConnected = kIsWeb
-              ? robot.state == RobotConnectionState.connected
-              : transport.status.grpcConnected;
+          // One transport: connection state lives on RobotConnection
+          final isConnected = robot.state == RobotConnectionState.connected;
 
           if (!isConnected) {
-            // Check if we're in connecting state
-            final isConnecting = kIsWeb
-                ? robot.state == RobotConnectionState.connecting
-                : false; // gRPC connection is fast, no need for connecting screen
-            if (isConnecting) {
+            if (robot.state == RobotConnectionState.connecting) {
               return _buildConnectingScreen();
             }
             return _buildConnectionScreen(robot);
@@ -579,38 +543,19 @@ class _HudScreenState extends State<HudScreen>
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(6),
-                    child: Consumer<UnifiedTransportManager>(
-                      builder: (context, manager, child) {
-                        return Stack(
-                          children: [
-                            MapView(
-                              fullscreen: true,
-                              mapStream: manager.mapStream,
-                              depthStream: manager.depthStream,
-                              onMapUpdate: (info, x, y) {
-                                if (mounted &&
-                                    (info != _mapInfo ||
-                                        x != _robotX ||
-                                        y != _robotY)) {
-                                  setState(() {
-                                    _mapInfo = info;
-                                    _robotX = x;
-                                    _robotY = y;
-                                  });
-                                }
-                              },
-                            ),
-                            Positioned(
-                              bottom: 16,
-                              left: 16,
-                              child: FloatingActionButton(
-                                onPressed: () => manager.connectMapStream(),
-                                tooltip: 'Connect Map Stream (WebRTC)',
-                                child: const Icon(Icons.stream),
-                              ),
-                            )
-                          ],
-                        );
+                    child: MapView(
+                      fullscreen: true,
+                      onMapUpdate: (info, x, y) {
+                        if (mounted &&
+                            (info != _mapInfo ||
+                                x != _robotX ||
+                                y != _robotY)) {
+                          setState(() {
+                            _mapInfo = info;
+                            _robotX = x;
+                            _robotY = y;
+                          });
+                        }
                       },
                     ),
                   ),
@@ -764,9 +709,7 @@ class _HudScreenState extends State<HudScreen>
                               color: _accentColor, fontWeight: FontWeight.bold),
                         ),
                         Text(
-                          kIsWeb
-                              ? 'WebSocket:8766 (Chrome requires WS)'
-                              : 'gRPC:50051 (native binary protocol)',
+                          'WebSocket:8766 (one transport, all platforms)',
                           style: TextStyle(
                               color: Colors.grey.shade400, fontSize: 11),
                         ),
@@ -1110,13 +1053,8 @@ class _HudScreenState extends State<HudScreen>
                         if (bc != null && bc.isStale) {
                           debugPrint('HUD: Connection stale - low-level WS reconnect (preserving tour)');
                           final r = context.read<RobotConnection>();
-                          final host = _extractHost(r.robotUrl);
-                          if (host.isNotEmpty) {
-                            // Low-level WebSocket reconnect (preserves BufferClient)
-                            r.client.reconnect();
-                            // Reconnect gRPC
-                            context.read<UnifiedTransportManager>().connectToHost(host);
-                          }
+                          // Low-level WebSocket reconnect (preserves BufferClient)
+                          r.client.reconnect();
                         }
                         tourManager.resumeFromVisitor();
                       },
@@ -1483,9 +1421,9 @@ class _HudScreenState extends State<HudScreen>
 
           // Latency meter - shows RTT from heartbeat
           Builder(builder: (context) {
-            final transport = context.watch<UnifiedTransportManager>();
-            final rtt = transport.status.rttMs;
-            final condition = transport.status.networkCondition;
+            final connection = context.watch<RobotConnection>();
+            final rtt = connection.rttMs;
+            final condition = connection.networkCondition;
             final color = switch (condition) {
               NetworkCondition.excellent => Colors.green,
               NetworkCondition.good => _accentColor,
@@ -1502,7 +1440,7 @@ class _HudScreenState extends State<HudScreen>
             };
             return _HudChip(
               icon: icon,
-              label: rtt > 0 ? '${rtt.toStringAsFixed(0)}ms' : '--',
+              label: rtt != null && rtt > 0 ? '${rtt}ms' : '--',
               color: color,
               pulse: condition == NetworkCondition.critical,
             );
@@ -1712,9 +1650,7 @@ class _HudScreenState extends State<HudScreen>
             color: _dangerColor,
             tooltip: 'Disconnect',
             onPressed: () {
-              // Disconnect both robot connection AND unified transport (gRPC)
               robot.disconnect();
-              context.read<UnifiedTransportManager>().disconnect();
               // Navigate back to login screen
               Navigator.of(context).pushReplacementNamed('/');
             },
@@ -2451,38 +2387,15 @@ class _HudScreenState extends State<HudScreen>
     final host = _extractHost(userInput);
     if (host.isEmpty) return;
 
-    if (kIsWeb) {
-      // Web/Chrome: WebSocket to relay:8766 (gRPC doesn't work in browsers)
-      final wsUrl = 'ws://$host:8766';
-      debugPrint('HUD: [Web/${_transportType.label}] Connecting to $wsUrl');
+    // One transport on every platform: WebSocket to relay:8766
+    final wsUrl = 'ws://$host:8766';
+    debugPrint('HUD: [${_transportType.label}] Connecting to $wsUrl');
 
-      if (robot.state == RobotConnectionState.connected) {
-        debugPrint('HUD: Already connected, skipping');
-        return;
-      }
-      robot.connectWithDisplayUrl(wsUrl, host);
-    } else {
-      // Native (macOS/iOS/Android): gRPC to relay:50051
-      final transport = context.read<UnifiedTransportManager>();
-
-      if (transport.status.grpcConnected) {
-        debugPrint('HUD: gRPC already connected, skipping');
-        return;
-      }
-
-      debugPrint(
-          'HUD: [Native/${_transportType.label}] Connecting to $host:50051');
-      transport.connectToHost(host);
-
-      // ALSO connect RobotConnection via WebSocket for capability discovery (waypoints!)
-      // The relay forwards WebSocket on port 8766 to the robot
-      if (robot.state != RobotConnectionState.connected) {
-        final wsUrl = 'ws://$host:8766';
-        robot.connectWithDisplayUrl(wsUrl, host);
-        debugPrint(
-            'HUD: Connecting WebSocket to $wsUrl for capability discovery');
-      }
+    if (robot.state == RobotConnectionState.connected) {
+      debugPrint('HUD: Already connected, skipping');
+      return;
     }
+    robot.connectWithDisplayUrl(wsUrl, host);
   }
 
   /// Open fleet picker to switch robots

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/robot_connection.dart';
 import '../core/chassis_protocol.dart';
-import '../core/unified_transport.dart';
 import '../services/audio_announcer.dart';
 
 /// Robot speed mode - controls built-in collision avoidance behavior
@@ -60,7 +59,7 @@ class _JoystickControlState extends State<JoystickControl> {
   bool _obstacleLeft = false;
   bool _obstacleRight = false;
   double _minFrontRange = double.infinity;
-  StreamSubscription? _grpcStatusSubscription;
+  RobotConnection? _safetySource;
   RobotSpeedMode _robotSpeedMode = RobotSpeedMode.safetyMed;
   bool _speedModeLoading = false;
 
@@ -89,34 +88,41 @@ class _JoystickControlState extends State<JoystickControl> {
     super.initState();
     AudioAnnouncer().init();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _subscribeToGrpcStatus();
+      _subscribeToSafetyStatus();
       _querySpeedMode();
     });
   }
 
-  void _subscribeToGrpcStatus() {
-    final transport = context.read<UnifiedTransportManager>();
-    _grpcStatusSubscription = transport.robotStatus.listen((status) {
-      if (!mounted) return;
+  void _subscribeToSafetyStatus() {
+    // Relay-computed LIDAR safety from /relay/safety over the live WebSocket
+    final robot = context.read<RobotConnection>();
+    _safetySource = robot;
+    robot.addListener(_onSafetyUpdate);
+    _onSafetyUpdate();
+  }
 
-      // min_range_meters: >0 = real distance, -1 = LIDAR stale/dead
-      final minRange = status['min_range_meters'] as double?;
+  void _onSafetyUpdate() {
+    if (!mounted) return;
+    final robot = _safetySource;
+    if (robot == null) return;
 
-      double distance;
-      if (minRange != null && minRange < 0) {
-        // Relay says LIDAR is stale (no /scan data for 3+ seconds)
-        distance = -1;
-      } else if (minRange != null && minRange > 0 && minRange < 100) {
-        // Real LIDAR distance from relay
-        distance = minRange;
-      } else {
-        distance = double.infinity;
-      }
+    final minRange = robot.minRangeMeters;
 
-      setState(() {
-        _minFrontRange = distance;
-        _obstacleAhead = distance > 0 && distance < creepDistance;
-      });
+    double distance;
+    if (robot.safetyStale) {
+      // No fresh safety data (relay keepalive missing) - treat LIDAR as dead
+      distance = -1;
+    } else if (minRange != null && minRange > 0 && minRange < 100) {
+      // Real LIDAR distance from relay
+      distance = minRange;
+    } else {
+      distance = double.infinity;
+    }
+
+    if (distance == _minFrontRange) return;
+    setState(() {
+      _minFrontRange = distance;
+      _obstacleAhead = distance > 0 && distance < creepDistance;
     });
   }
 
@@ -169,7 +175,7 @@ class _JoystickControlState extends State<JoystickControl> {
   @override
   void dispose() {
     _sendTimer?.cancel();
-    _grpcStatusSubscription?.cancel();
+    _safetySource?.removeListener(_onSafetyUpdate);
     super.dispose();
   }
 

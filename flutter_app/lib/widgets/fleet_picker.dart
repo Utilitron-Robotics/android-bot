@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/fleet_discovery.dart';
 import '../core/robot_connection.dart';
-import '../core/dual_connection.dart';
 
 /// Fleet picker with WiFi scanning and robot selection
 class FleetPicker extends StatefulWidget {

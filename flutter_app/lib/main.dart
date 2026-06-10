@@ -1,20 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'core/unified_transport.dart';
 import 'core/robot_connection.dart';
 import 'core/fleet_discovery.dart';
 import 'core/sequence_mode.dart';
 import 'core/task_engine.dart';
 import 'screens/hud_screen.dart';
-
-// Global instance of the transport manager
-final unifiedTransportManager = UnifiedTransportManager(
-  endpoints: const TransportEndpoints(
-    // gRPC host is set dynamically when user connects to a relay
-    grpcHost: null,
-    robotId: 'robot-1',
-  ),
-);
 
 // Build version - pass via: --dart-define=BUILD_TIME=... --dart-define=BUILD_HASH=...
 const kBuildTime = String.fromEnvironment('BUILD_TIME', defaultValue: 'dev');
@@ -46,9 +36,7 @@ class DroidControllerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        // Provide the single instance of the transport manager
-        ChangeNotifierProvider.value(value: unifiedTransportManager),
-        // Legacy WebSocket connection for direct rosbridge communication
+        // The one transport: WebSocket (rosbridge) via the relay
         ChangeNotifierProvider(create: (_) => RobotConnection()),
         ChangeNotifierProvider(create: (_) => FleetDiscovery()),
         ChangeNotifierProvider.value(value: SequenceManager.instance),

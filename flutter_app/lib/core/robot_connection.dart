@@ -2,8 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'rosbridge_client.dart';
-import 'platform_transport.dart';
 import 'task_mode.dart';
+import 'transport_config.dart';
 import '../services/robot_introspection.dart';
 import '../services/audio_announcer.dart';
 import '../services/sequence_executor.dart';
@@ -11,18 +11,11 @@ import '../services/sequence_executor.dart';
 /// Robot connection state (renamed to avoid conflict with Flutter's ConnectionState)
 enum RobotConnectionState { disconnected, connecting, connected, error }
 
-/// Manages robot connection and discovered capabilities
-///
-/// Platform-aware transport:
-/// - Web: WebSocket via RosbridgeClient
-/// - Native: gRPC via PlatformTransport (with WebSocket fallback for discovery)
+/// Manages robot connection and discovered capabilities.
+/// One transport everywhere: WebSocket (rosbridge protocol) via the relay.
 class RobotConnection extends ChangeNotifier implements CommandExecutor {
   final RosbridgeClient _client = RosbridgeClient();
   RobotIntrospection? _introspection;
-
-  // Platform transport - used on native for commands
-  PlatformTransport? _platformTransport;
-  PlatformTransport? get platformTransport => _platformTransport;
 
   RobotConnectionState _state = RobotConnectionState.disconnected;
   String _robotUrl = '';
@@ -31,11 +24,38 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   // Subscriptions for live data
   StreamSubscription? _statusSubscription;
-  StreamSubscription? _platformStatusSub;
+  StreamSubscription? _rttSubscription;
   RobotStatus _status = RobotStatus();
 
-  // When true, skip status subscription (gRPC handles it)
-  bool _skipStatusSubscription = false;
+  // Relay-computed safety intelligence from /relay/safety (LIDAR zones).
+  // Staleness is client-side: no fresh message within the threshold means
+  // the data cannot be trusted (relay keepalive proves LIDAR liveness).
+  static const Duration safetyStaleAfter = Duration(milliseconds: 3000);
+  double? _minRangeMeters;
+  String _safetyZone = 'CLEAR';
+  bool _obstacleInPath = false;
+  String _obstacleType = 'CLEAR';
+  DateTime? _lastSafetyUpdate;
+
+  double? get minRangeMeters => _minRangeMeters;
+  String get safetyZone => _safetyZone;
+  bool get obstacleInPath => _obstacleInPath;
+  String get obstacleType => _obstacleType;
+  bool get safetyStale =>
+      _lastSafetyUpdate == null ||
+      DateTime.now().difference(_lastSafetyUpdate!) > safetyStaleAfter;
+
+  // RTT from the relay_ping echo on the live socket
+  int? get rttMs => _client.rttMs;
+  NetworkCondition get networkCondition {
+    final rtt = _client.rttMs;
+    if (rtt == null) return NetworkCondition.fair;
+    if (rtt < 50) return NetworkCondition.excellent;
+    if (rtt < 150) return NetworkCondition.good;
+    if (rtt < 300) return NetworkCondition.fair;
+    if (rtt < 600) return NetworkCondition.poor;
+    return NetworkCondition.critical;
+  }
 
   // Connection health tracking
   DateTime? _lastStatusUpdate;
@@ -148,9 +168,7 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
 
   /// Connect to robot using connectUrl, but save displayUrl for the UI
   /// This allows HTTP mode to connect via WebSocket but show HTTP URL to user
-  /// Set capabilityOnly=true when gRPC handles status (skips /robot_status subscription)
-  Future<void> connectWithDisplayUrl(String connectUrl, String displayUrl, {bool capabilityOnly = false}) async {
-    _skipStatusSubscription = capabilityOnly;
+  Future<void> connectWithDisplayUrl(String connectUrl, String displayUrl) async {
     debugPrint('RobotConnection: connectWithDisplayUrl called - connectUrl=$connectUrl, displayUrl=$displayUrl');
     if (_state == RobotConnectionState.connecting) {
       debugPrint('RobotConnection: Already connecting, skipping');
@@ -255,8 +273,25 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
       type: 'yutong_assistance/RobotStatus',
     );
 
+    // Surface RTT updates (relay_ping echo arrives every ping interval)
+    _rttSubscription?.cancel();
+    _rttSubscription = _client.rtt.listen((_) => notifyListeners());
+
     // Listen for status updates
     _statusSubscription = _client.messages.listen((msg) {
+      // Relay-synthesized safety topic (broadcast by relay, no subscribe needed)
+      if (msg['topic'] == '/relay/safety') {
+        final data = msg['msg'] as Map<String, dynamic>?;
+        if (data != null) {
+          _minRangeMeters = (data['min_range_m'] as num?)?.toDouble();
+          _safetyZone = data['safety_zone'] as String? ?? 'CLEAR';
+          _obstacleInPath = data['obstacle_in_path'] as bool? ?? false;
+          _obstacleType = data['obstacle_type'] as String? ?? 'CLEAR';
+          _lastSafetyUpdate = DateTime.now();
+          notifyListeners();
+        }
+        return;
+      }
       if (msg['topic'] == '/robot_status') {
         final data = msg['msg'] as Map<String, dynamic>?;
         if (data != null) {
@@ -386,11 +421,15 @@ class RobotConnection extends ChangeNotifier implements CommandExecutor {
       _statusSubscription!.cancel();
       _statusSubscription = null;
     }
+    _rttSubscription?.cancel();
+    _rttSubscription = null;
     _client.disconnect();
     _state = RobotConnectionState.disconnected;
     _capabilities = null;
     _status = RobotStatus();
     _lastStatusUpdate = null;
+    _minRangeMeters = null;
+    _lastSafetyUpdate = null;
     notifyListeners();
   }
 

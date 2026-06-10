@@ -52,6 +52,13 @@ class RosbridgeClient {
   Timer? _pingTimer;
   Timer? _reconnectTimer;
   DateTime? _lastMessageTime;
+
+  // RTT measured via relay_ping/relay_pong echo (relay answers; a direct
+  // robot rosbridge ignores the unknown op, same as the old bare ping)
+  int? _rttMs;
+  int? get rttMs => _rttMs;
+  final StreamController<int> _rttController = StreamController<int>.broadcast();
+  Stream<int> get rtt => _rttController.stream;
   String? _lastUrl;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 10;
@@ -223,11 +230,11 @@ class RosbridgeClient {
       return;
     }
 
-    // Send a ping (rosbridge doesn't have ping, but we can send an empty subscribe)
-    // This will fail if the connection is dead
+    // RTT probe doubling as liveness ping. The relay echoes relay_pong;
+    // a direct robot rosbridge ignores the unknown op (send failure still
+    // detects a dead connection either way).
     try {
-      // Use a harmless operation that won't affect state
-      send({'op': 'ping'}); // Rosbridge ignores unknown ops
+      send({'op': 'relay_ping', 't': DateTime.now().millisecondsSinceEpoch});
     } catch (e) {
       debugPrint('RosbridgeClient: Ping failed: $e');
       _handleDisconnect();
@@ -263,6 +270,14 @@ class RosbridgeClient {
     final op = msg['op'] as String?;
     if (op == 'pong') {
       // Connection is alive - lastMessageTime already updated by stream listener
+      return;
+    }
+    if (op == 'relay_pong') {
+      final t = msg['t'] as int?;
+      if (t != null && t > 0) {
+        _rttMs = DateTime.now().millisecondsSinceEpoch - t;
+        _rttController.add(_rttMs!);
+      }
       return;
     }
 
@@ -430,6 +445,7 @@ class RosbridgeClient {
     _messageController.close();
     _logController.close();
     _stateController.close();
+    _rttController.close();
   }
 
   // === Tablet Commands (intercepted by relay, not forwarded to robot) ===
