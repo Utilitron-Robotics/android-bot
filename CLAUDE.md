@@ -60,11 +60,10 @@ cd relay_app
 │                                                                   │
 │   Flutter App ←──────────────→ Android Tablet (Relay)            │
 │   (Phone/PC/Web)                   │                             │
-│                                    │ gRPC :50051                 │
-│   Protocols:                       │ WS :8766                    │
-│   • gRPC (primary)                 │ HTTP :8765                  │
-│   • WebSocket (fallback)           │                             │
-│   • HTTP (last resort)             │                             │
+│                                    │ WS :8766                    │
+│   Protocol:                        │ HTTP :8765 (map polling)    │
+│   • WebSocket (the ONE             │                             │
+│     transport, all platforms)      │                             │
 │                                    │                             │
 └────────────────────────────────────┼─────────────────────────────┘
                                      │
@@ -83,7 +82,11 @@ cd relay_app
 - Tablet is WIRED to robot (not WiFi)
 - Flutter apps connect to the relay tablet
 - Robot's WiFi hotspot is for diagnostics only
-- gRPC is the primary protocol (WAN-ready, binary, reliable)
+- WebSocket (rosbridge protocol) is THE transport on every platform.
+  The gRPC/MQTT/adaptive/unified transport frameworks were deleted
+  (June 2026) - they never carried drive commands. Relay-computed
+  safety arrives as synthetic topic `/relay/safety`; RTT via
+  `relay_ping`/`relay_pong` echo.
 
 ---
 
@@ -91,11 +94,11 @@ cd relay_app
 
 | Port | Protocol | App | Purpose |
 |------|----------|-----|---------|
-| 50051 | gRPC | Relay | Primary command channel |
-| 8765 | HTTP | Relay | REST API fallback |
-| 8766 | WebSocket | Relay | LAN legacy support |
+| 8766 | WebSocket | Relay | THE command + status channel |
+| 8765 | HTTP | Relay | Map/LIDAR/people polling (until WS push lands) |
 | 9090 | WebSocket | Robot | rosbridge (wired connection) |
 | 9999 | UDP | Relay | Discovery broadcast |
+| 50051 | gRPC | Relay | Dormant (server still runs; no Flutter client) |
 
 ---
 
@@ -265,7 +268,7 @@ The user debugs with:
 - These are DIFFERENT topics with DIFFERENT message formats
 - `/scan` is the one that WORKS on our robots
 - The relay subscribes to BOTH and processes whichever delivers data
-- The Flutter joystick gets safety zones via gRPC (relay processes LIDAR → STOP/CREEP/WARN/CLEAR)
+- The Flutter joystick gets safety zones via the synthetic `/relay/safety` topic over WebSocket (relay processes LIDAR → STOP/CREEP/WARN/CLEAR; zone changes emit immediately, 2s keepalive proves liveness, client treats >3s silence as stale)
 - **NEVER remove a working data subscription until the replacement is VERIFIED end-to-end**
 - **When fixing a bug, grep ALL callers** (e.g. tour start exists in BOTH hud_screen.dart AND sequence_editor.dart)
 

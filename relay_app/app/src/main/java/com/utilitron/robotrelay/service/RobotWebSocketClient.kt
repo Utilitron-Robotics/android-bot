@@ -41,6 +41,26 @@ class RobotWebSocketClient(
         private const val CREEP_DISTANCE = 0.50f
         private const val WARN_DISTANCE = 0.80f
         private const val CREEP_SPEED = 0.05
+
+        // /relay/safety WS publishing: zone changes emit immediately; range-only
+        // changes are throttled; keepalive proves LIDAR liveness so clients can
+        // age-out staleness without the relay ever re-publishing stale data.
+        private const val SAFETY_EMIT_INTERVAL_MS = 500L
+        private const val SAFETY_RANGE_DELTA_M = 0.05f
+        private const val SAFETY_KEEPALIVE_MS = 2000L
+        private const val SAFETY_CLEAR_RANGE_M = 999.0
+
+        // /relay/lidar + /relay/people push (replaces HUD HTTP polling):
+        // emitted only when fresh data just arrived, at most this often.
+        // Payload shapes mirror the HTTP /lidar and /people endpoints.
+        private const val PUSH_LIDAR_INTERVAL_MS = 200L
+        private const val PUSH_PEOPLE_INTERVAL_MS = 200L
+
+        // Teleop deadman: the joystick streams velocity every 100ms while
+        // held; this many ms of silence after a nonzero command means the
+        // operator vanished (wifi drop mid-drag between floors) - zero once.
+        private const val DEADMAN_TIMEOUT_MS = 800L
+        private const val DEADMAN_CHECK_INTERVAL_MS = 200L
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -593,6 +613,9 @@ class RobotWebSocketClient(
                             kotlin.math.sqrt(x * x + y * y).toFloat()
                         }.filter { it > 0.05f }
                         checkLaserData(distances)
+
+                        // Fresh lidar (and current people) -> push to HUD clients
+                        emitVisualizationPush()
                     } else {
                         // Fallback to points array (distance format)
                         val points = msg.get("points")?.asJsonArray?.mapNotNull {
@@ -723,6 +746,8 @@ class RobotWebSocketClient(
                             Log.i("PEOPLE_DEBUG", "no people array found, keys: ${msg.keySet()}")
                         }
                     }
+                    // People tracker just updated -> push to HUD clients
+                    emitVisualizationPush()
                 }
                 ChassisProtocol.TOPIC_HANDPOSE -> {
                     // Hand gesture detection - LOG to understand format
@@ -833,6 +858,138 @@ class RobotWebSocketClient(
                     if (_detachMode.value) " [DETACH]" else "")
         }
         _robotStatus.value = _robotStatus.value?.copy(safetyZone = newZone)
+
+        emitSafetyStatus(newZone, zoneChanged = newZone != oldZone, minFront = minFront)
+    }
+
+    @Volatile private var lastSafetyEmitMs: Long = 0
+    @Volatile private var lastEmittedRangeM: Float = Float.MAX_VALUE
+
+    /**
+     * Publish relay-computed safety intelligence to WS clients as a synthetic
+     * rosbridge-style topic. Rides the same incomingMessages flow the forwarder
+     * already broadcasts, so it inherits forwarder resilience and there is
+     * exactly one publish pipe to clients.
+     */
+    private fun emitSafetyStatus(zone: SafetyZone, zoneChanged: Boolean, minFront: Float) {
+        val now = System.currentTimeMillis()
+        val rangeDelta = kotlin.math.abs(minFront - lastEmittedRangeM)
+        val throttleElapsed = now - lastSafetyEmitMs >= SAFETY_EMIT_INTERVAL_MS
+        val keepaliveDue = now - lastSafetyEmitMs >= SAFETY_KEEPALIVE_MS
+
+        if (!zoneChanged && !keepaliveDue && !(throttleElapsed && rangeDelta >= SAFETY_RANGE_DELTA_M)) {
+            return
+        }
+
+        lastSafetyEmitMs = now
+        lastEmittedRangeM = minFront
+        val status = _robotStatus.value
+        val rangeM = if (minFront == Float.MAX_VALUE) SAFETY_CLEAR_RANGE_M else minFront.toDouble()
+        val msg = "{\"op\":\"publish\",\"topic\":\"/relay/safety\",\"msg\":{" +
+                "\"safety_zone\":\"${zone.name}\"," +
+                "\"min_range_m\":$rangeM," +
+                "\"obstacle_in_path\":${status?.obstacleInPath ?: false}," +
+                "\"obstacle_moving\":${status?.obstacleMoving ?: false}," +
+                "\"obstacle_type\":\"${status?.obstacleType ?: "CLEAR"}\"," +
+                "\"detach_mode\":${_detachMode.value}," +
+                "\"ts\":$now}}"
+        _incomingMessages.tryEmit(msg)
+    }
+
+    // ── Teleop deadman ─────────────────────────────────────────────────
+    // Armed by any teleop velocity command (WS-forwarded or HTTP). If the
+    // last command was motion and the stream goes silent, zero the base
+    // exactly once. Autonomous nav is untouched: sendVelocity already
+    // defers to move_base while navStatus == 601.
+    @Volatile private var lastTeleopCmdMs = 0L
+    @Volatile private var teleopMoving = false
+    private var deadmanJob: Job? = null
+
+    fun noteTeleopCommand(linearX: Double, angularZ: Double) {
+        lastTeleopCmdMs = System.currentTimeMillis()
+        teleopMoving = linearX != 0.0 || angularZ != 0.0
+    }
+
+    private fun startDeadmanWatchdog() {
+        deadmanJob?.cancel()
+        deadmanJob = scope.launch {
+            while (isActive) {
+                delay(DEADMAN_CHECK_INTERVAL_MS)
+                if (teleopMoving &&
+                    System.currentTimeMillis() - lastTeleopCmdMs >= DEADMAN_TIMEOUT_MS) {
+                    teleopMoving = false
+                    Log.w(TAG, "DEADMAN: teleop silent ${DEADMAN_TIMEOUT_MS}ms while moving - zeroing base")
+                    sendVelocity(0.0, 0.0)
+                }
+            }
+        }
+    }
+
+    init {
+        startDeadmanWatchdog()
+    }
+
+    private val pushGson = com.google.gson.Gson()
+    @Volatile private var lastLidarPushMs = 0L
+    @Volatile private var lastPeoplePushMs = 0L
+    @Volatile private var lastPushedPeopleCount = -1
+
+    /**
+     * Push lidar points and tracked people to WS clients as synthetic topics,
+     * replacing HUD HTTP polling. Called only from data-arrival handlers, so
+     * pushed data is fresh by construction; throttled to the old poll cadence;
+     * an empty people list is pushed exactly once (transition), never repeated.
+     */
+    private fun emitVisualizationPush() {
+        val now = System.currentTimeMillis()
+        val status = _robotStatus.value
+
+        val px = lidarPointsX
+        val py = lidarPointsY
+        if (px.isNotEmpty() && now - lastLidarPushMs >= PUSH_LIDAR_INTERVAL_MS) {
+            lastLidarPushMs = now
+            val data = mapOf(
+                "px" to px,
+                "py" to py,
+                "robot_x" to (status?.x ?: 0.0),
+                "robot_y" to (status?.y ?: 0.0),
+                "robot_theta" to (status?.theta ?: 0.0),
+                "age_ms" to 0,
+                "point_count" to px.size
+            )
+            _incomingMessages.tryEmit(
+                "{\"op\":\"publish\",\"topic\":\"/relay/lidar\",\"msg\":${pushGson.toJson(data)}}")
+        }
+
+        if (now - lastPeoplePushMs >= PUSH_PEOPLE_INTERVAL_MS) {
+            val tracked = peopleTracker.getTrackedPeople()
+            if (tracked.isNotEmpty() || lastPushedPeopleCount != 0) {
+                lastPeoplePushMs = now
+                lastPushedPeopleCount = tracked.size
+                val people = tracked.map { person ->
+                    mapOf(
+                        "id" to person.id,
+                        "x" to person.x,
+                        "y" to person.y,
+                        "vx" to person.vx,
+                        "vy" to person.vy,
+                        "heading" to person.heading,
+                        "confidence" to person.confidence
+                    )
+                }
+                val data = mapOf(
+                    "people" to people,
+                    "robot_x" to (status?.x ?: 0.0),
+                    "robot_y" to (status?.y ?: 0.0),
+                    "robot_theta" to (status?.theta ?: 0.0),
+                    "age_ms" to 0,
+                    "count" to tracked.size,
+                    "people_detected" to _peopleDetected.value
+                )
+                _incomingMessages.tryEmit(
+                    "{\"op\":\"publish\",\"topic\":\"/relay/people\",\"msg\":${pushGson.toJson(data)}}")
+            }
+        }
     }
 
     /**
@@ -880,6 +1037,8 @@ class RobotWebSocketClient(
             // Don't send teleop velocity during autonomous nav - it overrides move_base
             return
         }
+
+        noteTeleopCommand(linearX, angularZ)
 
         var adjustedLinear = linearX
 
