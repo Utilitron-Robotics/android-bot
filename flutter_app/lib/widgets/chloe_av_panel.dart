@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -36,6 +37,36 @@ class _ChloeAvPanelState extends State<ChloeAvPanel> {
   bool _audioOn = false;
   bool _audioBusy = false;
   bool _wakeBusy = false;
+  bool _trackingLocked = false;
+  bool _lockBusy = false;
+
+  /// Teleop cutout: lock her head tracking so her gaze doesn't fight the
+  /// operator. State lives on the Nano; the response is the truth.
+  Future<void> _toggleTrackingLock() async {
+    final base = widget.baseUrl;
+    if (base == null || _lockBusy) return;
+    setState(() => _lockBusy = true);
+    final action = _trackingLocked ? 'unlock' : 'lock';
+    try {
+      final res = await http
+          .post(Uri.parse('$base/tracking/$action'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        _trackingLocked = data['tracking_locked'] as bool? ?? _trackingLocked;
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Tracking $action failed (${res.statusCode})')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Tracking $action failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _lockBusy = false);
+    }
+  }
 
   /// POST /wake or /sleep on the Nano. The Nano runs its env-configured
   /// command and reports honestly (501 when not configured).
@@ -128,6 +159,18 @@ class _ChloeAvPanelState extends State<ChloeAvPanel> {
                         fontSize: 12,
                         letterSpacing: 2)),
                 const Spacer(),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  tooltip: _trackingLocked
+                      ? 'Unlock her head tracking'
+                      : 'Lock head tracking for teleop',
+                  color: _trackingLocked ? Colors.redAccent : Colors.grey,
+                  icon: Icon(_trackingLocked ? Icons.lock : Icons.lock_open),
+                  onPressed: widget.baseUrl == null || _lockBusy
+                      ? null
+                      : _toggleTrackingLock,
+                ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   iconSize: 18,
